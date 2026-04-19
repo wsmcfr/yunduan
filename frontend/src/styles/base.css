@@ -1,0 +1,269 @@
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Bahnschrift", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--app-text);
+  background:
+    radial-gradient(circle at top left, rgba(47, 182, 162, 0.18), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(106, 167, 255, 0.16), transparent 28%),
+    linear-gradient(135deg, #07111d 0%, #0c1a2d 46%, #0f2035 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent),
+    var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-md);
+  box-shadow: var(--app-shadow);
+  backdrop-filter: blur(22px);
+}
+
+.page-grid {
+  display: grid;
+  gap: 20px;
+}
+
+.page-grid.two-col {
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+}
+
+.page-grid.three-col {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.muted-text {
+  color: var(--app-text-secondary);
+}
+
+/**
+ * 统一覆盖 Element Plus 的基础暗色变量。
+ * 这样表格、输入框、分页和弹层都能融入当前深色工业控制台风格。
+ */
+:root {
+  --el-bg-color: #0d1a2a;
+  --el-bg-color-page: #0d1a2a;
+  --el-bg-color-overlay: #10243a;
+  --el-fill-color-blank: transparent;
+  --el-fill-color-light: rgba(255, 255, 255, 0.03);
+  --el-fill-color-lighter: rgba(255, 255, 255, 0.04);
+  --el-fill-color-dark: rgba(7, 16, 27, 0.88);
+  --el-border-color: rgba(149, 184, 223, 0.18);
+  --el-border-color-light: rgba(149, 184, 223, 0.14);
+  --el-border-color-lighter: rgba(149, 184, 223, 0.12);
+  --el-border-color-extra-light: rgba(149, 184, 223, 0.08);
+  --el-text-color-primary: var(--app-text);
+  --el-text-color-regular: var(--app-text-secondary);
+  --el-text-color-secondary: rgba(182, 201, 220, 0.72);
+  --el-text-color-placeholder: rgba(140, 166, 192, 0.72);
+  --el-mask-color: rgba(3, 8, 16, 0.72);
+  --el-box-shadow-light: 0 20px 80px rgba(4, 10, 18, 0.45);
+  --el-color-primary: var(--app-primary);
+  --el-color-success: var(--app-success);
+  --el-color-warning: var(--app-warning);
+  --el-color-danger: var(--app-danger);
+  --el-color-info: var(--app-info);
+}
+
+.el-button {
+  --el-button-bg-color: rgba(255, 255, 255, 0.04);
+  --el-button-border-color: rgba(149, 184, 223, 0.18);
+  --el-button-text-color: var(--app-text);
+  --el-button-hover-bg-color: rgba(47, 182, 162, 0.12);
+  --el-button-hover-border-color: rgba(47, 182, 162, 0.36);
+  --el-button-hover-text-color: var(--app-text);
+}
+
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper,
+.el-date-editor.el-input__wrapper,
+.el-input-number,
+.el-input-number .el-input__wrapper {
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: 0 0 0 1px rgba(149, 184, 223, 0.14) inset;
+}
+
+.el-input__wrapper:hover,
+.el-textarea__inner:hover,
+.el-select__wrapper:hover,
+.el-date-editor.el-input__wrapper:hover,
+.el-input-number:hover {
+  box-shadow: 0 0 0 1px rgba(47, 182, 162, 0.28) inset;
+}
+
+.el-textarea__inner,
+.el-input__inner,
+.el-select__selected-item,
+.el-form-item__label {
+  color: var(--app-text);
+}
+
+.el-dialog,
+.el-dropdown__popper,
+.el-select__popper.el-popper,
+.el-picker__popper.el-popper,
+.el-message {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent), #10233a;
+  border: 1px solid rgba(149, 184, 223, 0.16);
+  box-shadow: var(--app-shadow);
+}
+
+.el-loading-mask {
+  background: rgba(6, 16, 27, 0.7);
+  backdrop-filter: blur(8px);
+}
+
+.el-select-dropdown__item,
+.el-dropdown-menu__item {
+  color: var(--app-text);
+}
+
+.el-select-dropdown__item.is-hovering,
+.el-select-dropdown__item:hover,
+.el-dropdown-menu__item:hover {
+  background: rgba(47, 182, 162, 0.12);
+  color: var(--app-text);
+}
+
+.el-table {
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: rgba(255, 255, 255, 0.02);
+  --el-table-row-hover-bg-color: rgba(47, 182, 162, 0.08);
+  --el-table-header-bg-color: rgba(255, 255, 255, 0.03);
+  --el-table-fixed-box-shadow: none;
+  --el-table-border-color: rgba(149, 184, 223, 0.12);
+  --el-table-header-text-color: rgba(198, 214, 230, 0.88);
+  --el-table-text-color: var(--app-text);
+  --el-table-current-row-bg-color: rgba(47, 182, 162, 0.08);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.el-table::before,
+.el-table__inner-wrapper::before {
+  background: rgba(149, 184, 223, 0.12) !important;
+}
+
+.el-table th.el-table__cell,
+.el-table td.el-table__cell {
+  background: transparent;
+  border-bottom: 1px solid rgba(149, 184, 223, 0.08);
+}
+
+.el-table tr:last-child td.el-table__cell {
+  border-bottom: none;
+}
+
+.el-table__empty-block,
+.el-empty,
+.el-empty__description {
+  background: transparent;
+  color: var(--app-text-secondary);
+}
+
+.el-pagination {
+  --el-pagination-button-bg-color: rgba(255, 255, 255, 0.035);
+  --el-pagination-button-color: var(--app-text-secondary);
+  --el-pagination-button-disabled-bg-color: rgba(255, 255, 255, 0.02);
+  --el-pagination-hover-color: var(--app-primary);
+  color: var(--app-text-secondary);
+}
+
+.el-pager li,
+.el-pagination button {
+  border: 1px solid rgba(149, 184, 223, 0.14);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--app-text-secondary);
+}
+
+.el-pager li.is-active {
+  color: #04201b;
+  background: linear-gradient(135deg, var(--app-primary), #7fe4d0);
+  border-color: transparent;
+}
+
+.el-tabs__item {
+  color: var(--app-text-secondary);
+}
+
+.el-tabs__item.is-active,
+.el-tabs__item:hover {
+  color: var(--app-text);
+}
+
+.el-tabs__active-bar,
+.el-tabs__nav-wrap::after {
+  background-color: rgba(149, 184, 223, 0.14);
+}
+
+.el-descriptions__body .el-descriptions__table {
+  --el-descriptions-table-border: rgba(149, 184, 223, 0.12);
+  color: var(--app-text);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.el-descriptions__label.el-descriptions__cell.is-bordered-label {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--app-text-secondary);
+}
+
+.el-descriptions__content.el-descriptions__cell.is-bordered-content {
+  background: transparent;
+}
+
+.el-alert {
+  background: rgba(255, 109, 98, 0.08);
+  border: 1px solid rgba(255, 109, 98, 0.16);
+}
+
+.el-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.el-radio-button__inner {
+  border: 1px solid rgba(149, 184, 223, 0.14);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--app-text-secondary);
+  box-shadow: none;
+}
+
+.el-radio-button:first-child .el-radio-button__inner,
+.el-radio-button:last-child .el-radio-button__inner {
+  border-radius: 12px;
+}
+
+.el-radio-button__original-radio:checked + .el-radio-button__inner {
+  background: linear-gradient(135deg, rgba(47, 182, 162, 0.94), rgba(120, 229, 209, 0.92));
+  border-color: transparent;
+  color: #05211c;
+  box-shadow: none;
+}
+
+.el-switch.is-checked .el-switch__core {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--app-primary), #7fe4d0);
+}
+
+@media (max-width: 1200px) {
+  .page-grid.two-col,
+  .page-grid.three-col {
+    grid-template-columns: 1fr;
+  }
+}

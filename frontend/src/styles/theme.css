@@ -1,0 +1,21 @@
+:root {
+  --app-bg: #0a1220;
+  --app-surface: rgba(9, 24, 39, 0.86);
+  --app-surface-soft: rgba(16, 35, 56, 0.72);
+  --app-surface-strong: #10233a;
+  --app-border: rgba(149, 184, 223, 0.18);
+  --app-text: #e8f0ff;
+  --app-text-secondary: #98b0c7;
+  --app-primary: #2fb6a2;
+  --app-primary-strong: #1f8f80;
+  --app-warning: #f6c95d;
+  --app-danger: #ff6d62;
+  --app-success: #28cb82;
+  --app-info: #6aa7ff;
+  --app-sidebar-width: 248px;
+  --app-radius-lg: 24px;
+  --app-radius-md: 18px;
+  --app-radius-sm: 12px;
+  --app-shadow: 0 20px 80px rgba(4, 10, 18, 0.45);
+  --app-grid-line: rgba(255, 255, 255, 0.04);
+}

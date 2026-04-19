@@ -1,2 +1,13 @@
 .codex/
 .trellis/workspace/
+__pycache__/
+*.pyc
+*.egg-info/
+node_modules/
+dist/
+.venv/
+backend/.env
+frontend/auto-imports.d.ts
+frontend/components.d.ts
+.trellis/tasks/
+output/

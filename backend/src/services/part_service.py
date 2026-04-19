@@ -1,0 +1,82 @@
+"""零件服务实现。"""
+
+from __future__ import annotations
+
+from sqlalchemy.orm import Session
+
+from src.core.errors import ConflictError, NotFoundError
+from src.db.models.part import Part
+from src.repositories.part_repository import PartRepository
+from src.schemas.part import PartCreateRequest, PartUpdateRequest
+
+
+class PartService:
+    """封装零件管理的业务流程。"""
+
+    def __init__(self, db: Session) -> None:
+        """初始化零件服务依赖。"""
+
+        self.db = db
+        self.part_repository = PartRepository(db)
+
+    def list_parts(
+        self,
+        *,
+        keyword: str | None,
+        is_active: bool | None,
+        skip: int,
+        limit: int,
+    ) -> tuple[int, list[Part]]:
+        """分页查询零件列表。"""
+
+        return self.part_repository.list_parts(
+            keyword=keyword,
+            is_active=is_active,
+            skip=skip,
+            limit=limit,
+        )
+
+    def create_part(self, payload: PartCreateRequest) -> Part:
+        """创建新的零件定义。"""
+
+        if self.part_repository.get_by_code(payload.part_code) is not None:
+            raise ConflictError(code="part_code_exists", message="零件编码已存在。")
+
+        part = Part(
+            part_code=payload.part_code,
+            name=payload.name,
+            category=payload.category,
+            description=payload.description,
+            is_active=payload.is_active,
+        )
+        self.part_repository.create(part)
+        self.db.commit()
+        self.db.refresh(part)
+        return part
+
+    def update_part(self, part_id: int, payload: PartUpdateRequest) -> Part:
+        """更新指定零件定义。"""
+
+        part = self.part_repository.get_by_id(part_id)
+        if part is None:
+            raise NotFoundError(code="part_not_found", message="零件不存在。")
+
+        if payload.part_code and payload.part_code != part.part_code:
+            existed = self.part_repository.get_by_code(payload.part_code)
+            if existed is not None and existed.id != part_id:
+                raise ConflictError(code="part_code_exists", message="零件编码已存在。")
+            part.part_code = payload.part_code
+
+        if payload.name is not None:
+            part.name = payload.name
+        if "category" in payload.model_fields_set:
+            part.category = payload.category
+        if "description" in payload.model_fields_set:
+            part.description = payload.description
+        if payload.is_active is not None:
+            part.is_active = payload.is_active
+
+        self.part_repository.save(part)
+        self.db.commit()
+        self.db.refresh(part)
+        return part

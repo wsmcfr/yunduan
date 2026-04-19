@@ -1,0 +1,27 @@
+[project]
+name = "yunduan-backend"
+version = "0.1.0"
+description = "Cloud MVP backend for industrial defect inspection."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116.0",
+  "uvicorn[standard]>=0.35.0",
+  "sqlalchemy>=2.0.43",
+  "alembic>=1.16.4",
+  "pydantic>=2.11.7",
+  "pydantic-settings>=2.10.1",
+  "pymysql>=1.1.1",
+  "python-multipart>=0.0.20",
+  "python-jose[cryptography]>=3.5.0",
+  "passlib>=1.7.4",
+  "cos-python-sdk-v5>=1.9.38"
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
