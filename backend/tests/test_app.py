@@ -1,0 +1,43 @@
+"""后端应用基础 smoke test。"""
+
+from __future__ import annotations
+
+import asyncio
+import unittest
+
+from src.app import app
+
+
+class AppSmokeTestCase(unittest.TestCase):
+    """覆盖应用初始化后的基础健康检查与关键路由挂载。"""
+
+    def test_healthcheck_returns_ok(self) -> None:
+        """验证健康检查端点存在且可以直接返回最小成功结果。"""
+
+        health_route = next(route for route in app.routes if route.path == "/health")
+        response = asyncio.run(health_route.endpoint())
+
+        self.assertEqual(response, {"status": "ok"})
+
+    def test_manual_review_route_is_mounted_under_records_path(self) -> None:
+        """验证人工复核最终路径确实挂在 `/api/v1/records` 前缀下。"""
+
+        route_paths = {route.path for route in app.routes}
+
+        self.assertIn("/api/v1/records/{record_id}/manual-review", route_paths)
+        self.assertNotIn("/api/v1/reviews/records/{record_id}/manual-review", route_paths)
+
+    def test_ai_chat_route_is_mounted_under_record_detail_path(self) -> None:
+        """验证 AI 对话接口同样挂在当前记录上下文路径下。"""
+
+        route_paths = {route.path for route in app.routes}
+
+        self.assertIn("/api/v1/records/{record_id}/ai-chat", route_paths)
+
+    def test_ai_gateway_discovery_route_is_mounted_under_settings_path(self) -> None:
+        """验证模型自动探测接口已挂到 settings 路由下。"""
+
+        route_paths = {route.path for route in app.routes}
+
+        self.assertIn("/api/v1/settings/ai-gateways/{gateway_id}/discovered-models", route_paths)
+        self.assertIn("/api/v1/settings/ai-gateways/discovery-preview", route_paths)

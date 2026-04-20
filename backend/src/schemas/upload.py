@@ -38,6 +38,7 @@ class FileObjectResponse(ORMBaseModel):
     content_type: str | None
     size_bytes: int | None
     etag: str | None
+    preview_url: str | None = None
     uploaded_at: datetime | None
     storage_last_modified: datetime | None
     created_at: datetime

@@ -6,14 +6,16 @@
 
 ## Overview
 
-There are no Vue components yet, so current component guidance is inferred from:
+The frontend now has a real component structure built around:
 
-- `MainPagePrototype.qml`, which already separates layout regions and groups related state
-- the planned cloud pages in `工业缺陷检测系统完整方案.md`
+- `AppShell`, `AppHeader`, and `AppSidebar` for the shell
+- `PageHeader` and `StatusTag` for shared presentation
+- feature components such as `RecordCreateDialog` and `ManualReviewFormCard`
+- route pages such as `RecordsPage`, `RecordDetailPage`, `PartsPage`, and `DevicesPage`
 
-The main lesson from the existing prototype is:
+The core lesson still holds:
 
-> a page should compose smaller purpose-specific sections instead of becoming one giant screen component
+> a page should orchestrate data and workflow, while child components render one focused concern
 
 ---
 
@@ -25,8 +27,9 @@ Preferred Vue SFC structure:
 <script setup lang="ts">
 // imports
 // props and emits
-// composables
+// composables and local state
 // derived state
+// handlers
 </script>
 
 <template>
@@ -42,14 +45,16 @@ Preferred Vue SFC structure:
 
 Use page-level components to orchestrate data and child components to render focused sections.
 
-Examples inspired by `MainPagePrototype.qml`:
+Current examples:
 
-| Page concern | Suggested web component |
+| Page concern | Current component |
 |---|---|
-| Top status bar | `TopStatusBar.vue` |
+| App shell | `AppShell.vue` |
+| Top bar with route title, time, and user menu | `AppHeader.vue` |
 | Left navigation | `AppSidebar.vue` |
-| Main result panel | `DetectionResultPanel.vue` |
-| Bottom stats block | `DashboardStatsBar.vue` |
+| Shared page intro | `PageHeader.vue` |
+| Manual review form | `ManualReviewFormCard.vue` |
+| Result badges | `StatusTag.vue` |
 
 ---
 
@@ -60,38 +65,78 @@ Examples inspired by `MainPagePrototype.qml`:
 | Define props explicitly with TypeScript types | Prevents hidden contracts |
 | Pass data down, emit events up | Keeps ownership clear |
 | Keep props focused on one concern | Avoids giant option bags |
-| Use domain names, not UI-only placeholders | Improves readability across layers |
+| Use domain names, not vague names like `value1` or `data` | Improves readability across layers |
 
-### Good examples to follow conceptually
+### Review Workspace Rule
 
-The QML prototype groups state by intent:
+Review actions belong to the record detail workspace, not to master-data pages.
 
-- `currentStateText`
-- `dxPixels`
-- `surfaceResultText`
-- `backlightResultText`
-- `finalResultText`
+Current contract:
 
-This is a good signal that props should be named by domain meaning, not by vague labels such as `value1`, `info`, or `data`.
+- `RecordsPage` screens records and routes to detail
+- `RecordDetailPage` owns evidence display, manual review, and AI review entry points
+- `PartsPage` and `DevicesPage` manage master data only
 
 ---
 
 ## Styling Patterns
 
-Current prototype evidence uses inline colors and layout sizing because it is a standalone mock.
-
-Production web UI should follow these rules:
+Production UI should follow these rules:
 
 | Rule | Notes |
 |---|---|
-| Shared tokens go in a central theme or style layer | Avoid copying hex colors everywhere |
-| Keep page shell layout separate from feature-specific styling | Prevents layout duplication |
-| Use component-local styles for one-off presentation only | Shared styles belong in tokens or common classes |
+| Shared design tokens live in `src/styles/theme.css` | Avoid copying colors and radii into many files |
+| Shared Element Plus dark-theme overrides live in `src/styles/base.css` | Keep the industrial dark look consistent |
+| Page shell layout stays separate from feature-specific styling | Prevents layout duplication |
+| Component-local styles are for one-off presentation only | Shared styling belongs in theme or base layers |
 
-Prototype-only patterns that should not survive into production:
+Current style coverage in `base.css` already includes:
 
-- repeated raw hex colors across many files
-- mixed layout and domain logic in the same long component file
+- table
+- pagination
+- input and textarea
+- select and date picker
+- dialog and dropdown
+- message and loading mask
+- descriptions
+- radio button group
+
+### Convention: Live Shell Signals
+
+The shell header clock must update automatically.
+
+Why:
+
+- users should see current local time without clicking refresh
+- the refresh button is for page data, not for the clock itself
+
+Implementation contract:
+
+- call `setInterval(..., 1000)` on mount
+- update the visible string every second
+- clear the timer on unmount
+
+### Convention: Element Plus On-Demand Import
+
+Element Plus is auto-imported on demand through Vite plugins.
+
+Build rule:
+
+- do not force the whole `element-plus` library into one manual chunk
+- keep manual chunk splitting limited to core vendor groups unless measurement proves otherwise
+
+Why:
+
+- a full `element-plus` chunk cancels the main benefit of on-demand component loading
+
+### Convention: Radio Button Values
+
+When using `ElRadioButton`, bind the selected value through `value`, not through `label`.
+
+Why:
+
+- recent Element Plus versions warn when `label` is used as the selection value
+- `label` should be treated as display content, while `value` is the stable form contract
 
 ---
 
@@ -104,7 +149,7 @@ Prototype-only patterns that should not survive into production:
 | Tables and lists | Keep keyboard access and readable empty states |
 | Images | Provide meaningful alt text when used in the web app |
 
-The QML prototype already pairs status colors with text labels such as `在线`, `离线`, and `常亮`. Keep that idea in the web UI.
+The current app already pairs colors with text in `StatusTag` and alert content. Keep that pattern.
 
 ---
 
@@ -112,9 +157,9 @@ The QML prototype already pairs status colors with text labels such as `在线`,
 
 | Repository evidence | What it shows |
 |---|---|
-| `MainPagePrototype.qml` | One root page with clearly named state groups and sectioned layout |
-| `MainPagePrototype.qml` | Helper functions (`statusColor`, `beatText`) stay small and UI-focused |
-| `工业缺陷检测系统完整方案.md` | The web app is page-driven, so components should support route-level composition |
+| `AppHeader.vue` | The shell owns live clock and user actions, not feature pages |
+| `RecordDetailPage.vue` + `ManualReviewFormCard.vue` | Detail page orchestrates workflow and child component emits a focused submit event |
+| `theme.css` + `base.css` | Tokens and component-library overrides are centralized instead of repeated in feature files |
 
 ---
 
@@ -125,4 +170,5 @@ The QML prototype already pairs status colors with text labels such as `在线`,
 | Building one huge page component with all panels inline | Hard to test and reuse |
 | Fetching backend data inside tiny presentational components | Couples rendering to transport logic |
 | Hard-coding repeated colors and labels in many files | Drifts quickly |
-| Reusing embedded-device UI assumptions directly in the web dashboard | The web app has different interaction needs |
+| Making the header clock depend on a manual refresh click | Produces stale shell state |
+| Using `label` as the selected radio value | Produces deprecation warnings and weak form contracts |

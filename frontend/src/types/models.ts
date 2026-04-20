@@ -1,4 +1,9 @@
 import type {
+  AIChatRole,
+  AIAuthMode,
+  AIGatewayVendor,
+  AIModelVendor,
+  AIProtocolType,
   DetectionResult,
   DeviceStatus,
   DeviceType,
@@ -43,6 +48,66 @@ export interface DefectDistributionItem {
   count: number;
 }
 
+export interface ResultDistributionItem {
+  result: DetectionResult;
+  count: number;
+}
+
+export interface ReviewStatusDistributionItem {
+  reviewStatus: ReviewStatus;
+  count: number;
+}
+
+export interface PartQualityItem {
+  partId: number;
+  partCode: string;
+  partName: string;
+  totalCount: number;
+  goodCount: number;
+  badCount: number;
+  uncertainCount: number;
+  passRate: number;
+}
+
+export interface DeviceQualityItem {
+  deviceId: number;
+  deviceCode: string;
+  deviceName: string;
+  totalCount: number;
+  goodCount: number;
+  badCount: number;
+  uncertainCount: number;
+  passRate: number;
+}
+
+export interface StatisticsFilters {
+  startDate: string | null;
+  endDate: string | null;
+  days: number;
+  partId: number | null;
+  deviceId: number | null;
+}
+
+export interface StatisticsOverview {
+  filters: StatisticsFilters;
+  summary: SummaryStatistics;
+  dailyTrend: DailyTrendItem[];
+  defectDistribution: DefectDistributionItem[];
+  resultDistribution: ResultDistributionItem[];
+  reviewStatusDistribution: ReviewStatusDistributionItem[];
+  partQualityRanking: PartQualityItem[];
+  deviceQualityRanking: DeviceQualityItem[];
+  keyFindings: string[];
+  generatedAt: string;
+}
+
+export interface StatisticsAIAnalysisResponse {
+  status: string;
+  answer: string;
+  providerHint: string | null;
+  generatedAt: string;
+}
+
 export interface PartModel {
   id: number;
   partCode: string;
@@ -76,8 +141,127 @@ export interface FileObjectModel {
   region: string;
   contentType: string | null;
   sizeBytes: number | null;
+  previewUrl: string | null;
   uploadedAt: string | null;
   storageLastModified: string | null;
+}
+
+export interface AIContextFile {
+  id: number;
+  fileKind: FileKind;
+  bucketName: string;
+  region: string;
+  objectKey: string;
+  uploadedAt: string | null;
+  previewUrl: string | null;
+}
+
+export interface AIRecordContext {
+  recordId: number;
+  recordNo: string;
+  partName: string;
+  partCode: string;
+  deviceName: string;
+  deviceCode: string;
+  result: DetectionResult;
+  effectiveResult: DetectionResult;
+  reviewStatus: ReviewStatus;
+  defectType: string | null;
+  defectDesc: string | null;
+  confidenceScore: number | null;
+  capturedAt: string;
+  detectedAt: string | null;
+  uploadedAt: string | null;
+  storageLastModified: string | null;
+  fileCount: number;
+  reviewCount: number;
+  availableFileKinds: FileKind[];
+  latestReviewDecision: DetectionResult | null;
+  latestReviewComment: string | null;
+  latestReviewedAt: string | null;
+}
+
+export interface AIChatResponse {
+  status: string;
+  answer: string;
+  recordId: number;
+  providerHint: string | null;
+  context: AIRecordContext;
+  referencedFiles: AIContextFile[];
+  suggestedQuestions: string[];
+}
+
+export interface AIChatMessage {
+  /**
+   * 前端本地消息唯一标识。
+   * 流式更新时只能靠它精确命中当前占位消息，不能再依赖可能重复的时间戳。
+   */
+  localId: string;
+  role: AIChatRole;
+  content: string;
+  createdAt: string;
+}
+
+export interface AIModelProfile {
+  id: number;
+  gatewayId: number;
+  displayName: string;
+  upstreamVendor: AIModelVendor;
+  protocolType: AIProtocolType;
+  authMode: AIAuthMode;
+  baseUrlOverride: string | null;
+  userAgent: string | null;
+  modelIdentifier: string;
+  supportsVision: boolean;
+  supportsStream: boolean;
+  isEnabled: boolean;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AIGatewayModel {
+  id: number;
+  name: string;
+  vendor: AIGatewayVendor;
+  officialUrl: string | null;
+  baseUrl: string;
+  note: string | null;
+  isEnabled: boolean;
+  isCustom: boolean;
+  hasApiKey: boolean;
+  apiKeyMask: string | null;
+  createdAt: string;
+  updatedAt: string;
+  models: AIModelProfile[];
+}
+
+export interface AIRuntimeModelOption {
+  id: number;
+  displayName: string;
+  upstreamVendor: AIModelVendor;
+  protocolType: AIProtocolType;
+  userAgent: string | null;
+  modelIdentifier: string;
+  supportsVision: boolean;
+  supportsStream: boolean;
+  gatewayId: number;
+  gatewayName: string;
+  gatewayVendor: AIGatewayVendor;
+  baseUrl: string;
+}
+
+export interface AIDiscoveredModelCandidate {
+  modelIdentifier: string;
+  displayName: string;
+  upstreamVendor: AIModelVendor;
+  protocolType: AIProtocolType;
+  authMode: AIAuthMode;
+  baseUrl: string;
+  userAgent: string | null;
+  supportsVision: boolean;
+  supportsStream: boolean;
+  sourceLabel: string;
 }
 
 export interface ReviewRecordModel {

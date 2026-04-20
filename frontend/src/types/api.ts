@@ -6,12 +6,47 @@ export type ReviewStatus = "pending" | "reviewed" | "ai_reserved";
 export type ReviewSource = "manual" | "ai_reserved";
 export type FileKind = "source" | "annotated" | "thumbnail";
 export type StorageProvider = "cos";
+export type AIChatRole = "user" | "assistant";
+export type AIGatewayVendor =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "zhipu"
+  | "moonshot"
+  | "minmax"
+  | "deepseek"
+  | "openclaudecode"
+  | "relay"
+  | "custom";
+export type AIProtocolType =
+  | "anthropic_messages"
+  | "openai_compatible"
+  | "openai_responses"
+  | "gemini_generate_content";
+export type AIAuthMode =
+  | "x_api_key"
+  | "authorization_bearer"
+  | "both"
+  | "query_api_key";
+export type AIModelVendor =
+  | "codex"
+  | "claude"
+  | "gemini"
+  | "deepseek"
+  | "glm"
+  | "kimi"
+  | "minmax"
+  | "custom";
 
 export interface ApiErrorResponseDto {
   code: string;
   message: string;
   details: Record<string, unknown> | null;
   request_id: string;
+}
+
+export interface ApiMessageResponseDto {
+  message: string;
 }
 
 export interface UserProfileDto {
@@ -60,6 +95,91 @@ export interface DefectDistributionItemDto {
 
 export interface DefectDistributionResponseDto {
   items: DefectDistributionItemDto[];
+}
+
+export interface ResultDistributionItemDto {
+  result: DetectionResult;
+  count: number;
+}
+
+export interface ReviewStatusDistributionItemDto {
+  review_status: ReviewStatus;
+  count: number;
+}
+
+export interface PartQualityItemDto {
+  part_id: number;
+  part_code: string;
+  part_name: string;
+  total_count: number;
+  good_count: number;
+  bad_count: number;
+  uncertain_count: number;
+  pass_rate: number;
+}
+
+export interface DeviceQualityItemDto {
+  device_id: number;
+  device_code: string;
+  device_name: string;
+  total_count: number;
+  good_count: number;
+  bad_count: number;
+  uncertain_count: number;
+  pass_rate: number;
+}
+
+export interface StatisticsFiltersDto {
+  start_date: string | null;
+  end_date: string | null;
+  days: number;
+  part_id: number | null;
+  device_id: number | null;
+}
+
+export interface StatisticsOverviewDto {
+  filters: StatisticsFiltersDto;
+  summary: SummaryStatisticsDto;
+  daily_trend: DailyTrendItemDto[];
+  defect_distribution: DefectDistributionItemDto[];
+  result_distribution: ResultDistributionItemDto[];
+  review_status_distribution: ReviewStatusDistributionItemDto[];
+  part_quality_ranking: PartQualityItemDto[];
+  device_quality_ranking: DeviceQualityItemDto[];
+  key_findings: string[];
+  generated_at: string;
+}
+
+export interface StatisticsAIAnalysisRequestDto {
+  model_profile_id: number | null;
+  provider_hint: string | null;
+  note: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  days: number;
+  part_id: number | null;
+  device_id: number | null;
+}
+
+export interface StatisticsAIAnalysisResponseDto {
+  status: string;
+  answer: string;
+  provider_hint: string | null;
+  generated_at: string;
+}
+
+export interface StatisticsExportPdfRequestDto {
+  model_profile_id: number | null;
+  provider_hint: string | null;
+  note: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  days: number;
+  part_id: number | null;
+  device_id: number | null;
+  include_ai_analysis: boolean;
+  include_sample_images: boolean;
+  sample_image_limit: number;
 }
 
 export interface PartDto {
@@ -127,6 +247,7 @@ export interface FileObjectDto {
   content_type: string | null;
   size_bytes: number | null;
   etag: string | null;
+  preview_url: string | null;
   uploaded_at: string | null;
   storage_last_modified: string | null;
   created_at: string;
@@ -243,6 +364,7 @@ export interface ManualReviewCreateRequestDto {
 }
 
 export interface AIReviewRequestDto {
+  model_profile_id: number | null;
   provider_hint: string | null;
   note: string | null;
 }
@@ -251,4 +373,191 @@ export interface AIReviewResponseDto {
   status: string;
   message: string;
   record_id: number;
+}
+
+export interface AIChatHistoryMessageDto {
+  role: AIChatRole;
+  content: string;
+}
+
+export interface AIContextFileDto {
+  id: number;
+  file_kind: FileKind;
+  bucket_name: string;
+  region: string;
+  object_key: string;
+  uploaded_at: string | null;
+  preview_url: string | null;
+}
+
+export interface AIRecordContextDto {
+  record_id: number;
+  record_no: string;
+  part_name: string;
+  part_code: string;
+  device_name: string;
+  device_code: string;
+  result: DetectionResult;
+  effective_result: DetectionResult;
+  review_status: ReviewStatus;
+  defect_type: string | null;
+  defect_desc: string | null;
+  confidence_score: number | null;
+  captured_at: string;
+  detected_at: string | null;
+  uploaded_at: string | null;
+  storage_last_modified: string | null;
+  file_count: number;
+  review_count: number;
+  available_file_kinds: FileKind[];
+  latest_review_decision: DetectionResult | null;
+  latest_review_comment: string | null;
+  latest_reviewed_at: string | null;
+}
+
+export interface AIChatRequestDto {
+  question: string;
+  model_profile_id: number | null;
+  provider_hint: string | null;
+  history: AIChatHistoryMessageDto[];
+}
+
+export interface AIChatResponseDto {
+  status: string;
+  answer: string;
+  record_id: number;
+  provider_hint: string | null;
+  context: AIRecordContextDto;
+  referenced_files: AIContextFileDto[];
+  suggested_questions: string[];
+}
+
+export interface AIModelProfileDto {
+  id: number;
+  gateway_id: number;
+  display_name: string;
+  upstream_vendor: AIModelVendor;
+  protocol_type: AIProtocolType;
+  auth_mode: AIAuthMode;
+  base_url_override: string | null;
+  user_agent: string | null;
+  model_identifier: string;
+  supports_vision: boolean;
+  supports_stream: boolean;
+  is_enabled: boolean;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIGatewayDto {
+  id: number;
+  name: string;
+  vendor: AIGatewayVendor;
+  official_url: string | null;
+  base_url: string;
+  note: string | null;
+  is_enabled: boolean;
+  is_custom: boolean;
+  has_api_key: boolean;
+  api_key_mask: string | null;
+  created_at: string;
+  updated_at: string;
+  models: AIModelProfileDto[];
+}
+
+export interface AIGatewayListResponseDto {
+  items: AIGatewayDto[];
+}
+
+export interface AIGatewayCreateRequestDto {
+  name: string;
+  vendor: AIGatewayVendor;
+  official_url: string | null;
+  base_url: string;
+  note: string | null;
+  api_key: string;
+  is_enabled: boolean;
+  is_custom: boolean;
+}
+
+export interface AIGatewayUpdateRequestDto {
+  name?: string;
+  vendor?: AIGatewayVendor;
+  official_url?: string | null;
+  base_url?: string;
+  note?: string | null;
+  api_key?: string | null;
+  is_enabled?: boolean;
+  is_custom?: boolean;
+}
+
+export interface AIGatewayDiscoveryPreviewRequestDto {
+  vendor: AIGatewayVendor;
+  base_url: string;
+  api_key: string;
+}
+
+export interface AIModelProfileCreateRequestDto {
+  display_name: string;
+  upstream_vendor: AIModelVendor;
+  protocol_type: AIProtocolType;
+  auth_mode: AIAuthMode;
+  base_url_override: string | null;
+  user_agent: string | null;
+  model_identifier: string;
+  supports_vision: boolean;
+  supports_stream: boolean;
+  is_enabled: boolean;
+  note: string | null;
+}
+
+export interface AIModelProfileUpdateRequestDto {
+  display_name?: string;
+  upstream_vendor?: AIModelVendor;
+  protocol_type?: AIProtocolType;
+  auth_mode?: AIAuthMode;
+  base_url_override?: string | null;
+  user_agent?: string | null;
+  model_identifier?: string;
+  supports_vision?: boolean;
+  supports_stream?: boolean;
+  is_enabled?: boolean;
+  note?: string | null;
+}
+
+export interface AIRuntimeModelOptionDto {
+  id: number;
+  display_name: string;
+  upstream_vendor: AIModelVendor;
+  protocol_type: AIProtocolType;
+  user_agent: string | null;
+  model_identifier: string;
+  supports_vision: boolean;
+  supports_stream: boolean;
+  gateway_id: number;
+  gateway_name: string;
+  gateway_vendor: AIGatewayVendor;
+  base_url: string;
+}
+
+export interface AIRuntimeModelOptionListResponseDto {
+  items: AIRuntimeModelOptionDto[];
+}
+
+export interface AIDiscoveredModelCandidateDto {
+  model_identifier: string;
+  display_name: string;
+  upstream_vendor: AIModelVendor;
+  protocol_type: AIProtocolType;
+  auth_mode: AIAuthMode;
+  base_url: string;
+  user_agent: string | null;
+  supports_vision: boolean;
+  supports_stream: boolean;
+  source_label: string;
+}
+
+export interface AIDiscoveredModelListResponseDto {
+  items: AIDiscoveredModelCandidateDto[];
 }

@@ -1,4 +1,6 @@
 import type {
+  AIChatRequestDto,
+  AIChatResponseDto,
   AIReviewRequestDto,
   AIReviewResponseDto,
   DetectionRecordCreateRequestDto,
@@ -8,7 +10,7 @@ import type {
   ReviewStatus,
 } from "@/types/api";
 
-import { apiRequest } from "./client";
+import { apiRequest, streamSseRequest } from "./client";
 
 export interface RecordListQuery {
   readonly partId?: number;
@@ -75,5 +77,54 @@ export function requestAiReview(
   return apiRequest<AIReviewResponseDto>(`/api/v1/records/${recordId}/ai-review`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * 在当前检测记录上下文下发起 AI 对话。
+ */
+export function requestAiChat(
+  recordId: number,
+  payload: AIChatRequestDto,
+): Promise<AIChatResponseDto> {
+  return apiRequest<AIChatResponseDto>(`/api/v1/records/${recordId}/ai-chat`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface AIChatStreamHandlers {
+  readonly onMeta?: (payload: AIChatResponseDto) => void;
+  readonly onDelta?: (deltaText: string) => void;
+  readonly onDone?: (payload: AIChatResponseDto) => void;
+}
+
+/**
+ * 在当前检测记录上下文下发起流式 AI 对话。
+ */
+export function streamAiChat(
+  recordId: number,
+  payload: AIChatRequestDto,
+  handlers: AIChatStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamSseRequest(`/api/v1/records/${recordId}/ai-chat/stream`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+    onEvent: (event) => {
+      if (event.event === "meta" && handlers.onMeta) {
+        handlers.onMeta(event.data as AIChatResponseDto);
+        return;
+      }
+      if (event.event === "delta" && handlers.onDelta) {
+        const payloadData = event.data as { text?: string };
+        handlers.onDelta(payloadData.text ?? "");
+        return;
+      }
+      if (event.event === "done" && handlers.onDone) {
+        handlers.onDone(event.data as AIChatResponseDto);
+      }
+    },
   });
 }

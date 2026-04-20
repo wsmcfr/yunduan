@@ -123,6 +123,35 @@ a {
   box-shadow: var(--app-shadow);
 }
 
+/**
+ * 服务式消息框不会命中 `.el-dialog` 的统一覆盖，这里单独补齐删除确认框的暗色外观。
+ * 这样网关和模型删除确认都能保持与系统其余弹窗一致的视觉层级。
+ */
+.el-overlay-message-box {
+  backdrop-filter: blur(8px);
+}
+
+.el-message-box {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent), #10233a;
+  border: 1px solid rgba(149, 184, 223, 0.16);
+  border-radius: 20px;
+  box-shadow: var(--app-shadow);
+}
+
+.el-message-box__title,
+.el-message-box__headerbtn .el-message-box__close {
+  color: var(--app-text);
+}
+
+.el-message-box__content,
+.el-message-box__message {
+  color: var(--app-text-secondary);
+}
+
+.el-message-box__btns {
+  border-top: 1px solid rgba(149, 184, 223, 0.12);
+}
+
 .el-loading-mask {
   background: rgba(6, 16, 27, 0.7);
   backdrop-filter: blur(8px);

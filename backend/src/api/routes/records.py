@@ -5,9 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_current_user, get_db
+from src.core.sse import build_sse_headers
 from src.db.models.enums import DetectionResult, ReviewStatus
 from src.db.models.user import User
 from src.schemas.detection_record import (
@@ -16,7 +18,7 @@ from src.schemas.detection_record import (
     DetectionRecordListItem,
     DetectionRecordListResponse,
 )
-from src.schemas.review import AIReviewRequest, AIReviewResponse
+from src.schemas.review import AIChatRequest, AIChatResponse, AIReviewRequest, AIReviewResponse
 from src.schemas.upload import FileObjectCreateRequest, FileObjectResponse
 from src.services.record_service import RecordService
 
@@ -108,3 +110,32 @@ def request_ai_review(
 
     result = RecordService(db).request_ai_review(record_id, payload)
     return AIReviewResponse.model_validate(result)
+
+
+@router.post("/{record_id}/ai-chat", response_model=AIChatResponse)
+def request_ai_chat(
+    record_id: int,
+    payload: AIChatRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> AIChatResponse:
+    """在当前检测记录上下文下发起 AI 对话。"""
+
+    result = RecordService(db).request_ai_chat(record_id, payload)
+    return AIChatResponse.model_validate(result)
+
+
+@router.post("/{record_id}/ai-chat/stream")
+def stream_ai_chat(
+    record_id: int,
+    payload: AIChatRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """在当前检测记录上下文下发起流式 AI 对话。"""
+
+    return StreamingResponse(
+        RecordService(db).stream_ai_chat(record_id, payload),
+        media_type="text/event-stream",
+        headers=build_sse_headers(),
+    )

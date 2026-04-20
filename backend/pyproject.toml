@@ -15,7 +15,8 @@ dependencies = [
   "python-multipart>=0.0.20",
   "python-jose[cryptography]>=3.5.0",
   "passlib>=1.7.4",
-  "cos-python-sdk-v5>=1.9.38"
+  "cos-python-sdk-v5>=1.9.38",
+  "weasyprint>=66.0"
 ]
 
 [build-system]

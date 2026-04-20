@@ -83,6 +83,108 @@ Required fields:
 
 ---
 
+## Scenario: SSE Streaming Error Boundary for AI Chat and Statistics
+
+### 1. Scope / Trigger
+
+- Trigger: any change to streaming AI endpoints, SSE helper functions, or payload fields emitted before the first delta chunk
+- Affected layers: service generator -> SSE encoder -> FastAPI `StreamingResponse` -> browser SSE parser
+
+### 2. Signatures
+
+```py
+def format_sse_event(*, event: str, payload: dict[str, Any]) -> str: ...
+
+def build_sse_error_payload(error: AppError) -> dict[str, Any]: ...
+```
+
+```http
+POST /api/v1/records/{record_id}/ai-chat/stream
+POST /api/v1/statistics/ai-analysis/stream
+```
+
+```text
+event: meta
+data: {...}
+
+event: delta
+data: {"text":"..."}
+
+event: done
+data: {...}
+
+event: error
+data: {"status_code":500,"code":"...","message":"...","details":{...}}
+```
+
+### 3. Contracts
+
+| Boundary | Contract |
+|---|---|
+| `meta` event | Must be emitted first so the frontend can initialize provider, suggestions, and context state |
+| `delta` event | Must carry incremental assistant text only |
+| `done` event | Must carry the final assembled answer and any final metadata snapshot |
+| `error` event | Must be emitted for both mapped domain errors and unhandled generator failures |
+| SSE payload encoding | Every payload must be JSON-serializable before `yield` |
+| Datetime fields in payloads | Must be converted through `jsonable_encoder(...)` or an equivalent serializer before `json.dumps(...)` |
+
+Additional rules:
+
+- never assume a Python `datetime`, enum, or ORM-derived object can be passed directly to `json.dumps(...)`
+- a failure while producing the first `meta` frame is still a user-visible streaming failure and must not fail silently
+- unhandled exceptions inside the generator must be converted into a final `error` event whenever possible
+
+### 4. Validation & Error Matrix
+
+| Condition | Problem | Expected behavior |
+|---|---|---|
+| `meta` payload contains `datetime` | `json.dumps(...)` raises before the stream really starts | Serialize through `jsonable_encoder(...)` first |
+| AI provider raises a mapped `AppError` mid-stream | Frontend gets an abruptly terminated stream | Emit `event: error` with stable `code`, `message`, and `status_code` |
+| Unexpected exception happens inside the generator | Browser sees a `200` response with no usable body | Log the exception and emit `stream_internal_error` if the connection is still writable |
+| Service emits raw ORM objects or non-JSON values | SSE helper crashes unpredictably | Convert to plain dict / list / primitive payloads before calling the encoder |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | `meta` includes record context with datetime fields, but `format_sse_event()` encodes it safely and the browser receives `meta -> delta -> done` |
+| Base | No runtime model is selected, so the service still emits `meta`, text chunks, and `done` from the reserved or fallback path |
+| Bad | The generator yields `meta` with raw datetimes, the connection returns `200`, and the frontend shows no answer because the stream died before the first usable event |
+
+### 6. Tests Required
+
+- SSE helper test asserting payloads containing `datetime` are encoded successfully
+- service test asserting record chat stream emits `meta` before any `delta`
+- service test asserting statistics stream emits `error` when an unhandled exception occurs
+- integration test asserting the frontend-observed event order is `meta -> delta* -> done` on success
+
+Assertion points:
+
+- `meta` remains readable by the frontend when context includes timestamps
+- `AppError` is mapped through `build_sse_error_payload(...)`
+- unexpected exceptions surface as `code="stream_internal_error"` instead of silent disconnects
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+def format_sse_event(*, event: str, payload: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+```
+
+#### Correct
+
+```py
+from fastapi.encoders import jsonable_encoder
+
+def format_sse_event(*, event: str, payload: dict[str, Any]) -> str:
+    serialized_payload = json.dumps(jsonable_encoder(payload), ensure_ascii=False)
+    return f"event: {event}\ndata: {serialized_payload}\n\n"
+```
+
+---
+
 ## Forbidden Patterns
 
 | Pattern | Why it is forbidden |
@@ -91,6 +193,8 @@ Required fields:
 | Returning raw tracebacks to clients | Leaks internals |
 | Catching and ignoring integration failures | Produces silent data loss |
 | Mapping every failure to a generic 500 without context | Makes retries and diagnosis difficult |
+| Yielding SSE events with raw `datetime` or other non-JSON values | The stream can fail before the frontend receives the first usable frame |
+| Letting a generator exception terminate a stream without an `error` event | The browser only sees a broken response and the UI cannot explain what failed |
 
 ---
 

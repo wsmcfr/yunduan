@@ -52,6 +52,15 @@ class UnauthorizedError(AppError):
         super().__init__(status_code=401, code=code, message=message)
 
 
+class ForbiddenError(AppError):
+    """权限不足错误。"""
+
+    def __init__(self, code: str, message: str) -> None:
+        """构造 403 类型错误。"""
+
+        super().__init__(status_code=403, code=code, message=message)
+
+
 class IntegrationError(AppError):
     """外部集成调用失败错误。"""
 

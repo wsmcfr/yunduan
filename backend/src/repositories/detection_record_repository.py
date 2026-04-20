@@ -127,6 +127,8 @@ class DetectionRecordRepository:
     def list_for_statistics(
         self,
         *,
+        part_id: int | None = None,
+        device_id: int | None = None,
         captured_from: datetime | None,
         captured_to: datetime | None,
     ) -> list[DetectionRecord]:
@@ -134,9 +136,16 @@ class DetectionRecordRepository:
 
         stmt = self._apply_filters(
             self._base_stmt(),
+            part_id=part_id,
+            device_id=device_id,
             captured_from=captured_from,
             captured_to=captured_to,
-        ).options(selectinload(DetectionRecord.reviews).selectinload(ReviewRecord.reviewer))
+        ).options(
+            selectinload(DetectionRecord.part),
+            selectinload(DetectionRecord.device),
+            selectinload(DetectionRecord.files),
+            selectinload(DetectionRecord.reviews).selectinload(ReviewRecord.reviewer),
+        )
         return list(self.db.execute(stmt).scalars())
 
     def create(self, record: DetectionRecord) -> DetectionRecord:

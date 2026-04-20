@@ -3,20 +3,49 @@
 from __future__ import annotations
 
 from datetime import date
+from io import BytesIO
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_current_user, get_db
+from src.core.sse import build_sse_headers
 from src.db.models.user import User
 from src.schemas.statistics import (
     DailyTrendResponse,
     DefectDistributionResponse,
+    StatisticsAIAnalysisRequest,
+    StatisticsAIAnalysisResponse,
+    StatisticsExportPdfRequest,
+    StatisticsOverviewResponse,
     SummaryStatisticsResponse,
 )
+from src.services.statistics_export_service import StatisticsExportService
 from src.services.statistics_service import StatisticsService
 
 router = APIRouter()
+
+
+@router.get("/overview", response_model=StatisticsOverviewResponse)
+def get_statistics_overview(
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    days: int = Query(default=7, ge=1, le=90),
+    part_id: int | None = Query(default=None, ge=1),
+    device_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> StatisticsOverviewResponse:
+    """返回统计页完整概览数据。"""
+
+    return StatisticsService(db).get_overview(
+        start_date=start_date,
+        end_date=end_date,
+        days=days,
+        part_id=part_id,
+        device_id=device_id,
+    )
 
 
 @router.get("/summary", response_model=SummaryStatisticsResponse)
@@ -60,4 +89,48 @@ def get_defect_distribution(
     return StatisticsService(db).get_defect_distribution(
         start_date=start_date,
         end_date=end_date,
+    )
+
+
+@router.post("/ai-analysis", response_model=StatisticsAIAnalysisResponse)
+def request_statistics_ai_analysis(
+    payload: StatisticsAIAnalysisRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> StatisticsAIAnalysisResponse:
+    """触发统计页 AI 批次分析。"""
+
+    return StatisticsService(db).request_ai_analysis(payload)
+
+
+@router.post("/ai-analysis/stream")
+def stream_statistics_ai_analysis(
+    payload: StatisticsAIAnalysisRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """流式触发统计页 AI 批次分析。"""
+
+    return StreamingResponse(
+        StatisticsService(db).stream_ai_analysis(payload),
+        media_type="text/event-stream",
+        headers=build_sse_headers(),
+    )
+
+
+@router.post("/export-pdf")
+def export_statistics_pdf(
+    payload: StatisticsExportPdfRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """导出服务端生成的统计 PDF 报表。"""
+
+    pdf_bytes, filename = StatisticsExportService(db).build_pdf(payload)
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
     )

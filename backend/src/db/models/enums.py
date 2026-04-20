@@ -67,6 +67,56 @@ class StorageProvider(str, Enum):
     COS = "cos"
 
 
+class AIGatewayVendor(str, Enum):
+    """AI 网关供应商/中转品牌枚举。"""
+
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    GOOGLE = "google"
+    ZHIPU = "zhipu"
+    MOONSHOT = "moonshot"
+    MINMAX = "minmax"
+    DEEPSEEK = "deepseek"
+    OPENCLAUDECODE = "openclaudecode"
+    RELAY = "relay"
+    CUSTOM = "custom"
+
+
+class AIProtocolType(str, Enum):
+    """后端适配外部模型时使用的协议类型枚举。"""
+
+    ANTHROPIC_MESSAGES = "anthropic_messages"
+    OPENAI_COMPATIBLE = "openai_compatible"
+    OPENAI_RESPONSES = "openai_responses"
+    GEMINI_GENERATE_CONTENT = "gemini_generate_content"
+
+
+class AIAuthMode(str, Enum):
+    """外部模型网关鉴权方式枚举。"""
+
+    X_API_KEY = "x_api_key"
+    AUTHORIZATION_BEARER = "authorization_bearer"
+    BOTH = "both"
+    QUERY_API_KEY = "query_api_key"
+
+
+class AIModelVendor(str, Enum):
+    """模型来源品牌枚举。
+
+    这里描述的是最终运行的模型家族，而不是中转网关品牌。
+    例如：`openclaudecode` 网关下的模型品牌仍然是 `claude`。
+    """
+
+    CODEX = "codex"
+    CLAUDE = "claude"
+    GEMINI = "gemini"
+    DEEPSEEK = "deepseek"
+    GLM = "glm"
+    KIMI = "kimi"
+    MINMAX = "minmax"
+    CUSTOM = "custom"
+
+
 def enum_values(enum_cls: type[Enum]) -> list[str]:
     """返回枚举成员的 value 列表，供 SQLAlchemy Enum 列统一复用。"""
 

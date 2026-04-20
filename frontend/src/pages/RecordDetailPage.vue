@@ -5,8 +5,9 @@ import { ElMessage } from "element-plus";
 
 import PageHeader from "@/components/common/PageHeader.vue";
 import StatusTag from "@/components/common/StatusTag.vue";
+import AiReviewChatDialog from "@/features/review/AiReviewChatDialog.vue";
 import ManualReviewFormCard from "@/features/review/ManualReviewFormCard.vue";
-import { requestAiReview, fetchRecordDetail } from "@/services/api/records";
+import { fetchRecordDetail } from "@/services/api/records";
 import { createManualReview } from "@/services/api/reviews";
 import { mapDetectionRecordDetailDto } from "@/services/mappers/commonMappers";
 import type { ManualReviewCreateRequestDto } from "@/types/api";
@@ -16,10 +17,9 @@ import { formatConfidence, formatDateTime } from "@/utils/format";
 const route = useRoute();
 const loading = ref(false);
 const reviewSubmitting = ref(false);
-const aiSubmitting = ref(false);
 const error = ref("");
 const record = ref<DetectionRecordModel | null>(null);
-const aiReviewMessage = ref("");
+const aiDialogVisible = ref(false);
 
 /**
  * 从路由里读取检测记录编号。
@@ -44,7 +44,6 @@ async function loadRecordDetail(): Promise<void> {
 
   loading.value = true;
   error.value = "";
-  aiReviewMessage.value = "";
 
   try {
     const response = await fetchRecordDetail(recordId.value);
@@ -79,29 +78,14 @@ async function handleManualReviewSubmit(payload: ManualReviewCreateRequestDto): 
 }
 
 /**
- * 发起云端 AI 复核预留接口。
- * 这里先只打占位接口，后端后续再接真实大模型服务。
+ * 打开 AI 对话弹窗。
+ * 详情页负责提供当前记录上下文，真正的多轮追问放到弹窗里完成。
  */
-async function handleAiReview(): Promise<void> {
+function openAiDialog(): void {
   if (!record.value) {
     return;
   }
-
-  aiSubmitting.value = true;
-
-  try {
-    const response = await requestAiReview(record.value.id, {
-      provider_hint: "cloud-llm",
-      note: "由详情页发起疑似样本复核",
-    });
-    aiReviewMessage.value = response.message;
-    ElMessage.success(response.message);
-  } catch (caughtError) {
-    const message = caughtError instanceof Error ? caughtError.message : "AI 复核接口调用失败";
-    ElMessage.error(message);
-  } finally {
-    aiSubmitting.value = false;
-  }
+  aiDialogVisible.value = true;
 }
 
 /**
@@ -200,35 +184,32 @@ watch(
       <section class="app-panel detail-section">
         <div class="detail-section__header">
           <div>
-            <strong>二次复核</strong>
-            <p class="muted-text">建议仅对疑似样本、误检样本或高价值零件启用复核。</p>
+            <strong>AI 对话分析</strong>
+            <p class="muted-text">这里不再只给一个简单按钮，而是把当前记录、图片对象、检测结果和复核历史一起带进 AI 对话工作区。</p>
           </div>
           <ElTag :type="shouldReview ? 'warning' : 'success'" effect="dark" round>
             {{ shouldReview ? "建议复核" : "当前可直接归档" }}
           </ElTag>
         </div>
 
-        <ElAlert
-          type="info"
-          show-icon
-          :closable="false"
-          title="MP157 初检始终是第一道判断。人工复核与云端大模型复核是可选的二次确认流程。"
-        />
+        <div class="detail-section__assistant-card">
+          <p class="muted-text">
+            AI 对话会自动读取当前零件、当前记录的初检结果、最终结果、缺陷说明、时间链路以及已登记的源图/标注图/缩略图对象。你可以直接在对话里追问“为什么会判成这样”“结合图片怎么看”“人工复核应该注意什么”。
+          </p>
+
+          <div class="detail-section__assistant-points">
+            <ElTag type="info" effect="dark" round>自动带入当前记录上下文</ElTag>
+            <ElTag type="warning" effect="dark" round>支持围绕当前图片对象追问</ElTag>
+            <ElTag type="success" effect="dark" round>适合先分析再人工复核</ElTag>
+          </div>
+        </div>
 
         <div class="detail-section__actions">
-          <ElButton type="primary" plain :loading="aiSubmitting" @click="handleAiReview">
-            触发云端 AI 复核
+          <ElButton type="primary" plain @click="openAiDialog">
+            打开 AI 对话分析
           </ElButton>
           <ElButton @click="loadRecordDetail" :loading="loading">刷新详情</ElButton>
         </div>
-
-        <ElAlert
-          v-if="aiReviewMessage"
-          type="success"
-          show-icon
-          :closable="false"
-          :title="aiReviewMessage"
-        />
 
         <ManualReviewFormCard
           :submitting="reviewSubmitting"
@@ -281,6 +262,11 @@ watch(
     <section v-else-if="loading" class="app-panel detail-section">
       <ElSkeleton animated :rows="8" />
     </section>
+
+    <AiReviewChatDialog
+      v-model="aiDialogVisible"
+      :record="record"
+    />
   </div>
 </template>
 
@@ -297,6 +283,12 @@ watch(
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+}
+
+.detail-section__assistant-card,
+.detail-section__assistant-points {
+  display: grid;
+  gap: 12px;
 }
 
 @media (max-width: 900px) {

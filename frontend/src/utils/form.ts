@@ -13,12 +13,54 @@ export function normalizeOptionalText(value: string | null | undefined): string 
 
 /**
  * 规范化可选日期时间字符串。
+ * Element Plus `datetime` 组件回传的是本地时间格式 `YYYY-MM-DDTHH:mm:ss`，
+ * 这里需要在提交前把它转换成带时区语义的 ISO 字符串，避免后端收到无时区时间。
  */
 export function normalizeOptionalDateTime(value: string | null | undefined): string | null {
   if (!value) {
     return null;
   }
-  return value;
+
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return null;
+  }
+
+  /**
+   * 优先按本地日期时间输入格式手动解析。
+   * 这样可以避免不同运行时对“无时区 ISO 字符串”的解析细节不一致。
+   */
+  const localDateTimeMatch =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(trimmedValue);
+
+  if (localDateTimeMatch) {
+    const [, yearText, monthText, dayText, hourText, minuteText, secondText = "00"] =
+      localDateTimeMatch;
+    const parsedDate = new Date(
+      Number(yearText),
+      Number(monthText) - 1,
+      Number(dayText),
+      Number(hourText),
+      Number(minuteText),
+      Number(secondText),
+    );
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return null;
+    }
+
+    return parsedDate.toISOString();
+  }
+
+  /**
+   * 如果调用方已经提供了带时区的 ISO 字符串，则统一转成标准 ISO 输出。
+   */
+  const parsedDate = new Date(trimmedValue);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate.toISOString();
 }
 
 /**
