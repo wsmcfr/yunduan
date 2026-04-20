@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
 import { fetchDevices } from "@/services/api/devices";
@@ -24,6 +24,12 @@ import type {
   StatisticsAIAnalysisResponse,
   StatisticsOverview,
 } from "@/types/models";
+import type { StatisticsPdfExportMode } from "@/types/api";
+import {
+  getStoredPreferredRuntimeModelId,
+  resolvePreferredRuntimeModelId,
+  setStoredPreferredRuntimeModelId,
+} from "@/utils/aiModelSelection";
 import { exportStatisticsReportPng } from "@/utils/statisticsReport";
 
 const DEFAULT_DAYS = 14;
@@ -153,9 +159,11 @@ export function useStatisticsOverview() {
 
     if (runtimeModelsResult.status === "fulfilled") {
       runtimeModels.value = runtimeModelsResult.value.items.map(mapAIRuntimeModelOptionDto);
-      if (!runtimeModels.value.some((item) => item.id === selectedModelId.value)) {
-        selectedModelId.value = runtimeModels.value[0]?.id ?? null;
-      }
+      selectedModelId.value = resolvePreferredRuntimeModelId(
+        runtimeModels.value,
+        getStoredPreferredRuntimeModelId(),
+      );
+      setStoredPreferredRuntimeModelId(selectedModelId.value);
     } else {
       runtimeModels.value = [];
       selectedModelId.value = null;
@@ -308,7 +316,7 @@ export function useStatisticsOverview() {
   /**
    * 调用后端服务端导出接口下载 PDF。
    */
-  function exportPdf(): void {
+  function exportPdf(exportMode: StatisticsPdfExportMode): void {
     if (!overview.value) {
       ElMessage.warning("当前没有可导出的统计数据。");
       return;
@@ -316,7 +324,14 @@ export function useStatisticsOverview() {
 
     pdfExporting.value = true;
     const [startDate, endDate] = dateRange.value.length === 2 ? dateRange.value : [null, null];
+    const hasStableAiAnalysis = !aiLoading.value && Boolean(aiAnalysis.value?.answer.trim());
+    const includeSampleImages = (
+      exportMode === "visual"
+      && overview.value.sampleGallery.totalImageCount > 0
+    );
+
     void downloadStatisticsPdf({
+      export_mode: exportMode,
       model_profile_id: selectedModelId.value,
       provider_hint: activeRuntimeModel.value?.displayName ?? null,
       note: analysisNote.value.trim() || null,
@@ -325,9 +340,20 @@ export function useStatisticsOverview() {
       days: days.value,
       part_id: selectedPartId.value,
       device_id: selectedDeviceId.value,
-      include_ai_analysis: true,
-      include_sample_images: true,
-      sample_image_limit: 4,
+      /**
+       * PDF 导出优先复用页面上已经生成好的 AI 分析结果，
+       * 避免导出动作再次发起一轮新的 AI 计算，把服务器 CPU 和等待时间一起拉高。
+       */
+      include_ai_analysis: hasStableAiAnalysis,
+      cached_ai_answer: hasStableAiAnalysis ? aiAnalysis.value?.answer ?? null : null,
+      cached_ai_provider_hint: hasStableAiAnalysis ? aiAnalysis.value?.providerHint ?? null : null,
+      cached_ai_generated_at: hasStableAiAnalysis ? aiAnalysis.value?.generatedAt ?? null : null,
+      /**
+       * 轻量报表版不嵌入 COS 样本图片，避免再次触发图片抓取与版面渲染开销。
+       * 视觉版仍保留少量代表图片，满足汇报展示场景。
+       */
+      include_sample_images: includeSampleImages,
+      sample_image_limit: includeSampleImages ? 2 : 0,
     })
       .catch((caughtError) => {
         const message = caughtError instanceof Error ? caughtError.message : "服务端 PDF 导出失败";
@@ -348,6 +374,17 @@ export function useStatisticsOverview() {
   onMounted(() => {
     void initialize();
   });
+
+  watch(
+    () => selectedModelId.value,
+    (nextModelId) => {
+      if (runtimeModels.value.length === 0) {
+        return;
+      }
+
+      setStoredPreferredRuntimeModelId(nextModelId);
+    },
+  );
 
   onBeforeUnmount(() => {
     abortAiAnalysisStream();

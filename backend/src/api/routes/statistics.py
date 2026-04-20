@@ -18,6 +18,7 @@ from src.schemas.statistics import (
     StatisticsAIAnalysisRequest,
     StatisticsAIAnalysisResponse,
     StatisticsExportPdfRequest,
+    StatisticsSampleGalleryResponse,
     StatisticsOverviewResponse,
     SummaryStatisticsResponse,
 )
@@ -40,6 +41,27 @@ def get_statistics_overview(
     """返回统计页完整概览数据。"""
 
     return StatisticsService(db).get_overview(
+        start_date=start_date,
+        end_date=end_date,
+        days=days,
+        part_id=part_id,
+        device_id=device_id,
+    )
+
+
+@router.get("/sample-gallery", response_model=StatisticsSampleGalleryResponse)
+def get_statistics_sample_gallery(
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    days: int = Query(default=7, ge=1, le=90),
+    part_id: int | None = Query(default=None, ge=1),
+    device_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> StatisticsSampleGalleryResponse:
+    """返回独立图库页使用的分类样本图数据。"""
+
+    return StatisticsService(db).get_sample_gallery(
         start_date=start_date,
         end_date=end_date,
         days=days,

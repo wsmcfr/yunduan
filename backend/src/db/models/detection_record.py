@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import DateTime, Enum as SqlEnum, Float, ForeignKey, Index, String, Text, text
+from sqlalchemy import JSON, DateTime, Enum as SqlEnum, Float, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base, IdMixin, TimestampMixin
@@ -57,6 +57,12 @@ class DetectionRecord(Base, IdMixin, TimestampMixin):
     defect_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     defect_desc: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 结构化上下文用于保存设备真实上传的视觉、传感器、判定和设备运行信息。
+    # 这里保持 JSON 结构，避免在云端过早把边缘侧数据压扁成少量固定字段。
+    vision_context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    sensor_context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    decision_context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    device_context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

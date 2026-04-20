@@ -21,6 +21,9 @@ import type {
   StatisticsAIAnalysisResponseDto,
   StatisticsFiltersDto,
   StatisticsOverviewDto,
+  StatisticsPartImageGroupDto,
+  StatisticsSampleGalleryResponseDto,
+  StatisticsSampleImageItemDto,
   SummaryStatisticsDto,
   UserProfileDto,
 } from "@/types/api";
@@ -46,6 +49,9 @@ import type {
   StatisticsAIAnalysisResponse,
   StatisticsFilters,
   StatisticsOverview,
+  StatisticsPartImageGroup,
+  StatisticsSampleGallery,
+  StatisticsSampleImageItem,
   SummaryStatistics,
   UserProfile,
 } from "@/types/models";
@@ -174,6 +180,68 @@ export function mapStatisticsFiltersDto(dto: StatisticsFiltersDto): StatisticsFi
 }
 
 /**
+ * 映射统计页图库中的单条样本卡片。
+ */
+export function mapStatisticsSampleImageItemDto(
+  dto: StatisticsSampleImageItemDto,
+): StatisticsSampleImageItem {
+  return {
+    recordId: dto.record_id,
+    recordNo: dto.record_no,
+    partId: dto.part_id,
+    partCode: dto.part_code,
+    partName: dto.part_name,
+    partCategory: dto.part_category,
+    deviceId: dto.device_id,
+    deviceCode: dto.device_code,
+    deviceName: dto.device_name,
+    imageFileId: dto.image_file_id,
+    imageFileKind: dto.image_file_kind,
+    imageCount: dto.image_count,
+    previewUrl: dto.preview_url,
+    uploadedAt: dto.uploaded_at,
+    capturedAt: dto.captured_at,
+    effectiveResult: dto.effective_result,
+    reviewStatus: dto.review_status,
+    defectType: dto.defect_type,
+    defectDesc: dto.defect_desc,
+  };
+}
+
+/**
+ * 映射统计页图库中的单个零件分组。
+ */
+export function mapStatisticsPartImageGroupDto(
+  dto: StatisticsPartImageGroupDto,
+): StatisticsPartImageGroup {
+  return {
+    partId: dto.part_id,
+    partCode: dto.part_code,
+    partName: dto.part_name,
+    partCategory: dto.part_category,
+    recordCount: dto.record_count,
+    imageCount: dto.image_count,
+    latestUploadedAt: dto.latest_uploaded_at,
+    items: dto.items.map(mapStatisticsSampleImageItemDto),
+  };
+}
+
+/**
+ * 映射统计页图库摘要。
+ */
+export function mapStatisticsSampleGalleryResponseDto(
+  dto: StatisticsSampleGalleryResponseDto,
+): StatisticsSampleGallery {
+  return {
+    totalRecordCount: dto.total_record_count,
+    totalImageCount: dto.total_image_count,
+    totalPartCount: dto.total_part_count,
+    latestUploadedAt: dto.latest_uploaded_at,
+    groups: dto.groups.map(mapStatisticsPartImageGroupDto),
+  };
+}
+
+/**
  * 映射统计页完整概览 DTO。
  */
 export function mapStatisticsOverviewDto(dto: StatisticsOverviewDto): StatisticsOverview {
@@ -189,6 +257,7 @@ export function mapStatisticsOverviewDto(dto: StatisticsOverviewDto): Statistics
     partQualityRanking: dto.part_quality_ranking.map(mapPartQualityItemDto),
     deviceQualityRanking: dto.device_quality_ranking.map(mapDeviceQualityItemDto),
     keyFindings: dto.key_findings,
+    sampleGallery: mapStatisticsSampleGalleryResponseDto(dto.sample_gallery),
     generatedAt: dto.generated_at,
   };
 }
@@ -218,6 +287,10 @@ export function mapPartDto(dto: PartDto): PartModel {
     category: dto.category,
     description: dto.description,
     isActive: dto.is_active,
+    recordCount: dto.record_count,
+    imageCount: dto.image_count,
+    latestCapturedAt: dto.latest_captured_at,
+    latestUploadedAt: dto.latest_uploaded_at,
     createdAt: dto.created_at,
     updatedAt: dto.updated_at,
   };
@@ -307,6 +380,10 @@ export function mapAIRecordContextDto(dto: AIRecordContextDto): AIRecordContext 
     defectType: dto.defect_type,
     defectDesc: dto.defect_desc,
     confidenceScore: dto.confidence_score,
+    visionContext: dto.vision_context,
+    sensorContext: dto.sensor_context,
+    decisionContext: dto.decision_context,
+    deviceContext: dto.device_context,
     capturedAt: dto.captured_at,
     detectedAt: dto.detected_at,
     uploadedAt: dto.uploaded_at,
@@ -437,6 +514,10 @@ export function mapDetectionRecordDto(dto: DetectionRecordDto): DetectionRecordM
     defectType: dto.defect_type,
     defectDesc: dto.defect_desc,
     confidenceScore: dto.confidence_score,
+    visionContext: dto.vision_context,
+    sensorContext: dto.sensor_context,
+    decisionContext: dto.decision_context,
+    deviceContext: dto.device_context,
     capturedAt: dto.captured_at,
     detectedAt: dto.detected_at,
     uploadedAt: dto.uploaded_at,

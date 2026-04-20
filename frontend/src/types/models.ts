@@ -14,6 +14,18 @@ import type {
   UserRole,
 } from "@/types/api";
 
+export type StructuredContextValue =
+  | string
+  | number
+  | boolean
+  | null
+  | StructuredContextValue[]
+  | {
+      [key: string]: StructuredContextValue;
+    };
+
+export type StructuredContextBlock = Record<string, StructuredContextValue>;
+
 export interface UserProfile {
   id: number;
   username: string;
@@ -88,6 +100,47 @@ export interface StatisticsFilters {
   deviceId: number | null;
 }
 
+export interface StatisticsSampleImageItem {
+  recordId: number;
+  recordNo: string;
+  partId: number;
+  partCode: string;
+  partName: string;
+  partCategory: string | null;
+  deviceId: number;
+  deviceCode: string;
+  deviceName: string;
+  imageFileId: number | null;
+  imageFileKind: FileKind | null;
+  imageCount: number;
+  previewUrl: string | null;
+  uploadedAt: string | null;
+  capturedAt: string;
+  effectiveResult: DetectionResult;
+  reviewStatus: ReviewStatus;
+  defectType: string | null;
+  defectDesc: string | null;
+}
+
+export interface StatisticsPartImageGroup {
+  partId: number;
+  partCode: string;
+  partName: string;
+  partCategory: string | null;
+  recordCount: number;
+  imageCount: number;
+  latestUploadedAt: string | null;
+  items: StatisticsSampleImageItem[];
+}
+
+export interface StatisticsSampleGallery {
+  totalRecordCount: number;
+  totalImageCount: number;
+  totalPartCount: number;
+  latestUploadedAt: string | null;
+  groups: StatisticsPartImageGroup[];
+}
+
 export interface StatisticsOverview {
   filters: StatisticsFilters;
   summary: SummaryStatistics;
@@ -98,6 +151,7 @@ export interface StatisticsOverview {
   partQualityRanking: PartQualityItem[];
   deviceQualityRanking: DeviceQualityItem[];
   keyFindings: string[];
+  sampleGallery: StatisticsSampleGallery;
   generatedAt: string;
 }
 
@@ -115,6 +169,10 @@ export interface PartModel {
   category: string | null;
   description: string | null;
   isActive: boolean;
+  recordCount: number;
+  imageCount: number;
+  latestCapturedAt: string | null;
+  latestUploadedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -169,6 +227,10 @@ export interface AIRecordContext {
   defectType: string | null;
   defectDesc: string | null;
   confidenceScore: number | null;
+  visionContext: StructuredContextBlock | null;
+  sensorContext: StructuredContextBlock | null;
+  decisionContext: StructuredContextBlock | null;
+  deviceContext: StructuredContextBlock | null;
   capturedAt: string;
   detectedAt: string | null;
   uploadedAt: string | null;
@@ -286,6 +348,10 @@ export interface DetectionRecordModel {
   defectType: string | null;
   defectDesc: string | null;
   confidenceScore: number | null;
+  visionContext: StructuredContextBlock | null;
+  sensorContext: StructuredContextBlock | null;
+  decisionContext: StructuredContextBlock | null;
+  deviceContext: StructuredContextBlock | null;
   capturedAt: string;
   detectedAt: string | null;
   uploadedAt: string | null;

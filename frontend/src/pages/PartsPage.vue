@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 
 import PageHeader from "@/components/common/PageHeader.vue";
 import PartFormDialog from "@/features/parts/PartFormDialog.vue";
+import { routeNames } from "@/router/routes";
 import { createPart, fetchParts, updatePart } from "@/services/api/parts";
 import { mapPartDto } from "@/services/mappers/commonMappers";
 import type { PartCreateRequestDto, PartUpdateRequestDto } from "@/types/api";
@@ -23,6 +25,7 @@ const keyword = ref("");
 const activeFilter = ref<ActiveFilterValue>("all");
 const dialogVisible = ref(false);
 const editingPart = ref<PartModel | null>(null);
+const router = useRouter();
 
 /**
  * 将界面上的启用状态筛选值转换成后端请求参数。
@@ -95,6 +98,21 @@ function openEditDialog(part: PartModel): void {
 }
 
 /**
+ * 进入当前零件类型对应的图库页。
+ * 主数据页不直接堆图片，而是跳转到独立图库页浏览和进入复检。
+ */
+function openPartGallery(part: PartModel): void {
+  void router.push({
+    name: routeNames.statisticsGallery,
+    query: {
+      days: "30",
+      part_id: String(part.id),
+      category: part.category ?? "",
+    },
+  });
+}
+
+/**
  * 提交新增或编辑零件。
  */
 async function handleSubmit(payload: PartCreateRequestDto | PartUpdateRequestDto): Promise<void> {
@@ -152,8 +170,8 @@ onMounted(() => {
   <div class="page-grid">
     <PageHeader
       eyebrow="Parts"
-      title="零件管理"
-      description="这里只维护零件主数据、启停状态和分类标签。疑似样本的人工复核与云端大模型复核统一进入检测记录详情页处理。"
+      title="零件类型管理"
+      description="这里维护的是零件类型/分类主数据，不是单条检测记录。样本图片浏览、人工复检与 AI 复核统一走图库页和检测详情页。"
     />
 
     <ElAlert
@@ -182,21 +200,31 @@ onMounted(() => {
       <div class="toolbar-actions">
         <ElButton @click="resetFilters">重置</ElButton>
         <ElButton @click="handleSearch" :loading="loading">查询</ElButton>
-        <ElButton type="primary" @click="openCreateDialog">新增零件</ElButton>
+        <ElButton type="primary" @click="openCreateDialog">新增零件类型</ElButton>
       </div>
     </section>
 
     <section class="app-panel table-section">
       <div class="table-section__header">
-        <strong>零件列表</strong>
-        <span class="table-section__meta">共 {{ total }} 条，建议优先维护比赛中实际会检测的金属小件类型</span>
+        <strong>零件类型列表</strong>
+        <span class="table-section__meta">共 {{ total }} 条，建议优先维护实际会被设备上传和检测的零件类型</span>
       </div>
 
       <ElTable :data="items" v-loading="loading" empty-text="暂无零件数据">
-        <ElTableColumn prop="partCode" label="零件编码" min-width="150" />
-        <ElTableColumn prop="name" label="名称" min-width="160" />
-        <ElTableColumn prop="category" label="分类" min-width="140" />
+        <ElTableColumn prop="partCode" label="类型编码" min-width="150" />
+        <ElTableColumn prop="name" label="类型名称" min-width="160" />
+        <ElTableColumn prop="category" label="上层分类" min-width="140" />
         <ElTableColumn prop="description" label="说明" min-width="260" />
+        <ElTableColumn label="关联记录" min-width="110">
+          <template #default="{ row }">
+            {{ row.recordCount }}
+          </template>
+        </ElTableColumn>
+        <ElTableColumn label="关联图片" min-width="110">
+          <template #default="{ row }">
+            {{ row.imageCount }}
+          </template>
+        </ElTableColumn>
         <ElTableColumn label="启用状态" min-width="100">
           <template #default="{ row }">
             <ElTag :type="row.isActive ? 'success' : 'info'" round effect="dark">
@@ -209,9 +237,17 @@ onMounted(() => {
             {{ formatDateTime(row.updatedAt) }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="操作" width="180" fixed="right">
+        <ElTableColumn label="最近图片上传" min-width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.latestUploadedAt) }}
+          </template>
+        </ElTableColumn>
+        <ElTableColumn label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <div class="table-actions">
+              <ElButton text type="success" @click="openPartGallery(row)">
+                查看图库
+              </ElButton>
               <ElButton text type="primary" @click="openEditDialog(row)">编辑</ElButton>
               <ElButton text @click="togglePartStatus(row)">
                 {{ row.isActive ? "停用" : "启用" }}

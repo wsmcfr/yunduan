@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTrendAxisTicks, resolveTrendPointRatio } from "./trendChart";
+import {
+  buildTrendAreaPath,
+  buildTrendAxisTicks,
+  buildTrendSeriesPoints,
+  buildTrendSmoothPath,
+  buildTrendValueTicks,
+  resolveTrendPointRatio,
+} from "./trendChart";
 
 /**
  * 构造连续日期趋势数据，便于验证不同时间窗口下的横轴抽稀行为。
@@ -53,5 +60,36 @@ describe("trend chart utilities", () => {
     const axisTicks = buildTrendAxisTicks(buildTrendItems(210));
 
     expect(axisTicks.every((item) => /^\d{4}-\d{2}$/.test(item.label))).toBe(true);
+  });
+
+  it("纵轴刻度会归一化到人眼更易读的范围", () => {
+    const valueTicks = buildTrendValueTicks(13);
+
+    expect(valueTicks.map((item) => item.label)).toEqual(["0", "5", "10", "15"]);
+  });
+
+  it("趋势值可以映射为图表坐标，并生成平滑曲线与面积路径", () => {
+    const points = buildTrendSeriesPoints(
+      [2, 5, 3],
+      {
+        x: 10,
+        y: 20,
+        width: 90,
+        height: 60,
+      },
+      {
+        maxValue: 5,
+      },
+    );
+
+    const smoothPath = buildTrendSmoothPath(points);
+    const areaPath = buildTrendAreaPath(points, 80);
+
+    expect(points).toHaveLength(3);
+    expect(points[0]?.x).toBe(10);
+    expect(points[1]?.y).toBe(20);
+    expect(points[2]?.x).toBe(100);
+    expect(smoothPath.startsWith("M 10.0 56.0 C")).toBe(true);
+    expect(areaPath.endsWith("L 10.0 80.0 Z")).toBe(true);
   });
 });

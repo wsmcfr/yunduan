@@ -230,7 +230,7 @@ watch(
             </ElFormItem>
           </ElCol>
           <ElCol :span="8">
-            <ElFormItem label="背光结果">
+            <ElFormItem label="背光通道结果">
               <ElSelect v-model="formState.backlightResult" clearable placeholder="可选">
                 <ElOption
                   v-for="option in detectionResultOptions"

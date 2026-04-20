@@ -5,6 +5,7 @@ import type {
   StatisticsAIAnalysisResponseDto,
   StatisticsExportPdfRequestDto,
   StatisticsOverviewDto,
+  StatisticsSampleGalleryResponseDto,
   SummaryStatisticsDto,
 } from "@/types/api";
 import { getStoredAuthToken } from "@/utils/storage";
@@ -77,6 +78,20 @@ export function fetchStatisticsOverview(
     ? `/api/v1/statistics/overview?${queryString}`
     : "/api/v1/statistics/overview";
   return apiRequest<StatisticsOverviewDto>(path);
+}
+
+/**
+ * 仅获取统计图库数据。
+ * 独立图库页只需要图片和分类入口，不需要重复拉整套趋势和排行数据。
+ */
+export function fetchStatisticsSampleGallery(
+  query: StatisticsOverviewQuery = {},
+): Promise<StatisticsSampleGalleryResponseDto> {
+  const queryString = buildStatisticsQueryString(query);
+  const path = queryString
+    ? `/api/v1/statistics/sample-gallery?${queryString}`
+    : "/api/v1/statistics/sample-gallery";
+  return apiRequest<StatisticsSampleGalleryResponseDto>(path);
 }
 
 /**

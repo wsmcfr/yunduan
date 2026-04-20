@@ -11,6 +11,7 @@ const RecordDetailPage = () => import("@/pages/RecordDetailPage.vue");
 const PartsPage = () => import("@/pages/PartsPage.vue");
 const DevicesPage = () => import("@/pages/DevicesPage.vue");
 const StatisticsPage = () => import("@/pages/StatisticsPage.vue");
+const StatisticsGalleryPage = () => import("@/pages/StatisticsGalleryPage.vue");
 const SettingsPage = () => import("@/pages/SettingsPage.vue");
 
 export const routeNames = {
@@ -21,6 +22,7 @@ export const routeNames = {
   parts: "parts",
   devices: "devices",
   statistics: "statistics",
+  statisticsGallery: "statistics-gallery",
   settings: "settings",
 } as const;
 
@@ -106,6 +108,15 @@ export const routes: RouteRecordRaw[] = [
     component: StatisticsPage,
     meta: {
       title: "统计分析",
+      requiresAuth: true,
+    },
+  },
+  {
+    path: "/statistics/gallery",
+    name: routeNames.statisticsGallery,
+    component: StatisticsGalleryPage,
+    meta: {
+      title: "样本图库",
       requiresAuth: true,
     },
   },

@@ -46,6 +46,10 @@ class PartResponse(ORMBaseModel):
     category: str | None
     description: str | None
     is_active: bool
+    record_count: int = 0
+    image_count: int = 0
+    latest_captured_at: datetime | None = None
+    latest_uploaded_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

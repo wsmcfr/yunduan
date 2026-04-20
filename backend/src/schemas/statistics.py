@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -188,6 +189,7 @@ class StatisticsAIAnalysisResponse(BaseModel):
 class StatisticsExportPdfRequest(BaseModel):
     """统计页服务端 PDF 导出请求体。"""
 
+    export_mode: Literal["visual", "lightweight"] = "visual"
     model_profile_id: int | None = Field(default=None, ge=1)
     provider_hint: str | None = Field(default=None, max_length=64)
     note: str | None = None
@@ -197,5 +199,8 @@ class StatisticsExportPdfRequest(BaseModel):
     part_id: int | None = Field(default=None, ge=1)
     device_id: int | None = Field(default=None, ge=1)
     include_ai_analysis: bool = True
+    cached_ai_answer: str | None = None
+    cached_ai_provider_hint: str | None = Field(default=None, max_length=128)
+    cached_ai_generated_at: datetime | None = None
     include_sample_images: bool = True
     sample_image_limit: int = Field(default=4, ge=0, le=8)

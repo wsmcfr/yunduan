@@ -45,7 +45,7 @@ const mode = computed(() => (props.initialValue ? "edit" : "create"));
 /**
  * 弹窗标题跟随模式切换。
  */
-const dialogTitle = computed(() => (mode.value === "create" ? "新增零件" : "编辑零件"));
+const dialogTitle = computed(() => (mode.value === "create" ? "新增零件类型" : "编辑零件类型"));
 
 /**
  * 表单状态统一放在一个响应式对象里，便于重置与回填。
@@ -180,12 +180,12 @@ watch(
     <ElForm ref="formRef" :model="formState" :rules="formRules" label-position="top">
       <ElRow :gutter="16">
         <ElCol :span="12">
-          <ElFormItem label="零件编码" prop="partCode">
+          <ElFormItem label="类型编码" prop="partCode">
             <ElInput v-model="formState.partCode" placeholder="例如 PART-001" />
           </ElFormItem>
         </ElCol>
         <ElCol :span="12">
-          <ElFormItem label="零件名称" prop="name">
+          <ElFormItem label="类型名称" prop="name">
             <ElInput v-model="formState.name" placeholder="例如 金属垫片" />
           </ElFormItem>
         </ElCol>
@@ -223,7 +223,7 @@ watch(
       <div class="dialog-footer">
         <ElButton @click="closeDialog">取消</ElButton>
         <ElButton type="primary" :loading="submitting" @click="submitForm">
-          {{ mode === "create" ? "创建零件" : "保存修改" }}
+          {{ mode === "create" ? "创建零件类型" : "保存修改" }}
         </ElButton>
       </div>
     </template>

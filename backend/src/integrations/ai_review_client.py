@@ -82,6 +82,18 @@ class AIReviewClient:
         if confidence_score is not None:
             observation_lines.append(f"模型置信度约为 {round(confidence_score * 100)}%。")
 
+        if context.get("vision_context"):
+            observation_lines.append("当前记录还附带了视觉检测上下文，可继续追问模型版本、各通道结果和图像判定依据。")
+
+        if context.get("sensor_context"):
+            observation_lines.append("当前记录还附带了传感器上下文，可继续追问电感/阈值/越界判断与缺陷结论的关系。")
+
+        if context.get("decision_context"):
+            observation_lines.append("当前记录还附带了最终判定依据上下文，可继续追问为什么会判成当前结果。")
+
+        if context.get("device_context"):
+            observation_lines.append("当前记录还附带了设备运行上下文，可继续追问设备批次、任务号、固件版本或采集参数。")
+
         if context.get("review_count", 0) > 0 and context.get("latest_review_decision"):
             observation_lines.append(
                 (
@@ -172,6 +184,10 @@ class AIReviewClient:
 
         if context.get("defect_type"):
             suggestions.append(f"围绕“{context['defect_type']}”说明这条记录为什么会被判成当前结果。")
+        if context.get("sensor_context"):
+            suggestions.append("结合传感器上下文，解释这条记录的传感器信号是否支持当前结论。")
+        if context.get("decision_context"):
+            suggestions.append("根据判定依据上下文，拆解这条记录为什么会被判成当前结果。")
 
         return suggestions[:4]
 

@@ -41,6 +41,58 @@ These rules are the minimum standard for the first backend implementation.
 
 ---
 
+## PDF Layout Quality
+
+### Convention: Direct-Draw PDF Renderers Need Pagination Regression Tests
+
+When a backend service draws PDF pages directly with `reportlab` canvas commands, layout bugs do not fail loudly.
+The PDF can still be generated while cards, charts, or bullet lists silently overflow the page bottom.
+
+Implementation contract:
+
+- any renderer that positions panels with explicit `x/y/width/height` values must reserve a stable footer-safe area
+- do not keep stacking sections onto the first page once the remaining height is smaller than the next block budget
+- split summary, appendix, or AI text into explicit later pages instead of relying on one oversized first page
+- unit tests should validate pagination behavior by patching the renderer dependency and using a fake canvas object
+- those tests should assert signals such as `showPage()` count, later-page section titles, and successful byte output
+- do not make pagination tests depend on the local machine having `reportlab` installed
+
+Example:
+
+```python
+with (
+    patch.object(renderer, "_load_reportlab", return_value=fake_modules),
+    patch.object(renderer, "_ensure_font_registered", return_value="FakeFont"),
+):
+    pdf_bytes, _ = renderer.build_pdf(overview=overview, ai_analysis=None)
+
+assert pdf_bytes.startswith(b"%PDF")
+assert fake_canvas.show_page_calls == 1
+assert "关键发现与样本摘要" in fake_canvas.drawn_strings
+```
+
+Why:
+
+- raw PDF bytes are poor regression oracles for pagination problems
+- local development environments may intentionally omit `reportlab`
+- a fake canvas catches the real failure mode here: content stayed on the wrong page or never paged at all
+
+### Common Mistake: Treating "PDF Generated Successfully" as Layout Success
+
+**Symptom**: The lightweight PDF opens, but the lower panels are clipped, crowded, or pushed beyond the printable area.
+
+**Cause**: Direct-draw renderers use absolute vertical coordinates; if the page budget is not recalculated, one more panel can silently overflow A4.
+
+**Fix**: Move supporting sections such as key findings, gallery summary, or AI appendix to dedicated pages and keep a fixed footer-safe area on each page.
+
+**Prevention**:
+
+- add a fake-canvas pagination test whenever a new direct-draw panel is introduced
+- assert later-page titles and `showPage()` counts
+- if a renderer change is deployed, follow with one real server-side smoke render instead of trusting unit tests alone
+
+---
+
 ## Testing Expectations
 
 ### Bootstrap baseline
@@ -51,6 +103,7 @@ These rules are the minimum standard for the first backend implementation.
 | Service layer | Unit tests for record creation, review decisions, and integration failure paths |
 | Repository layer | Query tests for filtering, sorting, and pagination |
 | Integration layer | Mocked tests for COS and AI review clients |
+| Server-rendered PDF | Verify both the renderer decision path and the manual-layout pagination path |
 
 ### Done means
 
@@ -58,6 +111,7 @@ These rules are the minimum standard for the first backend implementation.
 - lint and type checks pass
 - changed API contracts are documented
 - at least one good-path and one failure-path test exist for new backend behavior
+- direct-draw PDF changes include a pagination regression test that does not rely on optional local PDF libraries
 
 ---
 

@@ -135,7 +135,7 @@ onMounted(() => {
     <PageHeader
       eyebrow="Records"
       title="检测记录"
-      description="这里以检测记录为主线管理流程：默认展示 MP157 初检结果，只有疑似样本才进入详情页触发人工复核或云端大模型复核。"
+      description="这里按检测事件管理流程：同一台设备可以上传多个零件类型的记录，只有疑似样本才进入详情页触发人工复核或云端大模型复核。"
     />
 
     <ElAlert

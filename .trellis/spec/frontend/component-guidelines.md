@@ -138,6 +138,55 @@ Why:
 - recent Element Plus versions warn when `label` is used as the selection value
 - `label` should be treated as display content, while `value` is the stable form contract
 
+### Convention: Evidence Preview Scaling
+
+Sample-gallery cards and review workspaces must treat inspection images as evidence, not as decorative hero banners.
+
+Implementation contract:
+
+- on desktop, wide evidence cards should split into a constrained preview column plus a metadata/action column
+- the preview stage may keep a stable ratio such as `4 / 3`, but it must also cap visible size with a `max-height` clamp
+- evidence images should prefer `max-width: 100%`, `max-height: 100%`, and `object-fit: contain`
+- do not use `object-fit: cover` for part-inspection previews when users need to see the full contour, edge, or hole position
+- collapse back to a single-column layout on narrow screens so metadata is not squeezed
+
+Example:
+
+```vue
+<style scoped>
+.sample-card {
+  display: grid;
+  grid-template-columns: minmax(260px, clamp(280px, 32vw, 420px)) minmax(0, 1fr);
+}
+
+.sample-card__preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  max-height: clamp(220px, 30vw, 340px);
+}
+
+.sample-card__preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+@media (max-width: 900px) {
+  .sample-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>
+```
+
+Why:
+
+- full-width `cover` images make a single part photo dominate the whole card on large screens
+- browser zoom changes expose the problem quickly: the page shrinks, but the evidence image still feels oversized
+- `contain` preserves the whole part shape, which is more important than edge-to-edge filling for review and audit pages
+
 ---
 
 ## Accessibility
@@ -172,3 +221,4 @@ The current app already pairs colors with text in `StatusTag` and alert content.
 | Hard-coding repeated colors and labels in many files | Drifts quickly |
 | Making the header clock depend on a manual refresh click | Produces stale shell state |
 | Using `label` as the selected radio value | Produces deprecation warnings and weak form contracts |
+| Letting one inspection image fill the full card width with `object-fit: cover` | Makes evidence previews look oversized and can crop the exact defect contour users need to inspect |

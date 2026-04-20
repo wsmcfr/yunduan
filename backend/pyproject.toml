@@ -16,7 +16,8 @@ dependencies = [
   "python-jose[cryptography]>=3.5.0",
   "passlib>=1.7.4",
   "cos-python-sdk-v5>=1.9.38",
-  "weasyprint>=66.0"
+  "weasyprint>=66.0",
+  "reportlab>=4.4.2"
 ]
 
 [build-system]

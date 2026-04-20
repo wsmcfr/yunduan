@@ -1,13 +1,24 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
 
 import MetricCard from "@/components/common/MetricCard.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
+import StatisticsPdfExportDialog from "@/features/statistics/StatisticsPdfExportDialog.vue";
 import { useStatisticsOverview } from "@/composables/useStatisticsOverview";
-import type { DetectionResult, ReviewStatus } from "@/types/api";
+import StatisticsSampleGallerySummarySection from "@/features/statistics/StatisticsSampleGallerySummarySection.vue";
+import type { DetectionResult, ReviewStatus, StatisticsPdfExportMode } from "@/types/api";
 import type { DailyTrendItem } from "@/types/models";
-import { buildTrendAxisTicks, resolveTrendPointRatio, type TrendAxisTick } from "@/utils/trendChart";
+import {
+  buildTrendAreaPath,
+  buildTrendAxisTicks,
+  buildTrendSeriesPoints,
+  buildTrendSmoothPath,
+  buildTrendValueTicks,
+  type TrendAxisTick,
+  type TrendChartPoint,
+  type TrendValueTick,
+} from "@/utils/trendChart";
 import { formatDateTime } from "@/utils/format";
 
 /**
@@ -16,7 +27,10 @@ import { formatDateTime } from "@/utils/format";
 interface TrendSeries {
   label: string;
   color: string;
-  points: string;
+  values: number[];
+  linePath: string;
+  areaPath: string;
+  points: TrendChartPoint[];
 }
 
 /**
@@ -28,21 +42,55 @@ interface TrendAxisTickState extends TrendAxisTick {
 }
 
 /**
+ * 页面模板消费的纵轴刻度状态。
+ * 这里额外保留 `y` 坐标，避免模板层做重复映射。
+ */
+interface TrendValueTickState extends TrendValueTick {
+  y: number;
+}
+
+/**
+ * 趋势图 hover 热区。
+ * 通过透明矩形覆盖每个日期区间，能让用户更容易“碰到”真实数据点。
+ */
+interface TrendInteractionZone {
+  index: number;
+  x: number;
+  width: number;
+}
+
+/**
+ * 趋势图悬停快照。
+ * 这里集中整理当前日期下的三条序列值，模板层就不需要自己按下标拼装。
+ */
+interface TrendActiveSnapshotItem {
+  label: string;
+  color: string;
+  value: number;
+  point: TrendChartPoint | null;
+}
+
+/**
  * 统计页趋势图的完整渲染状态。
  */
 interface TrendChartState {
   axisTicks: TrendAxisTickState[];
+  valueTicks: TrendValueTickState[];
   series: TrendSeries[];
+  interactionZones: TrendInteractionZone[];
+  chartLeft: number;
+  chartRight: number;
+  chartBottom: number;
 }
 
 const QUICK_DAY_PRESETS = [7, 14, 30, 60];
-const TREND_CHART_WIDTH = 620;
-const TREND_CHART_HEIGHT = 260;
+const TREND_CHART_WIDTH = 660;
+const TREND_CHART_HEIGHT = 320;
 const TREND_CHART_PADDING = {
-  top: 18,
-  right: 18,
-  bottom: 34,
-  left: 12,
+  top: 24,
+  right: 28,
+  bottom: 56,
+  left: 58,
 };
 
 const {
@@ -76,6 +124,18 @@ const {
 } = useStatisticsOverview();
 
 /**
+ * 当前趋势图悬停的日期点。
+ * `null` 表示未悬停，此时默认回退到最后一个日期点，符合“先看最新状态”的习惯。
+ */
+const hoveredTrendIndex = ref<number | null>(null);
+
+/**
+ * PDF 导出版本选择弹窗显隐状态。
+ * 导出前先让用户明确选“视觉版”还是“轻量报表版”。
+ */
+const pdfExportDialogVisible = ref(false);
+
+/**
  * 当前统计概览中的摘要数据。
  */
 const summary = computed(() => overview.value?.summary ?? null);
@@ -89,6 +149,11 @@ const deviceRanking = computed(() => overview.value?.deviceQualityRanking ?? [])
 const keyFindings = computed(() => overview.value?.keyFindings ?? []);
 const resultDistribution = computed(() => overview.value?.resultDistribution ?? []);
 const reviewStatusDistribution = computed(() => overview.value?.reviewStatusDistribution ?? []);
+/**
+ * 统计页下半区会直接消费当前窗口内的样本图库摘要，
+ * 用于展示总入口、分类入口和跳转到单条复检界面的按钮。
+ */
+const sampleGallery = computed(() => overview.value?.sampleGallery ?? null);
 
 /**
  * 导出和 UI 标题中都需要展示当前筛选作用范围。
@@ -130,6 +195,46 @@ const reviewDistributionStyle = computed(() =>
  * 自定义 SVG 趋势图的数据准备。
  */
 const trendChart = computed(() => createTrendChartState(overview.value?.dailyTrend ?? []));
+
+/**
+ * 当前高亮的趋势点下标。
+ * 未悬停时默认高亮最后一个时间点，方便用户打开页面先看到最新状态。
+ */
+const activeTrendIndex = computed<number | null>(() => {
+  const totalPointCount = trendChart.value.series[0]?.points.length ?? 0;
+  if (totalPointCount <= 0) {
+    return null;
+  }
+
+  return hoveredTrendIndex.value ?? totalPointCount - 1;
+});
+
+/**
+ * 当前趋势图顶部摘要区展示的数据快照。
+ */
+const activeTrendSnapshot = computed<{
+  date: string;
+  items: TrendActiveSnapshotItem[];
+} | null>(() => {
+  if (!overview.value || activeTrendIndex.value === null) {
+    return null;
+  }
+
+  const currentTrendItem = overview.value.dailyTrend[activeTrendIndex.value];
+  if (!currentTrendItem) {
+    return null;
+  }
+
+  return {
+    date: currentTrendItem.date,
+    items: trendChart.value.series.map((series) => ({
+      label: series.label,
+      color: series.color,
+      value: series.values[activeTrendIndex.value ?? 0] ?? 0,
+      point: series.points[activeTrendIndex.value ?? 0] ?? null,
+    })),
+  };
+});
 
 /**
  * 供条形排行计算宽度时复用的最大值。
@@ -231,62 +336,105 @@ function buildConicGradient<TItem extends { count: number }>(
   return `conic-gradient(${gradientParts.join(", ")})`;
 }
 
-/**
- * 把单条趋势序列转换成 SVG 折线 points。
- */
-function buildTrendPoints(
-  items: DailyTrendItem[],
-  valueResolver: (item: DailyTrendItem) => number,
-): string {
-  if (items.length === 0) {
-    return "";
+function createTrendInteractionZones(points: TrendChartPoint[]): TrendInteractionZone[] {
+  if (points.length === 0) {
+    return [];
   }
 
-  const chartWidth = TREND_CHART_WIDTH - TREND_CHART_PADDING.left - TREND_CHART_PADDING.right;
-  const chartHeight = TREND_CHART_HEIGHT - TREND_CHART_PADDING.top - TREND_CHART_PADDING.bottom;
-  const maxValue = Math.max(...items.map((item) => valueResolver(item)), 1);
+  return points.map((point, index) => {
+    const previousPoint = points[index - 1];
+    const nextPoint = points[index + 1];
+    const leftBoundary = previousPoint ? (previousPoint.x + point.x) / 2 : TREND_CHART_PADDING.left;
+    const rightBoundary = nextPoint
+      ? (point.x + nextPoint.x) / 2
+      : TREND_CHART_WIDTH - TREND_CHART_PADDING.right;
 
-  return items
-    .map((item, index) => {
-      const x = TREND_CHART_PADDING.left + chartWidth * resolveTrendPointRatio(index, items.length);
-      const y =
-        TREND_CHART_PADDING.top +
-        chartHeight -
-        chartHeight * (valueResolver(item) / maxValue);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+    return {
+      index,
+      x: leftBoundary,
+      width: Math.max(rightBoundary - leftBoundary, 18),
+    };
+  });
 }
 
 /**
  * 把趋势数据整理成页面模板直接可用的图表状态。
  */
 function createTrendChartState(items: DailyTrendItem[]): TrendChartState {
-  const chartWidth = TREND_CHART_WIDTH - TREND_CHART_PADDING.left - TREND_CHART_PADDING.right;
+  const chartLeft = TREND_CHART_PADDING.left;
+  const chartTop = TREND_CHART_PADDING.top;
+  const chartRight = TREND_CHART_WIDTH - TREND_CHART_PADDING.right;
+  const chartBottom = TREND_CHART_HEIGHT - TREND_CHART_PADDING.bottom;
+  const chartWidth = chartRight - chartLeft;
+  const chartHeight = chartBottom - chartTop;
+  const seriesDefinitions = [
+    {
+      label: "总量",
+      color: "#7fe4d0",
+      values: items.map((item) => item.totalCount),
+      withArea: true,
+    },
+    {
+      label: "不良",
+      color: "#ff7a6d",
+      values: items.map((item) => item.badCount),
+      withArea: false,
+    },
+    {
+      label: "待确认",
+      color: "#ffcc62",
+      values: items.map((item) => item.uncertainCount),
+      withArea: false,
+    },
+  ] as const;
+  const rawMaxValue = Math.max(
+    ...seriesDefinitions.flatMap((series) => series.values),
+    1,
+  );
+  const valueTicks = buildTrendValueTicks(rawMaxValue).map((item) => ({
+    ...item,
+    y: chartTop + chartHeight - chartHeight * item.ratio,
+  }));
+  const chartMaxValue = valueTicks[valueTicks.length - 1]?.value ?? rawMaxValue;
+  const series = seriesDefinitions.map<TrendSeries>((series) => {
+    const points = buildTrendSeriesPoints(series.values, {
+      x: chartLeft,
+      y: chartTop,
+      width: chartWidth,
+      height: chartHeight,
+    }, {
+      maxValue: chartMaxValue,
+    });
+
+    return {
+      label: series.label,
+      color: series.color,
+      values: series.values,
+      linePath: buildTrendSmoothPath(points),
+      areaPath: series.withArea ? buildTrendAreaPath(points, chartBottom) : "",
+      points,
+    };
+  });
 
   return {
     axisTicks: buildTrendAxisTicks(items).map((item) => ({
       ...item,
-      x: TREND_CHART_PADDING.left + chartWidth * item.ratio,
+      x: chartLeft + chartWidth * item.ratio,
     })),
-    series: [
-      {
-        label: "总量",
-        color: "#7fe4d0",
-        points: buildTrendPoints(items, (item) => item.totalCount),
-      },
-      {
-        label: "不良",
-        color: "#ff7a6d",
-        points: buildTrendPoints(items, (item) => item.badCount),
-      },
-      {
-        label: "待确认",
-        color: "#ffcc62",
-        points: buildTrendPoints(items, (item) => item.uncertainCount),
-      },
-    ],
+    valueTicks,
+    series,
+    interactionZones: createTrendInteractionZones(series[0]?.points ?? []),
+    chartLeft,
+    chartRight,
+    chartBottom,
   };
+}
+
+/**
+ * 用于趋势图顶部摘要区展示日期文案。
+ */
+function formatTrendDate(date: string): string {
+  return date;
 }
 
 /**
@@ -330,10 +478,25 @@ async function handleExportPng(): Promise<void> {
 }
 
 /**
- * PDF 导出底层已经处理浏览器弹窗拦截提示，这里只负责触发。
+ * 打开 PDF 导出版本选择弹窗。
  */
-function handleExportPdf(): void {
-  exportPdf();
+function handleOpenPdfExportDialog(): void {
+  pdfExportDialogVisible.value = true;
+}
+
+/**
+ * 根据用户选择的导出版本触发实际 PDF 导出。
+ */
+function handleConfirmPdfExport(exportMode: StatisticsPdfExportMode): void {
+  pdfExportDialogVisible.value = false;
+  exportPdf(exportMode);
+}
+
+/**
+ * 当鼠标离开趋势图时，恢复为“最后一个日期点”的默认高亮状态。
+ */
+function handleTrendMouseLeave(): void {
+  hoveredTrendIndex.value = null;
 }
 </script>
 
@@ -354,7 +517,7 @@ function handleExportPdf(): void {
           plain
           :loading="pdfExporting"
           :disabled="!hasOverview"
-          @click="handleExportPdf"
+          @click="handleOpenPdfExportDialog"
         >
           导出 PDF
         </ElButton>
@@ -482,6 +645,11 @@ function handleExportPdf(): void {
     </div>
 
     <div v-if="overview" class="stats-page__content">
+      <StatisticsSampleGallerySummarySection
+        :gallery="sampleGallery"
+        :filters="overview?.filters ?? null"
+      />
+
       <div class="stats-page__chart-grid">
         <section class="app-panel stats-panel">
           <div class="stats-panel__header">
@@ -492,38 +660,95 @@ function handleExportPdf(): void {
           </div>
 
           <div v-if="trendChart.axisTicks.length > 0" class="stats-trend">
+            <div class="stats-trend__summary">
+              <div>
+                <strong>
+                  {{ activeTrendSnapshot ? `${formatTrendDate(activeTrendSnapshot.date)} 的趋势快照` : "趋势快照" }}
+                </strong>
+                <p class="muted-text">
+                  当前高亮日期下，可以直接看到总量、不良与待确认的实际数量，而不是只盯着一条线。
+                </p>
+              </div>
+
+              <div v-if="activeTrendSnapshot" class="stats-trend__summary-pills">
+                <span
+                  v-for="item in activeTrendSnapshot.items"
+                  :key="item.label"
+                  class="stats-trend__summary-pill"
+                >
+                  <i :style="{ backgroundColor: item.color }" />
+                  {{ item.label }} {{ item.value }}
+                </span>
+              </div>
+            </div>
+
             <svg
               class="stats-trend__svg"
               :viewBox="`0 0 ${TREND_CHART_WIDTH} ${TREND_CHART_HEIGHT}`"
               role="img"
               aria-label="统计趋势曲线"
+              @mouseleave="handleTrendMouseLeave"
             >
+              <defs>
+                <linearGradient id="stats-trend-area" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stop-color="#7fe4d0" stop-opacity="0.26" />
+                  <stop offset="100%" stop-color="#7fe4d0" stop-opacity="0.02" />
+                </linearGradient>
+              </defs>
+
               <line
-                :x1="TREND_CHART_PADDING.left"
-                :x2="TREND_CHART_WIDTH - TREND_CHART_PADDING.right"
-                :y1="TREND_CHART_HEIGHT - TREND_CHART_PADDING.bottom"
-                :y2="TREND_CHART_HEIGHT - TREND_CHART_PADDING.bottom"
+                :x1="trendChart.chartLeft"
+                :x2="trendChart.chartLeft"
+                :y1="TREND_CHART_PADDING.top"
+                :y2="trendChart.chartBottom"
                 class="stats-trend__axis"
               />
               <line
-                :x1="TREND_CHART_PADDING.left"
-                :x2="TREND_CHART_WIDTH - TREND_CHART_PADDING.right"
-                :y1="TREND_CHART_PADDING.top + 76"
-                :y2="TREND_CHART_PADDING.top + 76"
-                class="stats-trend__grid"
-              />
-              <line
-                :x1="TREND_CHART_PADDING.left"
-                :x2="TREND_CHART_WIDTH - TREND_CHART_PADDING.right"
-                :y1="TREND_CHART_PADDING.top + 152"
-                :y2="TREND_CHART_PADDING.top + 152"
-                class="stats-trend__grid"
+                :x1="trendChart.chartLeft"
+                :x2="trendChart.chartRight"
+                :y1="trendChart.chartBottom"
+                :y2="trendChart.chartBottom"
+                class="stats-trend__axis"
               />
 
-              <polyline
+              <g v-for="tick in trendChart.valueTicks" :key="`value-${tick.label}`">
+                <line
+                  :x1="trendChart.chartLeft"
+                  :x2="trendChart.chartRight"
+                  :y1="tick.y"
+                  :y2="tick.y"
+                  class="stats-trend__grid"
+                />
+                <text
+                  :x="trendChart.chartLeft - 12"
+                  :y="tick.y + 4"
+                  text-anchor="end"
+                  class="stats-trend__value-label"
+                >
+                  {{ tick.label }}
+                </text>
+              </g>
+
+              <path
+                v-if="trendChart.series[0]?.areaPath"
+                :d="trendChart.series[0].areaPath"
+                fill="url(#stats-trend-area)"
+                stroke="none"
+              />
+
+              <line
+                v-if="activeTrendSnapshot?.items[0]?.point"
+                :x1="activeTrendSnapshot.items[0].point.x"
+                :x2="activeTrendSnapshot.items[0].point.x"
+                :y1="TREND_CHART_PADDING.top"
+                :y2="trendChart.chartBottom"
+                class="stats-trend__cursor-line"
+              />
+
+              <path
                 v-for="series in trendChart.series"
                 :key="series.label"
-                :points="series.points"
+                :d="series.linePath"
                 fill="none"
                 :stroke="series.color"
                 stroke-width="4"
@@ -531,11 +756,36 @@ function handleExportPdf(): void {
                 stroke-linejoin="round"
               />
 
+              <g v-for="series in trendChart.series" :key="`points-${series.label}`">
+                <circle
+                  v-for="point in series.points"
+                  :key="`${series.label}-${point.index}`"
+                  :cx="point.x"
+                  :cy="point.y"
+                  :r="activeTrendIndex === point.index ? 5.8 : 3.2"
+                  :fill="series.color"
+                  :stroke="activeTrendIndex === point.index ? '#0f2136' : 'rgba(15, 33, 54, 0.58)'"
+                  :stroke-width="activeTrendIndex === point.index ? 2.4 : 1.2"
+                  :opacity="activeTrendIndex === point.index ? 1 : 0.78"
+                />
+              </g>
+
+              <rect
+                v-for="zone in trendChart.interactionZones"
+                :key="`zone-${zone.index}`"
+                :x="zone.x"
+                :y="TREND_CHART_PADDING.top"
+                :width="zone.width"
+                :height="trendChart.chartBottom - TREND_CHART_PADDING.top"
+                fill="transparent"
+                @mouseenter="hoveredTrendIndex = zone.index"
+              />
+
               <text
                 v-for="tick in trendChart.axisTicks"
                 :key="`${tick.label}-${tick.index}`"
                 :x="tick.x"
-                :y="TREND_CHART_HEIGHT - 8"
+                :y="TREND_CHART_HEIGHT - 14"
                 text-anchor="middle"
                 class="stats-trend__label"
               >
@@ -854,6 +1104,12 @@ function handleExportPdf(): void {
     <section v-else-if="loading" class="app-panel stats-panel">
       <ElSkeleton animated :rows="10" />
     </section>
+
+    <StatisticsPdfExportDialog
+      v-model="pdfExportDialogVisible"
+      :exporting="pdfExporting"
+      @submit="handleConfirmPdfExport"
+    />
   </div>
 </template>
 
@@ -972,9 +1228,47 @@ function handleExportPdf(): void {
   gap: 16px;
 }
 
+.stats-trend__summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(127, 228, 208, 0.12);
+  background:
+    radial-gradient(circle at top right, rgba(127, 228, 208, 0.1), transparent 34%),
+    rgba(255, 255, 255, 0.02);
+}
+
+.stats-trend__summary p {
+  margin: 8px 0 0;
+  line-height: 1.7;
+}
+
+.stats-trend__summary-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.stats-trend__summary-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  background: rgba(10, 25, 40, 0.72);
+  color: #eef5fc;
+  font-weight: 600;
+}
+
 .stats-trend__svg {
   width: 100%;
-  min-height: 260px;
+  min-height: 320px;
+  overflow: visible;
 }
 
 .stats-trend__axis {
@@ -986,8 +1280,18 @@ function handleExportPdf(): void {
   stroke-dasharray: 6 6;
 }
 
+.stats-trend__cursor-line {
+  stroke: rgba(127, 228, 208, 0.22);
+  stroke-dasharray: 4 6;
+}
+
 .stats-trend__label {
   fill: rgba(182, 201, 220, 0.72);
+  font-size: 12px;
+}
+
+.stats-trend__value-label {
+  fill: rgba(143, 168, 192, 0.74);
   font-size: 12px;
 }
 
@@ -1004,6 +1308,7 @@ function handleExportPdf(): void {
 }
 
 .stats-trend__legend-item i,
+.stats-trend__summary-pill i,
 .stats-distribution-card__label i {
   width: 10px;
   height: 10px;
@@ -1244,6 +1549,7 @@ function handleExportPdf(): void {
     grid-template-columns: 1fr;
   }
 
+  .stats-trend__summary,
   .stats-page__hero-actions,
   .stats-filter-card__header,
   .stats-panel__header,
@@ -1252,6 +1558,10 @@ function handleExportPdf(): void {
   .stats-distribution-card__item {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .stats-trend__summary-pills {
+    justify-content: flex-start;
   }
 
   .stats-page__metrics,

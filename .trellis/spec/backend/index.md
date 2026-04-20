@@ -26,6 +26,7 @@ Read these files before changing backend code:
 - [Error Handling](./error-handling.md): when touching API handlers or integrations
 - [Logging Guidelines](./logging-guidelines.md): when adding observability or background tasks
 - [Database Guidelines](./database-guidelines.md): when touching models, queries, or migrations
+- [Deployment Guidelines](./deployment-guidelines.md): when touching production update flow, server paths, restart procedure, or runtime deployment assumptions
 
 If a change also affects frontend payloads or storage contracts, read:
 
@@ -43,6 +44,7 @@ If a change also affects frontend payloads or storage contracts, read:
 | [Error Handling](./error-handling.md) | Error types, handling strategies | Bootstrap filled |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | Bootstrap filled |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | Bootstrap filled |
+| [Deployment Guidelines](./deployment-guidelines.md) | Production server alias, paths, update steps, restart and verification contract | Bootstrap filled |
 
 ---
 

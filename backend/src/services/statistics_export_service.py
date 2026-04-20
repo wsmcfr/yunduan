@@ -21,6 +21,7 @@ from src.schemas.statistics import (
     StatisticsExportPdfRequest,
     StatisticsOverviewResponse,
 )
+from src.services.statistics_lightweight_pdf_renderer import StatisticsLightweightPdfRenderer
 from src.services.statistics_service import StatisticsService
 
 logger = get_logger(__name__)
@@ -30,10 +31,11 @@ class StatisticsExportService:
     """负责把统计页概览导出成服务端生成的 PDF 报表。"""
 
     _sample_file_priority = {
-        FileKind.ANNOTATED: 0,
-        FileKind.SOURCE: 1,
-        FileKind.THUMBNAIL: 2,
+        FileKind.THUMBNAIL: 0,
+        FileKind.ANNOTATED: 1,
+        FileKind.SOURCE: 2,
     }
+    _max_embedded_image_bytes = 2 * 1024 * 1024
 
     def __init__(self, db: Session) -> None:
         """初始化导出服务依赖。"""
@@ -154,7 +156,7 @@ class StatisticsExportService:
                 region=file_object.region,
                 object_key=file_object.object_key,
                 timeout_seconds=60,
-                max_bytes=5 * 1024 * 1024,
+                max_bytes=self._max_embedded_image_bytes,
             )
             content_type = str(file_payload["content_type"])
             if not content_type.startswith("image/"):
@@ -214,6 +216,28 @@ class StatisticsExportService:
             self._build_sample_image_entry(record=record)
             for record in self._pick_sample_records(records=records, limit=sample_image_limit)
         ]
+
+    def _build_cached_ai_analysis(
+        self,
+        *,
+        payload: StatisticsExportPdfRequest,
+    ) -> StatisticsAIAnalysisResponse | None:
+        """把前端已经拿到的 AI 分析文本复用到导出流程中。
+
+        这样用户在页面上已经跑过一次 AI 分析时，PDF 导出不会再重复请求模型，
+        可以显著降低导出等待时间，也避免服务端在同一时间既跑 AI 又跑 WeasyPrint。
+        """
+
+        cached_answer = (payload.cached_ai_answer or "").strip()
+        if not cached_answer:
+            return None
+
+        return StatisticsAIAnalysisResponse(
+            status="completed",
+            answer=cached_answer,
+            provider_hint=payload.cached_ai_provider_hint or payload.provider_hint,
+            generated_at=payload.cached_ai_generated_at or datetime.now(timezone.utc),
+        )
 
     def _build_trend_svg(self, *, overview: StatisticsOverviewResponse) -> str:
         """生成趋势曲线的内联 SVG。"""
@@ -711,7 +735,7 @@ class StatisticsExportService:
 
       <section class="panel">
         <h3>COS 样本图像</h3>
-        <p class="muted">本节由服务端直接通过 COS 连接读取图片并嵌入 PDF，不依赖浏览器本地预览。</p>
+        <p class="muted">本节由服务端直接通过 COS 连接抽样读取代表图片并嵌入 PDF，优先使用缩略图以控制导出耗时和 CPU 占用。</p>
         <div class="sample-grid">{sample_images_html}</div>
       </section>
     </div>
@@ -727,6 +751,10 @@ class StatisticsExportService:
 
         if not payload.include_ai_analysis:
             return None
+
+        cached_ai_analysis = self._build_cached_ai_analysis(payload=payload)
+        if cached_ai_analysis is not None:
+            return cached_ai_analysis
 
         try:
             return self.statistics_service.request_ai_analysis(
@@ -764,12 +792,20 @@ class StatisticsExportService:
             device_id=payload.device_id,
         )
         ai_analysis = self._build_ai_analysis(payload=payload)
+
+        if payload.export_mode == "lightweight":
+            # 轻量版走直接绘制链路，不再继续抓 COS 样本图，也不依赖 WeasyPrint。
+            return StatisticsLightweightPdfRenderer().build_pdf(
+                overview=overview,
+                ai_analysis=ai_analysis,
+            )
+
         sample_images = (
             self._load_sample_images(
                 overview=overview,
                 sample_image_limit=payload.sample_image_limit,
             )
-            if payload.include_sample_images
+            if payload.include_sample_images and payload.sample_image_limit > 0
             else []
         )
         html_text = self._build_html(

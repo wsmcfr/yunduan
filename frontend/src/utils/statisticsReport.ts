@@ -5,18 +5,19 @@ import type {
   StatisticsOverview,
 } from "@/types/models";
 import { formatDateTime } from "@/utils/format";
-import { buildTrendAxisTicks } from "@/utils/trendChart";
+import {
+  buildTrendAreaPath,
+  buildTrendAxisTicks,
+  buildTrendSeriesPoints,
+  buildTrendSmoothPath,
+  buildTrendValueTicks,
+} from "@/utils/trendChart";
 
 export interface StatisticsReportPayload {
   overview: StatisticsOverview;
   aiAnalysis: StatisticsAIAnalysisResponse | null;
   partLabel?: string | null;
   deviceLabel?: string | null;
-}
-
-interface SvgPoint {
-  x: number;
-  y: number;
 }
 
 const SVG_WIDTH = 1400;
@@ -86,36 +87,6 @@ function wrapText(value: string, maxCharsPerLine: number): string[] {
   }
 
   return wrappedLines;
-}
-
-/**
- * 把折线图序列映射为 SVG 坐标点。
- */
-function buildSeriesPoints(
-  values: number[],
-  chartX: number,
-  chartY: number,
-  chartWidth: number,
-  chartHeight: number,
-): SvgPoint[] {
-  const safeValues = values.length > 0 ? values : [0];
-  const maxValue = Math.max(...safeValues, 1);
-
-  return safeValues.map((value, index) => {
-    const ratioX = safeValues.length <= 1 ? 0.5 : index / (safeValues.length - 1);
-    const ratioY = value / maxValue;
-    return {
-      x: chartX + chartWidth * ratioX,
-      y: chartY + chartHeight - chartHeight * ratioY,
-    };
-  });
-}
-
-/**
- * 把点坐标序列转成 SVG 折线 points 文本。
- */
-function buildPolyline(points: SvgPoint[]): string {
-  return points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
 }
 
 /**
@@ -239,26 +210,32 @@ export function buildStatisticsReportSvg(payload: StatisticsReportPayload): stri
    * 导出图表沿用页面相同的横轴抽稀策略，避免页面与 PNG/PDF 展示口径不一致。
    */
   const axisTicks = buildTrendAxisTicks(overview.dailyTrend);
-  const totalSeries = buildSeriesPoints(
+  const trendRect = {
+    x: 0,
+    y: 0,
+    width: 460,
+    height: 180,
+  };
+  const rawTrendMaxValue = Math.max(
+    ...overview.dailyTrend.flatMap((item) => [item.totalCount, item.badCount, item.uncertainCount]),
+    1,
+  );
+  const valueTicks = buildTrendValueTicks(rawTrendMaxValue);
+  const trendMaxValue = valueTicks[valueTicks.length - 1]?.value ?? rawTrendMaxValue;
+  const totalSeries = buildTrendSeriesPoints(
     overview.dailyTrend.map((item) => item.totalCount),
-    0,
-    0,
-    460,
-    180,
+    trendRect,
+    { maxValue: trendMaxValue },
   );
-  const badSeries = buildSeriesPoints(
+  const badSeries = buildTrendSeriesPoints(
     overview.dailyTrend.map((item) => item.badCount),
-    0,
-    0,
-    460,
-    180,
+    trendRect,
+    { maxValue: trendMaxValue },
   );
-  const uncertainSeries = buildSeriesPoints(
+  const uncertainSeries = buildTrendSeriesPoints(
     overview.dailyTrend.map((item) => item.uncertainCount),
-    0,
-    0,
-    460,
-    180,
+    trendRect,
+    { maxValue: trendMaxValue },
   );
   const findings = overview.keyFindings.slice(0, 5);
   const aiLines = wrapText(
@@ -296,12 +273,37 @@ export function buildStatisticsReportSvg(payload: StatisticsReportPayload): stri
     <text x="28" y="42" fill="#f8fbff" font-size="24" font-weight="700">趋势曲线</text>
     <text x="28" y="68" fill="#8ea4bd" font-size="14">总量 / 不良 / 待确认按天变化</text>
     <g transform="translate(82 110)">
+      <defs>
+        <linearGradient id="reportTrendArea" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#7fe4d0" stop-opacity="0.28" />
+          <stop offset="100%" stop-color="#7fe4d0" stop-opacity="0.03" />
+        </linearGradient>
+      </defs>
       <line x1="0" y1="180" x2="460" y2="180" stroke="#28445e" />
-      <line x1="0" y1="120" x2="460" y2="120" stroke="#20384f" stroke-dasharray="6 6" />
-      <line x1="0" y1="60" x2="460" y2="60" stroke="#20384f" stroke-dasharray="6 6" />
-      <polyline fill="none" stroke="#7fe4d0" stroke-width="4" points="${buildPolyline(totalSeries)}" />
-      <polyline fill="none" stroke="#ff7a6d" stroke-width="4" points="${buildPolyline(badSeries)}" />
-      <polyline fill="none" stroke="#ffcc62" stroke-width="4" points="${buildPolyline(uncertainSeries)}" />
+      <line x1="0" y1="0" x2="0" y2="180" stroke="#28445e" />
+      ${valueTicks
+        .map((item) => {
+          const y = (180 - 180 * item.ratio).toFixed(1);
+          return `
+            <line x1="0" y1="${y}" x2="460" y2="${y}" stroke="#20384f" stroke-dasharray="6 6" />
+            <text x="-12" y="${Number(y) + 4}" fill="#7d95af" font-size="11" text-anchor="end">${escapeMarkup(item.label)}</text>
+          `;
+        })
+        .join("")}
+      <path fill="url(#reportTrendArea)" stroke="none" d="${buildTrendAreaPath(totalSeries, 180)}" />
+      <path fill="none" stroke="#7fe4d0" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="${buildTrendSmoothPath(totalSeries)}" />
+      <path fill="none" stroke="#ff7a6d" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="${buildTrendSmoothPath(badSeries)}" />
+      <path fill="none" stroke="#ffcc62" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="${buildTrendSmoothPath(uncertainSeries)}" />
+      ${[totalSeries, badSeries, uncertainSeries]
+        .map((seriesPoints, seriesIndex) => {
+          const color = seriesIndex === 0 ? "#7fe4d0" : seriesIndex === 1 ? "#ff7a6d" : "#ffcc62";
+          return seriesPoints
+            .map(
+              (point) => `<circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="3.2" fill="${color}" stroke="#112740" stroke-width="1.2" />`,
+            )
+            .join("");
+        })
+        .join("")}
       ${axisTicks
         .map((item) => {
           const point = totalSeries[item.index] ?? totalSeries[0];

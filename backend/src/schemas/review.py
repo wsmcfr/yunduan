@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -100,6 +100,10 @@ class AIRecordContext(BaseModel):
     defect_type: str | None
     defect_desc: str | None
     confidence_score: float | None
+    vision_context: dict[str, Any] | None
+    sensor_context: dict[str, Any] | None
+    decision_context: dict[str, Any] | None
+    device_context: dict[str, Any] | None
     captured_at: datetime
     detected_at: datetime | None
     uploaded_at: datetime | None

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
+from src.db.models.detection_record import DetectionRecord
+from src.db.models.file_object import FileObject
 from src.db.models.part import Part
 
 
@@ -61,6 +65,49 @@ class PartRepository:
             ).scalars()
         )
         return total, items
+
+    def summarize_detection_usage(
+        self,
+        *,
+        part_ids: list[int],
+    ) -> dict[int, dict[str, int | datetime | None]]:
+        """汇总零件类型关联的记录量、图片量和最近上传时间。"""
+
+        if not part_ids:
+            return {}
+
+        latest_uploaded_expr = func.max(
+            func.coalesce(
+                FileObject.uploaded_at,
+                FileObject.storage_last_modified,
+                FileObject.created_at,
+                DetectionRecord.uploaded_at,
+            )
+        )
+        stmt = (
+            select(
+                DetectionRecord.part_id.label("part_id"),
+                func.count(func.distinct(DetectionRecord.id)).label("record_count"),
+                func.count(FileObject.id).label("image_count"),
+                func.max(DetectionRecord.captured_at).label("latest_captured_at"),
+                latest_uploaded_expr.label("latest_uploaded_at"),
+            )
+            .select_from(DetectionRecord)
+            .outerjoin(FileObject, FileObject.detection_record_id == DetectionRecord.id)
+            .where(DetectionRecord.part_id.in_(part_ids))
+            .group_by(DetectionRecord.part_id)
+        )
+
+        usage_map: dict[int, dict[str, int | datetime | None]] = {}
+        for row in self.db.execute(stmt):
+            usage_map[int(row.part_id)] = {
+                "record_count": int(row.record_count or 0),
+                "image_count": int(row.image_count or 0),
+                "latest_captured_at": row.latest_captured_at,
+                "latest_uploaded_at": row.latest_uploaded_at,
+            }
+
+        return usage_map
 
     def create(self, part: Part) -> Part:
         """创建零件并返回持久化对象。"""

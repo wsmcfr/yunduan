@@ -185,6 +185,111 @@ def format_sse_event(*, event: str, payload: dict[str, Any]) -> str:
 
 ---
 
+## Scenario: Statistics PDF Export Mode Error Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `/api/v1/statistics/export-pdf`, `StatisticsExportService.build_pdf(...)`, the lightweight PDF renderer, or PDF dependency setup on the production host
+- Affected layers: request schema -> export service mode dispatch -> WeasyPrint / ReportLab renderer -> production response behavior
+
+### 2. Signatures
+
+```py
+class StatisticsExportPdfRequest(BaseModel):
+    export_mode: Literal["visual", "lightweight"] = "visual"
+    include_ai_analysis: bool = True
+    include_sample_images: bool = True
+    sample_image_limit: int = Field(default=4, ge=0, le=8)
+```
+
+```py
+def build_pdf(self, payload: StatisticsExportPdfRequest) -> tuple[bytes, str]: ...
+def _load_reportlab(self) -> dict[str, Any]: ...
+def _ensure_font_registered(self, *, pdfmetrics: Any, unicode_cid_font: Any) -> str: ...
+```
+
+```http
+POST /api/v1/statistics/export-pdf
+```
+
+### 3. Contracts
+
+| Boundary | Contract |
+|---|---|
+| `export_mode="visual"` | Must stay on the WeasyPrint HTML rendering path |
+| `export_mode="lightweight"` | Must dispatch directly to the ReportLab-based renderer and must not continue into the HTML / sample-image path |
+| ReportLab dependency | Missing `reportlab` must surface as a stable integration error, not an unhandled traceback |
+| WeasyPrint dependency | Missing `weasyprint` must surface as a stable integration error, not an unhandled traceback |
+| Font registration | `pdfmetrics.getRegisteredFontNames()` must be treated as a sequence of font-name strings |
+| Lightweight performance path | Lightweight export must not load COS sample images when the mode is `lightweight` |
+
+Additional rules:
+
+- predictable renderer setup failures belong to `IntegrationError`, not raw `500 Internal Server Error`
+- lightweight-mode regressions should be caught by service/unit tests before deployment
+- frontend export benchmarking should use `include_ai_analysis=false` when the goal is renderer timing only
+
+### 4. Validation & Error Matrix
+
+| Condition | Problem | Expected behavior |
+|---|---|---|
+| `reportlab` is not installed | Lightweight export cannot initialize its renderer | Raise `IntegrationError(code="lightweight_pdf_renderer_unavailable", ...)` |
+| `weasyprint` is not installed | Visual export cannot render HTML to PDF | Raise `IntegrationError(code="pdf_renderer_unavailable", ...)` |
+| Lightweight mode still calls sample-image loading | Export becomes slower and loses its intended lightweight behavior | Dispatch directly to the lightweight renderer before sample-image loading |
+| Font registration code treats registered font names as objects with `.fontName` | The route returns a raw `500` during lightweight export | Treat `getRegisteredFontNames()` as plain strings and keep the path test-covered |
+| Visual benchmark keeps AI analysis enabled | Timing includes model latency instead of renderer cost | Disable AI analysis during renderer benchmark runs |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | `export_mode="lightweight"` skips sample images, initializes ReportLab, accepts string font names, and returns a PDF response |
+| Base | `export_mode="visual"` still uses WeasyPrint and embeds only the explicitly requested sample images |
+| Bad | A lightweight-renderer refactor accesses `font.fontName`, triggers `AttributeError`, and the API returns a plain `500 Internal Server Error` |
+
+### 6. Tests Required
+
+- service test asserting `export_mode="lightweight"` dispatches to the lightweight renderer
+- service test asserting lightweight mode does not call sample-image loading
+- renderer test asserting missing `reportlab` maps to `lightweight_pdf_renderer_unavailable`
+- renderer test asserting `_ensure_font_registered(...)` accepts string names returned by `getRegisteredFontNames()`
+- existing visual-path test coverage must still protect cached AI reuse and visual sample-image selection rules
+
+Assertion points:
+
+- the lightweight renderer receives `overview` and `ai_analysis` directly from `StatisticsExportService`
+- `_load_sample_images(...)` is not called for lightweight mode
+- missing dependencies map to stable error codes instead of plain tracebacks
+- registered font names such as `"STSong-Light"` do not require `.fontName` access
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+registered_fonts = {item.fontName for item in pdfmetrics.getRegisteredFontNames()}
+if font_name not in registered_fonts:
+    pdfmetrics.registerFont(unicode_cid_font(font_name))
+```
+
+#### Correct
+
+```py
+registered_fonts = set(pdfmetrics.getRegisteredFontNames())
+if font_name not in registered_fonts:
+    pdfmetrics.registerFont(unicode_cid_font(font_name))
+```
+
+```py
+if payload.export_mode == "lightweight":
+    return StatisticsLightweightPdfRenderer().build_pdf(
+        overview=overview,
+        ai_analysis=ai_analysis,
+    )
+```
+
+---
+
 ## Forbidden Patterns
 
 | Pattern | Why it is forbidden |
@@ -195,6 +300,7 @@ def format_sse_event(*, event: str, payload: dict[str, Any]) -> str:
 | Mapping every failure to a generic 500 without context | Makes retries and diagnosis difficult |
 | Yielding SSE events with raw `datetime` or other non-JSON values | The stream can fail before the frontend receives the first usable frame |
 | Letting a generator exception terminate a stream without an `error` event | The browser only sees a broken response and the UI cannot explain what failed |
+| Letting predictable PDF renderer setup failures bubble out as plain `500` errors | The client cannot distinguish dependency issues, renderer regressions, and temporary deployment mistakes |
 
 ---
 
@@ -215,3 +321,4 @@ def format_sse_event(*, event: str, payload: dict[str, Any]) -> str:
 | Putting storage, AI review, and DB writes in one route without staged failure handling | Hard to recover from partial failures |
 | Using human text as the only error identifier | Frontend cannot branch reliably |
 | Translating every error too early in lower layers | Reduces observability and reuse |
+| Assuming third-party library helper APIs return rich objects without checking the actual return type | Small renderer regressions can escape as production-only `500` errors |

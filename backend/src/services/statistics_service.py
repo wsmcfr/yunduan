@@ -641,6 +641,30 @@ class StatisticsService:
             generated_at=datetime.now(timezone.utc),
         )
 
+    def get_sample_gallery(
+        self,
+        *,
+        start_date: date | None,
+        end_date: date | None,
+        days: int,
+        part_id: int | None = None,
+        device_id: int | None = None,
+    ) -> StatisticsSampleGalleryResponse:
+        """只返回统计图库数据，供独立图库页按分类浏览和进入复检。"""
+
+        resolved_start_date, resolved_end_date = self._resolve_date_window(
+            start_date=start_date,
+            end_date=end_date,
+            days=days,
+        )
+        records = self._load_records(
+            start_date=resolved_start_date,
+            end_date=resolved_end_date,
+            part_id=part_id,
+            device_id=device_id,
+        )
+        return self._build_sample_gallery(records=records)
+
     def get_summary(
         self,
         *,

@@ -18,6 +18,11 @@ import type {
 } from "@/types/models";
 import { formatConfidence, formatDateTime } from "@/utils/format";
 import {
+  getStoredPreferredRuntimeModelId,
+  resolvePreferredRuntimeModelId,
+  setStoredPreferredRuntimeModelId,
+} from "@/utils/aiModelSelection";
+import {
   buildAiPreviewUrl,
   createAiOpeningMessage,
   createDefaultAiSuggestedQuestions,
@@ -342,7 +347,11 @@ async function loadRuntimeModels(): Promise<void> {
   try {
     const response = await fetchRuntimeAIModels();
     runtimeModels.value = response.items.map(mapAIRuntimeModelOptionDto);
-    selectedModelId.value = runtimeModels.value[0]?.id ?? null;
+    selectedModelId.value = resolvePreferredRuntimeModelId(
+      runtimeModels.value,
+      getStoredPreferredRuntimeModelId(),
+    );
+    setStoredPreferredRuntimeModelId(selectedModelId.value);
   } catch (caughtError) {
     runtimeModels.value = [];
     selectedModelId.value = null;
@@ -692,6 +701,17 @@ async function submitQuestion(): Promise<void> {
     sending.value = false;
   }
 }
+
+watch(
+  () => selectedModelId.value,
+  (nextModelId) => {
+    if (runtimeModels.value.length === 0) {
+      return;
+    }
+
+    setStoredPreferredRuntimeModelId(nextModelId);
+  },
+);
 
 watch(
   () => [props.modelValue, props.record?.id],

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +29,10 @@ class DetectionRecordCreateRequest(BaseModel):
     defect_type: str | None = Field(default=None, max_length=128)
     defect_desc: str | None = None
     confidence_score: float | None = Field(default=None, ge=0, le=1)
+    vision_context: dict[str, Any] | None = None
+    sensor_context: dict[str, Any] | None = None
+    decision_context: dict[str, Any] | None = None
+    device_context: dict[str, Any] | None = None
     captured_at: datetime
     detected_at: datetime | None = None
     uploaded_at: datetime | None = None
@@ -50,6 +55,10 @@ class DetectionRecordListItem(ORMBaseModel):
     defect_type: str | None
     defect_desc: str | None
     confidence_score: float | None
+    vision_context: dict[str, Any] | None
+    sensor_context: dict[str, Any] | None
+    decision_context: dict[str, Any] | None
+    device_context: dict[str, Any] | None
     captured_at: datetime
     detected_at: datetime | None
     uploaded_at: datetime | None

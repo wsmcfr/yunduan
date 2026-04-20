@@ -7,6 +7,7 @@ export type ReviewSource = "manual" | "ai_reserved";
 export type FileKind = "source" | "annotated" | "thumbnail";
 export type StorageProvider = "cos";
 export type AIChatRole = "user" | "assistant";
+export type StatisticsPdfExportMode = "visual" | "lightweight";
 export type AIGatewayVendor =
   | "openai"
   | "anthropic"
@@ -37,6 +38,16 @@ export type AIModelVendor =
   | "kimi"
   | "minmax"
   | "custom";
+
+export type StructuredContextValueDto =
+  | string
+  | number
+  | boolean
+  | null
+  | StructuredContextValueDto[]
+  | {
+      [key: string]: StructuredContextValueDto;
+    };
 
 export interface ApiErrorResponseDto {
   code: string;
@@ -137,6 +148,47 @@ export interface StatisticsFiltersDto {
   device_id: number | null;
 }
 
+export interface StatisticsSampleImageItemDto {
+  record_id: number;
+  record_no: string;
+  part_id: number;
+  part_code: string;
+  part_name: string;
+  part_category: string | null;
+  device_id: number;
+  device_code: string;
+  device_name: string;
+  image_file_id: number | null;
+  image_file_kind: FileKind | null;
+  image_count: number;
+  preview_url: string | null;
+  uploaded_at: string | null;
+  captured_at: string;
+  effective_result: DetectionResult;
+  review_status: ReviewStatus;
+  defect_type: string | null;
+  defect_desc: string | null;
+}
+
+export interface StatisticsPartImageGroupDto {
+  part_id: number;
+  part_code: string;
+  part_name: string;
+  part_category: string | null;
+  record_count: number;
+  image_count: number;
+  latest_uploaded_at: string | null;
+  items: StatisticsSampleImageItemDto[];
+}
+
+export interface StatisticsSampleGalleryResponseDto {
+  total_record_count: number;
+  total_image_count: number;
+  total_part_count: number;
+  latest_uploaded_at: string | null;
+  groups: StatisticsPartImageGroupDto[];
+}
+
 export interface StatisticsOverviewDto {
   filters: StatisticsFiltersDto;
   summary: SummaryStatisticsDto;
@@ -147,6 +199,7 @@ export interface StatisticsOverviewDto {
   part_quality_ranking: PartQualityItemDto[];
   device_quality_ranking: DeviceQualityItemDto[];
   key_findings: string[];
+  sample_gallery: StatisticsSampleGalleryResponseDto;
   generated_at: string;
 }
 
@@ -169,6 +222,7 @@ export interface StatisticsAIAnalysisResponseDto {
 }
 
 export interface StatisticsExportPdfRequestDto {
+  export_mode: StatisticsPdfExportMode;
   model_profile_id: number | null;
   provider_hint: string | null;
   note: string | null;
@@ -178,6 +232,9 @@ export interface StatisticsExportPdfRequestDto {
   part_id: number | null;
   device_id: number | null;
   include_ai_analysis: boolean;
+  cached_ai_answer?: string | null;
+  cached_ai_provider_hint?: string | null;
+  cached_ai_generated_at?: string | null;
   include_sample_images: boolean;
   sample_image_limit: number;
 }
@@ -189,6 +246,10 @@ export interface PartDto {
   category: string | null;
   description: string | null;
   is_active: boolean;
+  record_count: number;
+  image_count: number;
+  latest_captured_at: string | null;
+  latest_uploaded_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -280,6 +341,10 @@ export interface DetectionRecordDto {
   defect_type: string | null;
   defect_desc: string | null;
   confidence_score: number | null;
+  vision_context: Record<string, StructuredContextValueDto> | null;
+  sensor_context: Record<string, StructuredContextValueDto> | null;
+  decision_context: Record<string, StructuredContextValueDto> | null;
+  device_context: Record<string, StructuredContextValueDto> | null;
   captured_at: string;
   detected_at: string | null;
   uploaded_at: string | null;
@@ -350,6 +415,10 @@ export interface DetectionRecordCreateRequestDto {
   defect_type: string | null;
   defect_desc: string | null;
   confidence_score: number | null;
+  vision_context?: Record<string, StructuredContextValueDto> | null;
+  sensor_context?: Record<string, StructuredContextValueDto> | null;
+  decision_context?: Record<string, StructuredContextValueDto> | null;
+  device_context?: Record<string, StructuredContextValueDto> | null;
   captured_at: string;
   detected_at: string | null;
   uploaded_at?: string | null;
@@ -403,6 +472,10 @@ export interface AIRecordContextDto {
   defect_type: string | null;
   defect_desc: string | null;
   confidence_score: number | null;
+  vision_context: Record<string, StructuredContextValueDto> | null;
+  sensor_context: Record<string, StructuredContextValueDto> | null;
+  decision_context: Record<string, StructuredContextValueDto> | null;
+  device_context: Record<string, StructuredContextValueDto> | null;
   captured_at: string;
   detected_at: string | null;
   uploaded_at: string | null;
