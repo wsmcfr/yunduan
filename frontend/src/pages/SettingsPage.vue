@@ -228,6 +228,20 @@ const activeGateway = computed<AIGatewayModel | null>(() => {
 });
 
 /**
+ * 当前公司里已启用的 AI 网关数量。
+ * 左侧列表区会把它作为概览数字展示，避免只有一张卡时留出大块无意义空白。
+ */
+const enabledGatewayCount = computed(
+  () => gateways.value.filter((gateway) => gateway.isEnabled).length,
+);
+
+/**
+ * 当前选中网关下挂载的模型数量。
+ * 这个数字放在列表概览里，帮助用户在切换详情前先看到当前网关规模。
+ */
+const activeGatewayModelCount = computed(() => activeGateway.value?.models.length ?? 0);
+
+/**
  * 用户管理列表总页数。
  */
 const usersPageCount = computed(() =>
@@ -2347,14 +2361,63 @@ watch(gatewayDialogVisible, (visible) => {
               :key="preset.id"
               class="gateway-preset-card"
             >
-              <div class="gateway-preset-card__body">
-                <strong>{{ preset.title }}</strong>
-                <p class="muted-text">{{ preset.summary }}</p>
-                <ElTag effect="plain" round>{{ gatewayVendorLabels[preset.payload.vendor] }}</ElTag>
+              <div class="gateway-preset-card__header">
+                <div class="gateway-preset-card__title-group">
+                  <strong>{{ preset.title }}</strong>
+                  <span class="gateway-preset-card__alias">{{ preset.payload.name }}</span>
+                </div>
+                <div class="gateway-preset-card__tags">
+                  <ElTag effect="plain" round>
+                    {{ gatewayVendorLabels[preset.payload.vendor] }}
+                  </ElTag>
+                  <ElTag
+                    effect="plain"
+                    round
+                    :type="preset.payload.is_custom ? 'warning' : 'success'"
+                  >
+                    {{ preset.payload.is_custom ? "自定义" : "官方预设" }}
+                  </ElTag>
+                </div>
               </div>
-              <ElButton type="primary" plain @click="openCreateGatewayDialog(preset.id)">
-                用此预设新建
-              </ElButton>
+
+              <div class="gateway-preset-card__body">
+                <p class="gateway-preset-card__summary">{{ preset.summary }}</p>
+
+                <div class="gateway-preset-card__meta">
+                  <div class="gateway-preset-card__meta-item">
+                    <span class="gateway-preset-card__meta-label">基础地址</span>
+                    <strong class="gateway-preset-card__meta-value mono-text">
+                      {{ preset.payload.base_url || "创建时填写" }}
+                    </strong>
+                  </div>
+                  <div class="gateway-preset-card__meta-item">
+                    <span class="gateway-preset-card__meta-label">接入说明</span>
+                    <p class="gateway-preset-card__note">
+                      {{ preset.payload.note || "按实际供应商文档补充协议说明。" }}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="gateway-preset-card__footer">
+                <span class="muted-text">
+                  {{ preset.payload.official_url ? "已附带官方文档地址" : "需要自行补充文档地址" }}
+                </span>
+                <div class="gateway-preset-card__footer-actions">
+                  <ElLink
+                    v-if="preset.payload.official_url"
+                    type="primary"
+                    :href="preset.payload.official_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    查看文档
+                  </ElLink>
+                  <ElButton type="primary" plain @click="openCreateGatewayDialog(preset.id)">
+                    用此预设新建
+                  </ElButton>
+                </div>
+              </div>
             </article>
           </div>
 
@@ -2365,33 +2428,50 @@ watch(gatewayDialogVisible, (visible) => {
                 <span class="muted-text">共 {{ gateways.length }} 个</span>
               </div>
 
+              <div v-if="gateways.length > 0" class="gateway-list__overview">
+                <div class="gateway-list__metric">
+                  <span class="gateway-list__metric-label">已启用</span>
+                  <strong>{{ enabledGatewayCount }}</strong>
+                </div>
+                <div class="gateway-list__metric">
+                  <span class="gateway-list__metric-label">当前模型</span>
+                  <strong>{{ activeGatewayModelCount }}</strong>
+                </div>
+              </div>
+
+              <p v-if="gateways.length > 0" class="gateway-list__hint">
+                左侧只看网关摘要，右侧再展开基础配置、密钥状态和模型明细，避免整页堆满信息。
+              </p>
+
               <div v-if="gateways.length === 0" class="gateway-list__empty">
                 <ElEmpty description="还没有 AI 网关配置" />
               </div>
 
-              <button
-                v-for="gateway in gateways"
-                :key="gateway.id"
-                type="button"
-                class="gateway-summary"
-                :class="{ 'gateway-summary--active': gateway.id === activeGateway?.id }"
-                @click="selectGateway(gateway.id)"
-              >
-                <div class="gateway-summary__head">
-                  <strong>{{ gateway.name }}</strong>
-                  <ElTag :type="gateway.isEnabled ? 'success' : 'info'" effect="dark" round>
-                    {{ gateway.isEnabled ? "启用" : "停用" }}
-                  </ElTag>
-                </div>
-                <div class="gateway-summary__tags">
-                  <ElTag effect="plain" round>{{ gatewayVendorLabels[gateway.vendor] }}</ElTag>
-                  <ElTag effect="plain" round type="info">{{ gateway.models.length }} 个模型</ElTag>
-                </div>
-                <p class="gateway-summary__url">{{ gateway.baseUrl }}</p>
-                <span class="gateway-summary__time">
-                  更新于 {{ formatDateTime(gateway.updatedAt) }}
-                </span>
-              </button>
+              <div v-if="gateways.length > 0" class="gateway-list__items">
+                <button
+                  v-for="gateway in gateways"
+                  :key="gateway.id"
+                  type="button"
+                  class="gateway-summary"
+                  :class="{ 'gateway-summary--active': gateway.id === activeGateway?.id }"
+                  @click="selectGateway(gateway.id)"
+                >
+                  <div class="gateway-summary__head">
+                    <strong>{{ gateway.name }}</strong>
+                    <ElTag :type="gateway.isEnabled ? 'success' : 'info'" effect="dark" round>
+                      {{ gateway.isEnabled ? "启用" : "停用" }}
+                    </ElTag>
+                  </div>
+                  <div class="gateway-summary__tags">
+                    <ElTag effect="plain" round>{{ gatewayVendorLabels[gateway.vendor] }}</ElTag>
+                    <ElTag effect="plain" round type="info">{{ gateway.models.length }} 个模型</ElTag>
+                  </div>
+                  <p class="gateway-summary__url">{{ gateway.baseUrl }}</p>
+                  <span class="gateway-summary__time">
+                    更新于 {{ formatDateTime(gateway.updatedAt) }}
+                  </span>
+                </button>
+              </div>
             </aside>
 
             <section class="gateway-detail">
@@ -2726,25 +2806,118 @@ watch(gatewayDialogVisible, (visible) => {
 }
 
 .gateway-preset-grid {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  /* 预设卡片统一高度，避免不同厂商文案长度把按钮和标签挤乱。 */
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-auto-rows: 1fr;
+  align-items: stretch;
 }
 
 .gateway-preset-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   min-width: 0;
-  padding: 16px;
+  padding: 18px;
   border: 1px solid rgba(149, 184, 223, 0.12);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.025);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at top right, rgba(127, 228, 208, 0.1), transparent 42%),
+    rgba(255, 255, 255, 0.025);
 }
 
-.gateway-preset-card__body {
+.gateway-preset-card__header,
+.gateway-preset-card__footer,
+.gateway-preset-card__tags,
+.gateway-preset-card__footer-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.gateway-preset-card__header,
+.gateway-preset-card__footer {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.gateway-preset-card__title-group,
+.gateway-preset-card__body,
+.gateway-preset-card__meta {
   display: grid;
   gap: 10px;
 }
 
-.gateway-preset-card__body p {
+.gateway-preset-card__title-group {
+  min-width: 0;
+}
+
+.gateway-preset-card__title-group strong {
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.gateway-preset-card__alias,
+.gateway-preset-card__meta-label {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+.gateway-preset-card__tags,
+.gateway-preset-card__footer-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.gateway-preset-card__body {
+  flex: 1;
+  align-content: start;
+}
+
+.gateway-preset-card__summary,
+.gateway-preset-card__body p,
+.gateway-preset-card__note {
   margin: 0;
   line-height: 1.7;
+}
+
+.gateway-preset-card__summary,
+.gateway-preset-card__note {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.gateway-preset-card__summary {
+  min-height: calc(1.7em * 2);
+  color: var(--app-text-secondary);
+}
+
+.gateway-preset-card__meta-item {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid rgba(149, 184, 223, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.gateway-preset-card__meta-value {
+  overflow: hidden;
+  color: var(--app-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.gateway-preset-card__note {
+  min-height: calc(1.7em * 2);
+  color: var(--app-text-secondary);
+}
+
+.gateway-preset-card__footer {
+  margin-top: auto;
+  padding-top: 4px;
 }
 
 .gateway-workspace {
@@ -2754,11 +2927,14 @@ watch(gatewayDialogVisible, (visible) => {
 
 .gateway-list,
 .gateway-detail {
-  min-height: 100%;
   padding: 18px;
   border: 1px solid rgba(149, 184, 223, 0.12);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.02);
+}
+
+.gateway-list {
+  align-content: start;
 }
 
 .gateway-list__header {
@@ -2766,6 +2942,43 @@ watch(gatewayDialogVisible, (visible) => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.gateway-list__overview,
+.gateway-list__items {
+  display: grid;
+  gap: 12px;
+}
+
+.gateway-list__overview {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.gateway-list__metric {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid rgba(149, 184, 223, 0.08);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(127, 228, 208, 0.08), transparent 40%),
+    rgba(255, 255, 255, 0.028);
+}
+
+.gateway-list__metric-label,
+.gateway-list__hint {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.gateway-list__metric strong {
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.gateway-list__hint {
+  margin: 0;
 }
 
 .gateway-list__empty,
@@ -2858,6 +3071,20 @@ watch(gatewayDialogVisible, (visible) => {
   .settings-pagination {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .gateway-preset-card__header,
+  .gateway-preset-card__footer {
+    flex-direction: column;
+  }
+
+  .gateway-preset-card__tags,
+  .gateway-preset-card__footer-actions {
+    justify-content: flex-start;
+  }
+
+  .gateway-list__overview {
+    grid-template-columns: 1fr;
   }
 }
 </style>

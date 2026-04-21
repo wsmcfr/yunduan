@@ -186,6 +186,46 @@ class StatisticsAIAnalysisResponse(BaseModel):
     generated_at: datetime
 
 
+class StatisticsAIChatHistoryMessage(BaseModel):
+    """统计页 AI 多轮追问中的单条历史消息。"""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class StatisticsAIChatRequest(BaseModel):
+    """统计页 AI 多轮追问请求体。"""
+
+    question: str = Field(min_length=1, max_length=2000)
+    model_profile_id: int | None = Field(default=None, ge=1)
+    provider_hint: str | None = Field(default=None, max_length=64)
+    note: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    days: int = Field(default=7, ge=1, le=90)
+    part_id: int | None = Field(default=None, ge=1)
+    device_id: int | None = Field(default=None, ge=1)
+    history: list[StatisticsAIChatHistoryMessage] = Field(default_factory=list)
+
+
+class StatisticsAIChatResponse(BaseModel):
+    """统计页 AI 多轮追问响应体。"""
+
+    status: str
+    answer: str
+    provider_hint: str | None = None
+    generated_at: datetime
+    suggested_questions: list[str]
+
+
+class StatisticsExportConversationMessage(BaseModel):
+    """统计导出时携带的 AI 工作台对话快照。"""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1)
+    created_at: datetime | None = None
+
+
 class StatisticsExportPdfRequest(BaseModel):
     """统计页服务端 PDF 导出请求体。"""
 
@@ -202,5 +242,6 @@ class StatisticsExportPdfRequest(BaseModel):
     cached_ai_answer: str | None = None
     cached_ai_provider_hint: str | None = Field(default=None, max_length=128)
     cached_ai_generated_at: datetime | None = None
+    cached_ai_conversation: list[StatisticsExportConversationMessage] = Field(default_factory=list)
     include_sample_images: bool = True
     sample_image_limit: int = Field(default=4, ge=0, le=8)

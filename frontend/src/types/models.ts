@@ -265,6 +265,10 @@ export interface StatisticsAIAnalysisResponse {
   generatedAt: string;
 }
 
+export interface StatisticsAIChatResponse extends StatisticsAIAnalysisResponse {
+  suggestedQuestions: string[];
+}
+
 export interface PartModel {
   id: number;
   partCode: string;

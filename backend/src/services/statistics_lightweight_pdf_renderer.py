@@ -9,7 +9,11 @@ from math import ceil
 from typing import Any
 
 from src.core.errors import IntegrationError
-from src.schemas.statistics import StatisticsAIAnalysisResponse, StatisticsOverviewResponse
+from src.schemas.statistics import (
+    StatisticsAIAnalysisResponse,
+    StatisticsExportConversationMessage,
+    StatisticsOverviewResponse,
+)
 
 
 @dataclass(slots=True)
@@ -702,11 +706,194 @@ class StatisticsLightweightPdfRenderer:
 
         return current_page_number
 
+    def _draw_ai_conversation_pages(
+        self,
+        *,
+        canvas_obj: Any,
+        colors: Any,
+        pdfmetrics: Any,
+        font_name: str,
+        page_width: float,
+        page_height: float,
+        ai_conversation: list[StatisticsExportConversationMessage],
+        start_page_number: int,
+    ) -> int:
+        """在后续页面绘制 AI 追问记录。
+
+        轻量版不走 HTML 排版，因此这里直接按消息块手工分页。
+        每条消息都会保留角色、时间和正文，避免导出后只剩主分析结论而丢失追问上下文。
+        """
+
+        normalized_messages = [
+            item for item in ai_conversation if item.content.strip()
+        ]
+        if not normalized_messages:
+            return start_page_number
+
+        current_page_number = start_page_number
+        current_y = 0.0
+        page_is_open = False
+        panel_x = 24
+        panel_width = page_width - 48
+        panel_bottom_limit = 54
+        meta_height = 44
+        line_height = 15
+        bottom_padding = 16
+        block_gap = 14
+
+        def open_page() -> None:
+            """打开一页新的追问记录页，并在必要时为上一页补页脚。"""
+
+            nonlocal current_page_number, current_y, page_is_open
+
+            if page_is_open:
+                self._draw_footer(
+                    canvas_obj=canvas_obj,
+                    page_width=page_width,
+                    font_name=font_name,
+                    page_number=current_page_number,
+                )
+                current_page_number += 1
+
+            canvas_obj.showPage()
+            self._draw_page_background(
+                canvas_obj=canvas_obj,
+                page_width=page_width,
+                page_height=page_height,
+            )
+            current_y = self._draw_page_title_block(
+                canvas_obj=canvas_obj,
+                font_name=font_name,
+                title="AI 追问记录",
+                description="这里保留统计页工作台里的后续追问与回答，方便导出后继续回溯分析链路。",
+                page_width=page_width,
+                page_height=page_height,
+            )
+            page_is_open = True
+
+        def resolve_chunk_line_capacity() -> int:
+            """根据当前页剩余空间，计算这一页还能放下多少行消息正文。
+
+            轻量 PDF 没有浏览器排版和自动分页能力，
+            因此这里必须先把“消息头 + 正文 + 底部留白”的高度预算算出来，
+            否则一条超长回复会整块画到页外，导致用户看到“导出没有上传完”。
+            """
+
+            available_height = current_y - panel_bottom_limit
+            available_line_height = available_height - meta_height - bottom_padding
+            if available_line_height <= 0:
+                return 0
+            return max(int(available_line_height // line_height), 1)
+
+        def draw_message_chunk(
+            *,
+            role_label: str,
+            created_at_label: str,
+            lines: list[str],
+            is_continued_chunk: bool,
+            role: str,
+        ) -> None:
+            """绘制当前页中的一段消息内容。
+
+            一条 AI 回复可能被拆成多个 chunk：
+            - 首段保留原始角色信息
+            - 后续段落追加“（续）”提示
+            这样用户翻页时能明确知道这是同一轮回答的续页，而不是新的对话。
+            """
+
+            nonlocal current_y
+
+            effective_lines = lines or [""]
+            block_height = meta_height + len(effective_lines) * line_height + bottom_padding
+            block_y = current_y - block_height
+            fill_color = "#F7FBFF" if role == "assistant" else "#EEF9F4"
+            stroke_color = "#D8E3EF" if role == "assistant" else "#CBEBDD"
+            meta_label = (
+                f"{role_label}（续） | {created_at_label}"
+                if is_continued_chunk
+                else f"{role_label} | {created_at_label}"
+            )
+
+            canvas_obj.setFillColor(colors.HexColor(fill_color))
+            canvas_obj.setStrokeColor(colors.HexColor(stroke_color))
+            canvas_obj.roundRect(
+                panel_x,
+                block_y,
+                panel_width,
+                block_height,
+                12,
+                fill=1,
+                stroke=1,
+            )
+
+            canvas_obj.setFillColor(self.theme.slate)
+            canvas_obj.setFont(font_name, 9)
+            canvas_obj.drawString(
+                panel_x + 14,
+                current_y - 20,
+                meta_label,
+            )
+
+            text_object = canvas_obj.beginText(panel_x + 14, current_y - 38)
+            text_object.setFont(font_name, 10)
+            text_object.setLeading(line_height)
+            text_object.setFillColor(self.theme.navy)
+            for line in effective_lines:
+                text_object.textLine(line)
+            canvas_obj.drawText(text_object)
+
+            current_y = block_y - block_gap
+
+        for item in normalized_messages:
+            role_label = "AI 助理" if item.role == "assistant" else "你"
+            wrapped_lines = self._wrap_text(
+                pdfmetrics=pdfmetrics,
+                text=item.content.strip(),
+                font_name=font_name,
+                font_size=10,
+                max_width=panel_width - 28,
+            )
+            remaining_lines = wrapped_lines or [""]
+            created_at_label = self._format_datetime(item.created_at)
+            chunk_index = 0
+
+            while remaining_lines:
+                if (not page_is_open) or resolve_chunk_line_capacity() <= 0:
+                    open_page()
+
+                chunk_line_capacity = resolve_chunk_line_capacity()
+                if chunk_line_capacity <= 0:
+                    open_page()
+                    chunk_line_capacity = max(resolve_chunk_line_capacity(), 1)
+
+                chunk_lines = remaining_lines[:chunk_line_capacity]
+                remaining_lines = remaining_lines[chunk_line_capacity:]
+                draw_message_chunk(
+                    role_label=role_label,
+                    created_at_label=created_at_label,
+                    lines=chunk_lines,
+                    is_continued_chunk=chunk_index > 0,
+                    role=item.role,
+                )
+                chunk_index += 1
+
+        if page_is_open:
+            self._draw_footer(
+                canvas_obj=canvas_obj,
+                page_width=page_width,
+                font_name=font_name,
+                page_number=current_page_number,
+            )
+            current_page_number += 1
+
+        return current_page_number
+
     def build_pdf(
         self,
         *,
         overview: StatisticsOverviewResponse,
         ai_analysis: StatisticsAIAnalysisResponse | None,
+        ai_conversation: list[StatisticsExportConversationMessage] | None = None,
     ) -> tuple[bytes, str]:
         """构建轻量报表版 PDF 字节流和文件名。"""
 
@@ -843,7 +1030,7 @@ class StatisticsLightweightPdfRenderer:
             page_number=2,
         )
 
-        self._draw_ai_analysis_pages(
+        next_page_number = self._draw_ai_analysis_pages(
             canvas_obj=canvas_obj,
             pdfmetrics=reportlab_modules["pdfmetrics"],
             font_name=font_name,
@@ -851,6 +1038,16 @@ class StatisticsLightweightPdfRenderer:
             page_height=page_height,
             ai_analysis=ai_analysis,
             start_page_number=3,
+        )
+        self._draw_ai_conversation_pages(
+            canvas_obj=canvas_obj,
+            colors=colors,
+            pdfmetrics=reportlab_modules["pdfmetrics"],
+            font_name=font_name,
+            page_width=page_width,
+            page_height=page_height,
+            ai_conversation=ai_conversation or [],
+            start_page_number=next_page_number,
         )
 
         canvas_obj.save()

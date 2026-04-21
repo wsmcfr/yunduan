@@ -18,6 +18,7 @@ from src.repositories.detection_record_repository import DetectionRecordReposito
 from src.schemas.statistics import (
     StatisticsAIAnalysisRequest,
     StatisticsAIAnalysisResponse,
+    StatisticsExportConversationMessage,
     StatisticsExportPdfRequest,
     StatisticsOverviewResponse,
 )
@@ -241,6 +242,23 @@ class StatisticsExportService:
             generated_at=payload.cached_ai_generated_at or datetime.now(timezone.utc),
         )
 
+    def _build_cached_ai_conversation(
+        self,
+        *,
+        payload: StatisticsExportPdfRequest,
+    ) -> list[StatisticsExportConversationMessage]:
+        """复用前端统计 AI 工作台里已经存在的多轮追问记录。
+
+        统计导出不应该为了补 PDF 内容再去重放一次追问链路，
+        因此这里直接消费前端传回来的会话快照，并在服务端做一次空文本清洗。
+        """
+
+        return [
+            item
+            for item in payload.cached_ai_conversation
+            if item.content.strip()
+        ]
+
     def _build_trend_svg(self, *, overview: StatisticsOverviewResponse) -> str:
         """生成趋势曲线的内联 SVG。"""
 
@@ -395,11 +413,45 @@ class StatisticsExportService:
             scope_parts.append(f"设备 ID：{overview.filters.device_id}")
         return " | ".join(scope_parts)
 
+    def _build_ai_conversation_html(
+        self,
+        *,
+        ai_conversation: list[StatisticsExportConversationMessage],
+    ) -> str:
+        """生成视觉版 PDF 中的 AI 多轮追问记录区域。"""
+
+        if not ai_conversation:
+            return "<p class='muted'>当前没有可导出的 AI 追问记录。</p>"
+
+        conversation_items: list[str] = []
+        for item in ai_conversation:
+            role_label = "AI 助理" if item.role == "assistant" else "你"
+            created_at = self._format_datetime(item.created_at)
+            role_modifier = (
+                "conversation-item--assistant"
+                if item.role == "assistant"
+                else "conversation-item--user"
+            )
+            conversation_items.append(
+                f"""
+                <article class="conversation-item {role_modifier}">
+                  <div class="conversation-item__meta">
+                    <strong>{escape(role_label)}</strong>
+                    <span>{escape(created_at)}</span>
+                  </div>
+                  <div class="conversation-item__content">{escape(item.content)}</div>
+                </article>
+                """
+            )
+
+        return f"<div class='conversation-list'>{''.join(conversation_items)}</div>"
+
     def _build_html(
         self,
         *,
         overview: StatisticsOverviewResponse,
         ai_analysis: StatisticsAIAnalysisResponse | None,
+        ai_conversation: list[StatisticsExportConversationMessage],
         sample_images: list[dict[str, str]],
     ) -> str:
         """构造服务端 PDF 渲染所需的完整 HTML。"""
@@ -469,6 +521,9 @@ class StatisticsExportService:
             if ai_analysis is not None
             else "模型：未生成"
         )
+        ai_conversation_html = self._build_ai_conversation_html(
+            ai_conversation=ai_conversation,
+        )
 
         return f"""<!doctype html>
 <html lang="zh-CN">
@@ -536,6 +591,9 @@ class StatisticsExportService:
         border-radius: 16px;
         background: #ffffff;
         padding: 16px 18px;
+        page-break-inside: auto;
+        break-inside: auto;
+        box-decoration-break: clone;
       }}
       .card h3,
       .panel h3,
@@ -626,6 +684,45 @@ class StatisticsExportService:
       }}
       .ai-panel__body {{
         white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        line-height: 1.85;
+      }}
+      .conversation-list {{
+        display: block;
+      }}
+      .conversation-item {{
+        display: block;
+        padding: 14px 16px;
+        margin-bottom: 12px;
+        border-radius: 14px;
+        border: 1px solid #dbe5f0;
+        page-break-inside: auto;
+        break-inside: auto;
+        box-decoration-break: clone;
+      }}
+      .conversation-item:last-child {{
+        margin-bottom: 0;
+      }}
+      .conversation-item--assistant {{
+        background: #f7fbff;
+      }}
+      .conversation-item--user {{
+        background: #eefaf6;
+        border-color: #cdece1;
+      }}
+      .conversation-item__meta {{
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+        color: #6f8298;
+        font-size: 12px;
+      }}
+      .conversation-item__content {{
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
         line-height: 1.85;
       }}
       .sample-card {{
@@ -736,6 +833,12 @@ class StatisticsExportService:
       </section>
 
       <section class="panel">
+        <h3>AI 追问记录</h3>
+        <p class="muted">这里会保留统计页工作台里后续的多轮追问与回答，便于导出后继续回溯分析链路。</p>
+        {ai_conversation_html}
+      </section>
+
+      <section class="panel">
         <h3>COS 样本图像</h3>
         <p class="muted">本节由服务端直接通过 COS 连接抽样读取代表图片并嵌入 PDF，优先使用缩略图以控制导出耗时和 CPU 占用。</p>
         <div class="sample-grid">{sample_images_html}</div>
@@ -797,12 +900,14 @@ class StatisticsExportService:
             device_id=payload.device_id,
         )
         ai_analysis = self._build_ai_analysis(company_id=company_id, payload=payload)
+        ai_conversation = self._build_cached_ai_conversation(payload=payload)
 
         if payload.export_mode == "lightweight":
             # 轻量版走直接绘制链路，不再继续抓 COS 样本图，也不依赖 WeasyPrint。
             return StatisticsLightweightPdfRenderer().build_pdf(
                 overview=overview,
                 ai_analysis=ai_analysis,
+                ai_conversation=ai_conversation,
             )
 
         sample_images = (
@@ -817,6 +922,7 @@ class StatisticsExportService:
         html_text = self._build_html(
             overview=overview,
             ai_analysis=ai_analysis,
+            ai_conversation=ai_conversation,
             sample_images=sample_images,
         )
 

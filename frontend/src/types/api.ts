@@ -398,6 +398,29 @@ export interface StatisticsAIAnalysisResponseDto {
   generated_at: string;
 }
 
+export interface StatisticsAIChatRequestDto {
+  question: string;
+  model_profile_id: number | null;
+  provider_hint: string | null;
+  note: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  days: number;
+  part_id: number | null;
+  device_id: number | null;
+  history: AIChatHistoryMessageDto[];
+}
+
+export interface StatisticsAIChatResponseDto extends StatisticsAIAnalysisResponseDto {
+  suggested_questions: string[];
+}
+
+export interface StatisticsExportConversationMessageDto {
+  role: AIChatRole;
+  content: string;
+  created_at?: string | null;
+}
+
 export interface StatisticsExportPdfRequestDto {
   export_mode: StatisticsPdfExportMode;
   model_profile_id: number | null;
@@ -412,6 +435,7 @@ export interface StatisticsExportPdfRequestDto {
   cached_ai_answer?: string | null;
   cached_ai_provider_hint?: string | null;
   cached_ai_generated_at?: string | null;
+  cached_ai_conversation?: StatisticsExportConversationMessageDto[];
   include_sample_images: boolean;
   sample_image_limit: number;
 }

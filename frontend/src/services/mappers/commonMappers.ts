@@ -26,6 +26,7 @@ import type {
   ReviewRecordDto,
   ReviewStatusDistributionItemDto,
   StatisticsAIAnalysisResponseDto,
+  StatisticsAIChatResponseDto,
   StatisticsFiltersDto,
   StatisticsOverviewDto,
   StatisticsPartImageGroupDto,
@@ -63,6 +64,7 @@ import type {
   ReviewRecordModel,
   ReviewStatusDistributionItem,
   StatisticsAIAnalysisResponse,
+  StatisticsAIChatResponse,
   StatisticsFilters,
   StatisticsOverview,
   StatisticsPartImageGroup,
@@ -440,6 +442,18 @@ export function mapStatisticsAIAnalysisResponseDto(
     answer: dto.answer,
     providerHint: dto.provider_hint,
     generatedAt: dto.generated_at,
+  };
+}
+
+/**
+ * 映射统计页 AI 多轮追问响应 DTO。
+ */
+export function mapStatisticsAIChatResponseDto(
+  dto: StatisticsAIChatResponseDto,
+): StatisticsAIChatResponse {
+  return {
+    ...mapStatisticsAIAnalysisResponseDto(dto),
+    suggestedQuestions: dto.suggested_questions,
   };
 }
 

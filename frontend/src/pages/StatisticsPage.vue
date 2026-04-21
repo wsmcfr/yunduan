@@ -4,6 +4,7 @@ import { ElMessage } from "element-plus";
 
 import MetricCard from "@/components/common/MetricCard.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
+import { useAiAutoScroll } from "@/composables/useAiAutoScroll";
 import StatisticsPdfExportDialog from "@/features/statistics/StatisticsPdfExportDialog.vue";
 import { useStatisticsOverview } from "@/composables/useStatisticsOverview";
 import StatisticsSampleGallerySummarySection from "@/features/statistics/StatisticsSampleGallerySummarySection.vue";
@@ -104,6 +105,9 @@ const {
   pdfExporting,
   overview,
   aiAnalysis,
+  aiQuestion,
+  aiMessages,
+  aiSuggestedQuestions,
   error,
   aiError,
   referenceError,
@@ -112,14 +116,19 @@ const {
   deviceOptions,
   selectedModelId,
   analysisNote,
+  chatSending,
+  streamingAssistantMessageId,
   activeRuntimeModel,
   canUseAiAnalysis,
+  isAiStreaming,
   selectedPartLabel,
   selectedDeviceLabel,
   refresh,
   applyQuickDays,
   resetFilters,
   runAiAnalysis,
+  useSuggestedQuestion,
+  submitAiQuestion,
   exportPng,
   exportPdf,
 } = useStatisticsOverview();
@@ -135,6 +144,17 @@ const hoveredTrendIndex = ref<number | null>(null);
  * 导出前先让用户明确选“视觉版”还是“轻量报表版”。
  */
 const pdfExportDialogVisible = ref(false);
+
+/**
+ * 统计页 AI 多轮消息区的自动跟随滚动控制。
+ * 只要用户还停留在底部，就自动跟随最新流式输出；用户上滑查看旧消息后，暂停自动跟随。
+ */
+const {
+  scrollbarRef: aiMessagesScrollbarRef,
+  handleScroll: handleAiMessagesScroll,
+} = useAiAutoScroll({
+  messages: aiMessages,
+});
 
 /**
  * 当前统计概览中的摘要数据。
@@ -468,13 +488,31 @@ async function handleRunAiAnalysis(): Promise<void> {
 }
 
 /**
- * 导出 PNG 时需要把异常转换成用户可读提示。
+ * 处理统计页 AI 继续追问。
+ */
+async function handleSubmitAiQuestion(): Promise<void> {
+  try {
+    await submitAiQuestion();
+  } catch (caughtError) {
+    ElMessage.error(aiError.value || (caughtError instanceof Error ? caughtError.message : "统计 AI 追问失败"));
+  }
+}
+
+/**
+ * 把推荐追问快速填回输入框。
+ */
+function handleUseSuggestedQuestion(question: string): void {
+  useSuggestedQuestion(question);
+}
+
+/**
+ * 导出海报图时需要把异常转换成用户可读提示。
  */
 async function handleExportPng(): Promise<void> {
   try {
     await exportPng();
   } catch (caughtError) {
-    ElMessage.error(caughtError instanceof Error ? caughtError.message : "统计图片导出失败");
+    ElMessage.error(caughtError instanceof Error ? caughtError.message : "统计海报导出失败");
   }
 }
 
@@ -512,7 +550,7 @@ function handleTrendMouseLeave(): void {
 
       <div class="stats-page__hero-actions">
         <ElButton @click="refresh" :loading="loading">刷新概览</ElButton>
-        <ElButton plain :disabled="!hasOverview" @click="handleExportPng">导出图片</ElButton>
+        <ElButton plain :disabled="!hasOverview" @click="handleExportPng">导出海报图</ElButton>
         <ElButton
           type="primary"
           plain
@@ -1002,9 +1040,9 @@ function handleTrendMouseLeave(): void {
       <section class="app-panel stats-ai-panel">
         <div class="stats-panel__header">
           <div>
-            <strong>AI 批次分析</strong>
+            <strong>AI 统计工作台</strong>
             <p class="muted-text">
-              AI 会直接读取当前统计窗口的摘要、趋势、缺陷分布、零件/设备排行和关键发现，再按更完整的统计审查提示词给出复盘结论。
+              AI 会直接读取当前统计窗口的摘要、趋势、缺陷分布、零件/设备排行和关键发现。你可以先生成一轮批次分析，再继续追问，也可以直接围绕当前窗口提问题。
             </p>
           </div>
           <div class="stats-ai-panel__header-tags">
@@ -1032,7 +1070,7 @@ function handleTrendMouseLeave(): void {
           show-icon
           :closable="false"
           title="当前账号未开通统计 AI 分析"
-          description="你仍然可以查看图表、筛选数据和导出纯统计报表，但无法发起 AI 批次分析。请联系管理员在系统设置中开启该权限。"
+          description="你仍然可以查看图表、筛选数据和导出纯统计报表，但无法发起 AI 分析或继续追问。请联系管理员在系统设置中开启该权限。"
         />
 
         <div class="stats-ai-panel__controls">
@@ -1065,7 +1103,7 @@ function handleTrendMouseLeave(): void {
             <ElButton
               type="primary"
               :loading="aiLoading"
-              :disabled="!canUseAiAnalysis"
+              :disabled="!canUseAiAnalysis || !hasOverview || isAiStreaming"
               @click="handleRunAiAnalysis"
             >
               生成 AI 分析
@@ -1087,43 +1125,147 @@ function handleTrendMouseLeave(): void {
           type="error"
           show-icon
           :closable="false"
-          title="统计 AI 分析失败"
+          title="统计 AI 工作台请求失败"
           :description="aiError"
         />
 
-        <div
-          v-if="aiLoading"
-          class="stats-ai-panel__thinking"
-          aria-label="AI 正在分析当前统计窗口"
-        >
-          <div class="stats-ai-panel__thinking-dots">
-            <span class="stats-ai-panel__thinking-dot" />
-            <span class="stats-ai-panel__thinking-dot" />
-            <span class="stats-ai-panel__thinking-dot" />
-          </div>
-          <p class="muted-text">
-            {{
-              activeRuntimeModel
-                ? `${activeRuntimeModel.displayName} 正在结合统计图表、排行和关键发现生成批次分析，请稍等。`
-                : "AI 正在结合统计图表、排行和关键发现生成批次分析，请稍等。"
-            }}
-          </p>
-        </div>
-
         <div class="stats-ai-panel__result">
           <div class="stats-ai-panel__result-meta">
-            <span>状态：{{ aiAnalysis?.status ?? (aiLoading ? "streaming" : "未生成") }}</span>
+            <span>状态：{{ aiAnalysis?.status ?? (isAiStreaming ? "streaming" : "未生成") }}</span>
             <span>模型：{{ aiAnalysis?.providerHint ?? activeRuntimeModel?.displayName ?? "未生成" }}</span>
             <span>时间：{{ aiAnalysis ? formatDateTime(aiAnalysis.generatedAt) : "未生成" }}</span>
           </div>
 
           <div class="stats-ai-panel__result-body">
             {{
-              aiAnalysis?.answer ||
-              (aiLoading
-                ? "AI 已开始流式输出分析内容，请稍等首段结果返回。"
-                : "当前还没有生成统计 AI 分析。你可以先确认筛选窗口，再选择模型发起分析。")
+              aiAnalysis
+                ? "最近一轮批次分析已经写入下方对话区，可继续追问更具体的问题。导出 PDF 时也会优先复用这轮分析结果。"
+                : isAiStreaming
+                ? "AI 已开始流式输出，本轮回答会直接写入下方对话区。"
+                : "当前还没有生成统计 AI 分析。你可以先生成一轮批次分析，或直接在下方输入问题。"
             }}
+          </div>
+        </div>
+
+        <div class="stats-ai-panel__conversation">
+          <div class="stats-ai-panel__conversation-header">
+            <div>
+              <strong>多轮追问</strong>
+              <p class="muted-text">所有追问都会继续绑定当前统计窗口和上方对话历史，不会脱离当前批次单独回答。</p>
+            </div>
+          </div>
+
+          <ElScrollbar
+            ref="aiMessagesScrollbarRef"
+            class="stats-ai-panel__messages"
+            @scroll="handleAiMessagesScroll"
+          >
+            <div v-if="aiMessages.length > 0" class="stats-ai-panel__message-list">
+              <article
+                v-for="message in aiMessages"
+                :key="message.localId"
+                class="stats-ai-panel__message-row"
+              >
+                <div
+                  :class="[
+                    'stats-ai-panel__message',
+                    message.role === 'assistant'
+                      ? 'stats-ai-panel__message--assistant'
+                      : 'stats-ai-panel__message--user',
+                  ]"
+                >
+                  <div class="stats-ai-panel__message-meta">
+                    <strong>{{ message.role === "assistant" ? "AI 助理" : "你" }}</strong>
+                    <span>
+                      {{
+                        message.role === "assistant" &&
+                        isAiStreaming &&
+                        message.localId === streamingAssistantMessageId
+                          ? message.content
+                            ? "流式输出中"
+                            : "思考中"
+                          : formatDateTime(message.createdAt)
+                      }}
+                    </span>
+                  </div>
+
+                  <div
+                    v-if="
+                      message.role === 'assistant' &&
+                      isAiStreaming &&
+                      message.localId === streamingAssistantMessageId
+                    "
+                    class="stats-ai-panel__thinking-indicator"
+                    aria-label="AI 正在思考"
+                  >
+                    <span class="stats-ai-panel__thinking-dot" />
+                    <span class="stats-ai-panel__thinking-dot" />
+                    <span class="stats-ai-panel__thinking-dot" />
+                  </div>
+
+                  <div class="stats-ai-panel__message-content">
+                    {{ message.content || " " }}
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <ElEmpty
+              v-else
+              description="先生成一轮批次分析，或直接在下方输入问题开始追问。"
+            />
+          </ElScrollbar>
+        </div>
+
+        <div class="stats-ai-panel__question-bank">
+          <span class="muted-text">推荐追问</span>
+          <div class="stats-ai-panel__question-bank-actions">
+            <ElButton
+              v-for="question in aiSuggestedQuestions"
+              :key="question"
+              size="small"
+              plain
+              round
+              @click="handleUseSuggestedQuestion(question)"
+            >
+              {{ question }}
+            </ElButton>
+          </div>
+        </div>
+
+        <ElInput
+          v-model="aiQuestion"
+          type="textarea"
+          :rows="4"
+          resize="none"
+          :disabled="!canUseAiAnalysis"
+          placeholder="继续问当前统计窗口的问题，例如：这批次更像设备异常还是材料批次异常？为什么这样判断？"
+          @keydown.ctrl.enter.prevent="handleSubmitAiQuestion"
+        />
+
+        <div class="stats-ai-panel__submit-bar">
+          <div class="stats-ai-panel__submit-meta">
+            <span class="muted-text">按 Ctrl + Enter 发送。追问会自动带上当前统计窗口和上方对话历史。</span>
+            <span class="muted-text">
+              {{
+                !canUseAiAnalysis
+                  ? "当前账号未开通 AI 分析权限。"
+                  : activeRuntimeModel
+                  ? `当前追问模型：${activeRuntimeModel.displayName} / ${activeRuntimeModel.gatewayName}`
+                  : "未选择模型时，后端只会返回预留提示。"
+              }}
+            </span>
+          </div>
+
+          <div class="stats-ai-panel__submit-actions">
+            <ElButton
+              type="primary"
+              :loading="chatSending"
+              :disabled="!canUseAiAnalysis || !aiQuestion.trim() || isAiStreaming"
+              @click="handleSubmitAiQuestion"
+            >
+              发送追问
+            </ElButton>
           </div>
         </div>
       </section>
@@ -1152,6 +1294,9 @@ function handleTrendMouseLeave(): void {
 .stats-panel__header,
 .stats-ai-panel__header-tags,
 .stats-ai-panel__actions,
+.stats-ai-panel__conversation-header,
+.stats-ai-panel__submit-bar,
+.stats-ai-panel__submit-actions,
 .stats-page__hero-actions,
 .stats-ranking__meta,
 .stats-ranking__summary,
@@ -1164,6 +1309,8 @@ function handleTrendMouseLeave(): void {
 .stats-filter-card__header,
 .stats-panel__header,
 .stats-ai-panel__actions,
+.stats-ai-panel__conversation-header,
+.stats-ai-panel__submit-bar,
 .stats-ranking__meta,
 .stats-distribution-card__item {
   align-items: flex-start;
@@ -1210,7 +1357,9 @@ function handleTrendMouseLeave(): void {
 .stats-ranking,
 .stats-ai-panel__controls,
 .stats-ai-panel__result,
-.stats-ai-panel__thinking {
+.stats-ai-panel__conversation,
+.stats-ai-panel__question-bank,
+.stats-ai-panel__submit-meta {
   display: grid;
   gap: 18px;
 }
@@ -1497,21 +1646,9 @@ function handleTrendMouseLeave(): void {
   padding-top: 16px;
 }
 
-.stats-ai-panel__thinking {
-  padding: 22px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(149, 184, 223, 0.12);
-}
-
-.stats-ai-panel__thinking-dots {
-  display: flex;
-  gap: 8px;
-}
-
 .stats-ai-panel__thinking-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
   background: rgba(127, 228, 208, 0.92);
   animation: stats-ai-thinking 1.2s infinite ease-in-out;
@@ -1545,6 +1682,104 @@ function handleTrendMouseLeave(): void {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--app-text);
+}
+
+.stats-ai-panel__conversation {
+  padding: 22px;
+  border-radius: 18px;
+  border: 1px solid rgba(149, 184, 223, 0.1);
+  background: rgba(255, 255, 255, 0.02);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.stats-ai-panel__conversation-header p {
+  margin: 8px 0 0;
+  line-height: 1.7;
+}
+
+.stats-ai-panel__messages {
+  min-height: 240px;
+  max-height: min(58vh, 720px);
+  height: auto;
+  padding-right: 6px;
+}
+
+.stats-ai-panel__message-list {
+  display: grid;
+  gap: 14px;
+}
+
+.stats-ai-panel__message-row {
+  display: flex;
+}
+
+.stats-ai-panel__message {
+  max-width: 90%;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+}
+
+.stats-ai-panel__message--assistant {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.stats-ai-panel__message--user {
+  margin-left: auto;
+  background: rgba(47, 182, 162, 0.12);
+  border-color: rgba(47, 182, 162, 0.22);
+}
+
+.stats-ai-panel__message-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--app-text-secondary);
+}
+
+.stats-ai-panel__message-content {
+  line-height: 1.85;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--app-text);
+}
+
+.stats-ai-panel__thinking-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stats-ai-panel__question-bank {
+  gap: 10px;
+}
+
+.stats-ai-panel__question-bank-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.stats-ai-panel__submit-bar {
+  gap: 16px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(149, 184, 223, 0.12);
+}
+
+.stats-ai-panel__submit-meta {
+  gap: 6px;
+}
+
+.stats-ai-panel__submit-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+:deep(.stats-ai-panel__question-bank-actions .el-button) {
+  margin-left: 0;
 }
 
 @keyframes stats-ai-thinking {
@@ -1589,6 +1824,8 @@ function handleTrendMouseLeave(): void {
   .stats-panel__header,
   .stats-ai-panel__header-tags,
   .stats-ai-panel__actions,
+  .stats-ai-panel__conversation-header,
+  .stats-ai-panel__submit-bar,
   .stats-ranking__meta,
   .stats-distribution-card__item {
     flex-direction: column;
@@ -1607,6 +1844,10 @@ function handleTrendMouseLeave(): void {
   .stats-distribution-card__donut {
     width: 164px;
     height: 164px;
+  }
+
+  .stats-ai-panel__message {
+    max-width: 100%;
   }
 }
 </style>

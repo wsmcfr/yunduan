@@ -443,6 +443,89 @@ class AIReviewClient:
             ]
         )
 
+    def _build_statistics_chat_system_instruction(self, *, model_context: dict[str, Any]) -> str:
+        """构造统计页多轮追问专用系统提示词。"""
+
+        model_line = (
+            f"当前运行模型：{model_context['display_name']} / {model_context['model_identifier']}；"
+            f"协议：{model_context['protocol_type']}；网关：{model_context['gateway_name']}。"
+        )
+        return "\n".join(
+            [
+                "你是工业缺陷检测系统里的统计复盘追问助理。",
+                "你只能围绕当前这一个统计窗口、当前筛选条件以及当前会话历史回答，不得跳出范围泛泛而谈。",
+                "回答必须使用中文，并且要让现场质检员、产线负责人和普通管理人员都能看懂。",
+                "如果用户的问题聚焦某一个维度，例如趋势、缺陷类型、零件、设备、待审核积压或样本量，你要优先直接回答这一维度，再补充它对整体判断的影响。",
+                "如果用户的问题比较宽泛，你要先给结论，再解释关键数据依据、风险边界和后续动作。",
+                "你必须始终检查并说明：当前样本量是否足够、筛选范围是否会放大局部异常、待审核数量是否会影响结论稳定性、原因判断哪些只是推断。",
+                "凡是明确来自统计快照的数据，要当作事实陈述；凡是对原因的解释，都必须标注为推断、倾向或可能原因。",
+                "如果数据不足、窗口过短、筛选条件过窄或当前问题超出统计快照可支撑的范围，必须直接指出限制，不能编造。",
+                "输出结构固定为：1. 直接回答；2. 关键数据依据；3. 风险与不确定性；4. 建议动作或后续观察点。",
+                model_line,
+            ]
+        )
+
+    def _build_statistics_chat_user_prompt(
+        self,
+        *,
+        question: str,
+        note: str | None,
+        statistics_context: dict[str, Any],
+    ) -> str:
+        """构造统计页多轮追问的用户提示词。"""
+
+        analysis_note = (note or "").strip()
+        note_block = f"补充关注点：{analysis_note}" if analysis_note else "补充关注点：无"
+        return "\n\n".join(
+            [
+                "请继续围绕下面这份统计报告回答用户追问，不要脱离当前统计窗口。",
+                "如果当前问题只覆盖某一部分，请先针对该问题直接作答，再补充它对整体批次判断的影响。",
+                "如果问题涉及设备责任、零件风险、缺陷集中、审核积压或时间趋势，请明确说明判断依据来自哪些统计字段，而不是只给结论。",
+                "如果原因只能推断，必须说明这是推断，不得写成已经验证的事实。",
+                note_block,
+                "统计报告快照：",
+                json.dumps(statistics_context, ensure_ascii=False, indent=2),
+                f"用户问题：{question.strip()}",
+            ]
+        )
+
+    def _build_statistics_suggested_questions(
+        self,
+        *,
+        statistics_context: dict[str, Any],
+    ) -> list[str]:
+        """根据统计快照生成下一轮推荐追问。"""
+
+        suggestions = [
+            "这批数据里现在最值得优先处理的风险点是什么？",
+            "从现有统计看，更像是设备侧问题还是零件批次问题？",
+            "当前待审核数量会不会掩盖真实良率？",
+            "还需要补哪些数据，才能把当前结论说得更稳？",
+        ]
+
+        defect_distribution = statistics_context.get("defect_distribution")
+        if isinstance(defect_distribution, list) and defect_distribution:
+            top_defect = defect_distribution[0]
+            defect_type = str(top_defect.get("defect_type") or "").strip()
+            if defect_type:
+                suggestions.insert(0, f"围绕“{defect_type}”继续看，当前最该先排查什么？")
+
+        part_ranking = statistics_context.get("part_quality_ranking")
+        if isinstance(part_ranking, list) and part_ranking:
+            top_part = part_ranking[0]
+            part_name = str(top_part.get("part_name") or "").strip()
+            if part_name:
+                suggestions.append(f"{part_name} 这一类零件为什么会排到当前风险前列？")
+
+        device_ranking = statistics_context.get("device_quality_ranking")
+        if isinstance(device_ranking, list) and device_ranking:
+            top_device = device_ranking[0]
+            device_name = str(top_device.get("device_name") or "").strip()
+            if device_name:
+                suggestions.append(f"{device_name} 这台设备的异常更像采集问题还是实际质量问题？")
+
+        return suggestions[:4]
+
     def _resolve_visual_source_url(self, *, file_object: dict[str, Any]) -> str | None:
         """解析文件对象可用于后端抓取字节流的来源地址。"""
 
@@ -1749,6 +1832,56 @@ class AIReviewClient:
             history=[],
             user_prompt=user_prompt,
             image_assets=[],
+        )
+
+    def stream_statistics_chat(
+        self,
+        *,
+        provider_hint: str | None,
+        question: str,
+        note: str | None,
+        history: list[dict[str, str]],
+        statistics_context: dict[str, Any],
+        model_context: dict[str, Any],
+    ) -> Iterator[str]:
+        """基于统计快照和会话历史逐片段返回追问结果。"""
+
+        logger.info(
+            "ai_review.statistics_chat_stream event=ai_review.statistics_chat_stream provider_hint=%s history_size=%s",
+            provider_hint or "",
+            len(history),
+        )
+
+        normalized_history = self._normalize_history(
+            history=history,
+            current_question=question,
+        )
+        system_instruction = self._build_statistics_chat_system_instruction(
+            model_context=model_context,
+        )
+        user_prompt = self._build_statistics_chat_user_prompt(
+            question=question,
+            note=note,
+            statistics_context=statistics_context,
+        )
+        yield from self._stream_protocol_text(
+            model_context=model_context,
+            system_instruction=system_instruction,
+            history=normalized_history,
+            user_prompt=user_prompt,
+            # 统计追问仍然只围绕聚合数据，不附带单条图像。
+            image_assets=[],
+        )
+
+    def build_suggested_questions_for_statistics(
+        self,
+        *,
+        statistics_context: dict[str, Any],
+    ) -> list[str]:
+        """向外部暴露统计页推荐追问列表。"""
+
+        return self._build_statistics_suggested_questions(
+            statistics_context=statistics_context,
         )
 
     def stream_chat_about_record(

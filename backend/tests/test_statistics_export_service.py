@@ -21,6 +21,7 @@ from src.schemas.statistics import (
     ResultDistributionItem,
     ReviewStatusDistributionItem,
     StatisticsAIAnalysisResponse,
+    StatisticsExportConversationMessage,
     StatisticsExportPdfRequest,
     StatisticsFiltersResponse,
     StatisticsOverviewResponse,
@@ -412,7 +413,7 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
             sample_image_limit=0,
         )
 
-        ai_analysis = service._build_ai_analysis(payload=payload)
+        ai_analysis = service._build_ai_analysis(company_id=1, payload=payload)
 
         self.assertIsNotNone(ai_analysis)
         self.assertEqual(ai_analysis.answer, "这是前端已经生成好的批次分析结论。")
@@ -451,15 +452,72 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
             sample_image_limit=0,
         )
 
-        pdf_bytes, filename = service.build_pdf(payload)
+        pdf_bytes, filename = service.build_pdf(company_id=1, payload=payload)
 
         self.assertEqual(pdf_bytes, b"%PDF-lightweight")
         self.assertEqual(filename, "statistics-lightweight-report.pdf")
         renderer_instance.build_pdf.assert_called_once_with(
             overview=fake_overview,
             ai_analysis=fake_ai_analysis,
+            ai_conversation=[],
         )
         service._load_sample_images.assert_not_called()  # type: ignore[attr-defined]
+
+    @patch("src.services.statistics_export_service.StatisticsLightweightPdfRenderer")
+    def test_build_pdf_passes_cached_ai_conversation_to_lightweight_renderer(
+        self,
+        lightweight_renderer_cls: Mock,
+    ) -> None:
+        """验证轻量版 PDF 会把前端缓存的多轮追问快照继续传给渲染器。"""
+
+        service = self.build_service()
+        fake_overview = Mock(name="overview")
+        fake_ai_analysis = Mock(name="ai_analysis")
+        service.statistics_service.get_overview = Mock(return_value=fake_overview)  # type: ignore[method-assign]
+        service._build_ai_analysis = Mock(return_value=fake_ai_analysis)  # type: ignore[method-assign]
+        renderer_instance = lightweight_renderer_cls.return_value
+        renderer_instance.build_pdf.return_value = (b"%PDF-lightweight", "statistics-lightweight-report.pdf")
+
+        payload = StatisticsExportPdfRequest(
+            export_mode="lightweight",
+            model_profile_id=None,
+            provider_hint="DeepSeek 官方",
+            note=None,
+            start_date=None,
+            end_date=None,
+            days=14,
+            part_id=None,
+            device_id=None,
+            include_ai_analysis=True,
+            cached_ai_answer="批次主分析。",
+            cached_ai_provider_hint="DeepSeek 官方",
+            cached_ai_generated_at=datetime(2026, 4, 21, 9, 0, 0, tzinfo=timezone.utc),
+            cached_ai_conversation=[
+                StatisticsExportConversationMessage(
+                    role="user",
+                    content="为什么这批次风险偏高？",
+                    created_at=datetime(2026, 4, 21, 9, 1, 0, tzinfo=timezone.utc),
+                ),
+                StatisticsExportConversationMessage(
+                    role="assistant",
+                    content="因为不良与待确认集中在同一类冲压件上。",
+                    created_at=datetime(2026, 4, 21, 9, 1, 10, tzinfo=timezone.utc),
+                ),
+            ],
+            include_sample_images=False,
+            sample_image_limit=0,
+        )
+
+        service.build_pdf(company_id=1, payload=payload)
+
+        renderer_instance.build_pdf.assert_called_once()
+        renderer_call_kwargs = renderer_instance.build_pdf.call_args.kwargs
+        self.assertEqual(len(renderer_call_kwargs["ai_conversation"]), 2)
+        self.assertEqual(renderer_call_kwargs["ai_conversation"][0].role, "user")
+        self.assertEqual(
+            renderer_call_kwargs["ai_conversation"][1].content,
+            "因为不良与待确认集中在同一类冲压件上。",
+        )
 
     def test_lightweight_renderer_reports_missing_reportlab_dependency(self) -> None:
         """验证轻量版渲染器在缺少 reportlab 时能抛出稳定的集成错误。"""
@@ -514,6 +572,7 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
             pdf_bytes, filename = renderer.build_pdf(
                 overview=self.build_statistics_overview(),
                 ai_analysis=None,
+                ai_conversation=[],
             )
 
         self.assertEqual(pdf_bytes, b"%PDF-fake")
@@ -539,7 +598,109 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
                     provider_hint="DeepSeek 官方",
                     generated_at=datetime(2026, 4, 21, 9, 0, 0, tzinfo=timezone.utc),
                 ),
+                ai_conversation=[],
             )
 
         self.assertEqual(holder["canvas"].show_page_calls, 2)
         self.assertIn("AI 批次分析全文", holder["canvas"].drawn_strings)
+
+    def test_lightweight_renderer_places_ai_conversation_after_analysis_pages(self) -> None:
+        """验证 AI 追问记录会从后续页面开始单独生成，而不是丢失在导出链路里。"""
+
+        renderer = StatisticsLightweightPdfRenderer()
+        fake_modules, holder = self.build_fake_reportlab_modules()
+
+        with (
+            patch.object(renderer, "_load_reportlab", return_value=fake_modules),
+            patch.object(renderer, "_ensure_font_registered", return_value="FakeFont"),
+        ):
+            renderer.build_pdf(
+                overview=self.build_statistics_overview(),
+                ai_analysis=StatisticsAIAnalysisResponse(
+                    status="completed",
+                    answer="这是统计 AI 的简要批次结论。",
+                    provider_hint="DeepSeek 官方",
+                    generated_at=datetime(2026, 4, 21, 9, 0, 0, tzinfo=timezone.utc),
+                ),
+                ai_conversation=[
+                    StatisticsExportConversationMessage(
+                        role="user",
+                        content="这批次最该先查哪里？",
+                        created_at=datetime(2026, 4, 21, 9, 1, 0, tzinfo=timezone.utc),
+                    ),
+                    StatisticsExportConversationMessage(
+                        role="assistant",
+                        content="建议先看冲压毛刺和设备 3 的治具稳定性。",
+                        created_at=datetime(2026, 4, 21, 9, 1, 6, tzinfo=timezone.utc),
+                    ),
+                ],
+            )
+
+        self.assertEqual(holder["canvas"].show_page_calls, 3)
+        self.assertIn("AI 追问记录", holder["canvas"].drawn_strings)
+        self.assertIn("这批次最该先查哪里？", holder["canvas"].drawn_strings)
+
+    def test_lightweight_renderer_splits_long_ai_message_across_pages(self) -> None:
+        """验证超长 AI 回复会自动续页，而不是在轻量 PDF 里被截断。"""
+
+        renderer = StatisticsLightweightPdfRenderer()
+        fake_modules, holder = self.build_fake_reportlab_modules()
+        long_answer = (
+            ("这是需要跨页保留的长段分析内容，用于验证轻量 PDF 的 AI 追问续页能力。" * 220)
+            + "\n最后结论：这一句必须出现在导出的最后页。"
+        )
+
+        with (
+            patch.object(renderer, "_load_reportlab", return_value=fake_modules),
+            patch.object(renderer, "_ensure_font_registered", return_value="FakeFont"),
+        ):
+            renderer.build_pdf(
+                overview=self.build_statistics_overview(),
+                ai_analysis=StatisticsAIAnalysisResponse(
+                    status="completed",
+                    answer="这是统计 AI 的简要批次结论。",
+                    provider_hint="DeepSeek 官方",
+                    generated_at=datetime(2026, 4, 21, 9, 0, 0, tzinfo=timezone.utc),
+                ),
+                ai_conversation=[
+                    StatisticsExportConversationMessage(
+                        role="assistant",
+                        content=long_answer,
+                        created_at=datetime(2026, 4, 21, 9, 1, 6, tzinfo=timezone.utc),
+                    ),
+                ],
+            )
+
+        self.assertGreaterEqual(holder["canvas"].show_page_calls, 4)
+        self.assertTrue(
+            any("AI 助理（续）" in item for item in holder["canvas"].drawn_strings),
+        )
+        self.assertIn("最后结论：这一句必须出现在导出的最后页。", holder["canvas"].drawn_strings)
+
+    def test_visual_pdf_html_allows_long_ai_conversation_to_split_across_pages(self) -> None:
+        """验证视觉版 HTML 会允许长追问内容跨页，而不是被整块卡片截断。"""
+
+        service = self.build_service()
+        html = service._build_html(
+            overview=self.build_statistics_overview(),
+            ai_analysis=StatisticsAIAnalysisResponse(
+                status="completed",
+                answer="这是统计 AI 的简要批次结论。",
+                provider_hint="DeepSeek 官方",
+                generated_at=datetime(2026, 4, 21, 9, 0, 0, tzinfo=timezone.utc),
+            ),
+            ai_conversation=[
+                StatisticsExportConversationMessage(
+                    role="assistant",
+                    content="这是用于验证视觉版跨页样式的超长追问内容。",
+                    created_at=datetime(2026, 4, 21, 9, 1, 6, tzinfo=timezone.utc),
+                ),
+            ],
+            sample_images=[],
+        )
+
+        self.assertIn(".conversation-item {", html)
+        self.assertIn("page-break-inside: auto;", html)
+        self.assertIn("break-inside: auto;", html)
+        self.assertIn("word-break: break-word;", html)
+        self.assertNotIn("break-inside: avoid;", html)

@@ -4,6 +4,7 @@ import { ElMessage } from "element-plus";
 import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
 
 import AppDialog from "@/components/common/AppDialog.vue";
+import { useAiAutoScroll } from "@/composables/useAiAutoScroll";
 import { ApiClientError } from "@/services/api/client";
 import { streamAiChat } from "@/services/api/records";
 import { fetchRuntimeAIModels } from "@/services/api/settings";
@@ -24,6 +25,10 @@ import {
   resolvePreferredRuntimeModelId,
   setStoredPreferredRuntimeModelId,
 } from "@/utils/aiModelSelection";
+import {
+  AI_CHAT_QUESTION_MAX_CHARACTERS,
+  buildAiChatHistoryPayload,
+} from "@/utils/aiChatHistory";
 import {
   buildAiPreviewUrl,
   createAiOpeningMessage,
@@ -137,6 +142,18 @@ const suggestedQuestions = ref<string[]>([]);
  * 当前轮 AI 回答实际引用到的文件对象。
  */
 const referencedFiles = ref<AIContextFile[]>([]);
+
+/**
+ * 多轮消息区的自动跟随滚动控制。
+ * 默认跟随最新内容；用户手动上滑查看旧消息后，暂停自动跟随，直到再次滑回底部。
+ */
+const {
+  scrollbarRef: messagesScrollbarRef,
+  handleScroll: handleMessagesScroll,
+  resetAutoScroll: resetMessagesAutoScroll,
+} = useAiAutoScroll({
+  messages,
+});
 
 /**
  * 当前选中的预览文件编号。
@@ -330,6 +347,7 @@ function resetDialogState(): void {
   chatErrorMessage.value = "";
   runtimeModelsError.value = "";
   cleanupVoiceInput();
+  resetMessagesAutoScroll();
 
   if (!props.record) {
     messages.value = [];
@@ -637,11 +655,23 @@ async function submitQuestion(): Promise<void> {
     return;
   }
 
+  /**
+   * 当前轮问题不做静默截断，超过后端上限时直接提示用户收缩问题范围。
+   * 这样可以避免用户误以为自己发出去的是完整问题。
+   */
+  if (normalizedQuestion.length > AI_CHAT_QUESTION_MAX_CHARACTERS) {
+    ElMessage.warning(
+      `单次提问请控制在 ${AI_CHAT_QUESTION_MAX_CHARACTERS} 个字符以内，再重新发送。`,
+    );
+    return;
+  }
+
   chatErrorMessage.value = "";
   abortActiveChatStream();
+  const previousMessages = [...messages.value];
 
   const nextMessages: AIChatMessage[] = [
-    ...messages.value,
+    ...previousMessages,
     createChatMessage("user", normalizedQuestion),
   ];
   const assistantMessage = createChatMessage("assistant", "");
@@ -661,10 +691,11 @@ async function submitQuestion(): Promise<void> {
       question: normalizedQuestion,
       model_profile_id: selectedModelId.value,
       provider_hint: activeRuntimeModel.value?.displayName ?? null,
-      history: nextMessages.map((item) => ({
-        role: item.role,
-        content: item.content,
-      })),
+      /**
+       * 当前问题已经走 `question` 字段，历史里只保留上一轮及更早上下文。
+       * 同时统一裁剪长消息，避免历史内容过长导致 422。
+       */
+      history: buildAiChatHistoryPayload(previousMessages),
     }, {
       onMeta: (responseDto) => {
         const response = mapAIChatResponseDto(responseDto);
@@ -975,7 +1006,11 @@ onBeforeUnmount(() => {
               class="ai-chat__inline-alert"
             />
 
-            <ElScrollbar class="ai-chat__messages">
+            <ElScrollbar
+              ref="messagesScrollbarRef"
+              class="ai-chat__messages"
+              @scroll="handleMessagesScroll"
+            >
               <div class="ai-chat__message-list">
                 <article
                   v-for="(message, index) in messages"

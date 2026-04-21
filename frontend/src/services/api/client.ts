@@ -20,6 +20,27 @@ export class ApiClientError extends Error {
 }
 
 /**
+ * 把 FastAPI 422 的字段路径和原始英文校验文案翻译成更贴近业务语境的提示。
+ * 这样前端展示给用户时，不会直接暴露 `body.history.0.content` 这类底层字段细节。
+ */
+function buildReadableValidationMessage(fieldPath: string, rawMessage: string): string {
+  if (
+    /^body\.history\.\d+\.content$/.test(fieldPath)
+    && rawMessage.includes("at most 4000 characters")
+  ) {
+    return "对话历史过长，系统已无法继续带上完整上下文，请缩短问题或刷新后重试。";
+  }
+
+  if (fieldPath === "body.question" && rawMessage.includes("at most 2000 characters")) {
+    return "当前提问过长，请控制在 2000 个字符以内后再发送。";
+  }
+
+  return fieldPath
+    ? `请求参数无效：${fieldPath}，${rawMessage || "请检查输入。"}`
+    : `请求参数无效：${rawMessage || "请检查输入。"}`;
+}
+
+/**
  * 把后端错误响应归一化成前端可展示的消息结构。
  * FastAPI 默认的 422 校验错误只有 `detail`，没有 `message`，这里统一补成人能看懂的提示。
  */
@@ -45,11 +66,10 @@ function normalizeApiErrorPayload(
       loc?: unknown[];
     };
     const fieldPath = Array.isArray(firstDetail?.loc) ? firstDetail.loc.join(".") : "";
+    const rawMessage = firstDetail?.msg ?? "请检查输入。";
     return {
       ...normalizedPayload,
-      message: fieldPath
-        ? `请求参数无效：${fieldPath}，${firstDetail?.msg ?? "请检查输入。"}`
-        : `请求参数无效：${firstDetail?.msg ?? "请检查输入。"}`,
+      message: buildReadableValidationMessage(fieldPath, rawMessage),
     };
   }
 

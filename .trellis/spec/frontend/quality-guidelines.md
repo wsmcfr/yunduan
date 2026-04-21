@@ -28,6 +28,7 @@ The web app should preserve those strengths.
 | Contracts | DTO mapping is explicit when backend shape differs from UI shape |
 | Empty/error/loading states | Every data-driven page handles them deliberately |
 | Reuse | Shared labels, routes, statuses, and endpoint paths are not duplicated blindly |
+| Visual balance | The page looks intentional at common zoom levels, without broken symmetry, oversized blank zones, or mismatched card/action alignment |
 
 ---
 
@@ -111,6 +112,27 @@ The web app should preserve those strengths.
 | Forgetting empty/error states while focusing only on the success path | Users lose trust quickly |
 | Repeating status text and badge logic in every page | Causes inconsistent UI behavior |
 | Shipping real production credentials in login helper copy | Exposes operator secrets through public frontend assets |
+| Letting one sparse side panel stretch to the full height of a dense detail area without meaningful filler content | Creates a large empty block that users perceive as unfinished or visually broken |
+
+### Convention: Visual QA Is Part of Done
+
+Frontend work is not done when the data is merely visible; it is done when the composition also looks deliberate and readable.
+
+Required visual QA pass:
+
+- inspect the changed page at `100%`, `125%`, and `150%` browser zoom
+- inspect at least one narrow layout around `900px` width
+- verify repeated cards or action panels align consistently when they are presented as one group
+- verify sparse panels do not leave abnormal empty slabs beside dense panels
+- verify the page uses an aesthetic appropriate to the scenario:
+  - dashboards should emphasize hierarchy and storytelling
+  - settings/admin pages should emphasize order, symmetry, and scan speed
+  - review/detail pages should emphasize evidence readability and action focus
+
+Why:
+
+- many user complaints that sound like “layout bug” are actually failures of visual balance, not failures of data binding
+- symmetry, spacing, and proportion are part of perceived quality in the same way loading and empty states are part of behavioral quality
 
 ---
 

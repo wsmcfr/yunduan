@@ -187,6 +187,63 @@ Why:
 - browser zoom changes expose the problem quickly: the page shrinks, but the evidence image still feels oversized
 - `contain` preserves the whole part shape, which is more important than edge-to-edge filling for review and audit pages
 
+### Convention: Visual Balance and Context-Specific Aesthetics
+
+Production pages must optimize for human visual comfort, not only for data density.
+
+Implementation contract:
+
+- keep a clear visual axis in each section; cards in the same row should align by top edge and usually by bottom action area as well
+- avoid accidental asymmetry caused by one card growing with text while neighboring cards keep short content; use equal-height cards, clamped text, or separated header/body/footer regions when the cards are meant to look like one set
+- do not stretch a sparse summary column to the full height of a dense detail pane unless that extra height is intentionally filled with overview metrics, helper copy, or secondary navigation
+- pick the aesthetic language by scenario instead of forcing one layout style everywhere:
+  - dashboards may be more expressive and visual
+  - settings and admin pages should prioritize order, symmetry, and scan efficiency
+  - review workspaces should prioritize evidence visibility and action clarity
+- reduce dead whitespace that looks like a layout bug; if one panel has much less content than its neighbor, prefer natural height plus a small overview block instead of a large empty slab
+- check layout at common zoom and viewport states before shipping: `100%`, `125%`, `150%`, and a narrow breakpoint around `900px`
+
+Example:
+
+```vue
+<style scoped>
+.gateway-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-auto-rows: 1fr;
+}
+
+.gateway-preset-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.gateway-preset-card__body {
+  flex: 1;
+}
+
+.gateway-preset-card__footer {
+  margin-top: auto;
+}
+
+.gateway-workspace {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.gateway-list {
+  align-content: start;
+}
+</style>
+```
+
+Why:
+
+- symmetry makes repeated management cards feel intentional rather than patched together
+- context-specific density prevents admin screens from looking like dashboards and prevents dashboards from feeling lifeless
+- natural-height side panels avoid the common “large empty column” defect that users read as broken design instead of deliberate whitespace
+
 ---
 
 ## Accessibility

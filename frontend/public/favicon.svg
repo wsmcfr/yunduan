@@ -1,15 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="YunDuan">
-  <defs>
-    <linearGradient id="yd-gradient" x1="10%" x2="90%" y1="10%" y2="90%">
-      <stop offset="0%" stop-color="#0f766e" />
-      <stop offset="100%" stop-color="#2563eb" />
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="16" fill="#081225" />
-  <path
-    d="M15 18h10l7 13 7-13h10L37 39v9h-10v-9L15 18Z"
-    fill="url(#yd-gradient)"
-  />
-  <circle cx="48" cy="48" r="7" fill="#f8fafc" fill-opacity="0.92" />
-  <path d="M46 48.5 48.2 50.7 52 46.8" fill="none" stroke="#081225" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="第九届嵌入式芯片与系统设计竞赛">
+  <rect width="64" height="64" rx="16" fill="#f4f8fd" />
+  <g fill="none" stroke="#2d5f90" stroke-linecap="round" stroke-width="2.3">
+    <path d="M22 14V7M28 14V7M34 14V7M40 14V7M46 14V7" />
+    <path d="M22 57V50M28 57V50M34 57V50M40 57V50M46 57V50" />
+    <path d="M14 22H7M14 28H7M14 34H7M14 40H7M14 46H7" />
+    <path d="M57 22H50M57 28H50M57 34H50M57 40H50M57 46H50" />
+    <rect x="14" y="14" width="36" height="36" rx="6.5" />
+  </g>
+  <rect x="18" y="18" width="28" height="28" rx="4" fill="#fdfefe" />
+  <text x="25" y="37" fill="#2d5f90" font-size="19" font-weight="700" font-family="'Bahnschrift', 'Segoe UI', 'Microsoft YaHei', sans-serif">9</text>
+  <text x="35" y="38" fill="#2d5f90" font-size="9.5" font-weight="800" font-family="'Bahnschrift', 'Segoe UI', 'Microsoft YaHei', sans-serif">th</text>
 </svg>

@@ -10,6 +10,7 @@ import {
 } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 
+import ContestAiLogo from "@/components/branding/ContestAiLogo.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import {
   fetchAuthRuntimeOptionsRequest,
@@ -450,6 +451,11 @@ onMounted(() => {
 <template>
   <div class="login-page">
     <section class="login-page__hero">
+      <div class="login-page__contest">
+        <p class="login-page__contest-title">第九届嵌入式芯片与系统设计竞赛</p>
+        <ContestAiLogo class="login-page__contest-logo" />
+      </div>
+
       <span class="login-page__eyebrow">Industrial Defect Detection</span>
       <h1 class="login-page__title">云端检测系统</h1>
       <p class="login-page__description">
@@ -778,17 +784,107 @@ onMounted(() => {
 <style scoped>
 .login-page {
   display: grid;
-  grid-template-columns: minmax(0, 1.18fr) minmax(420px, 0.82fr);
-  gap: 32px;
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 560px);
+  gap: 28px;
   min-height: 100vh;
-  padding: 32px;
+  padding: 28px;
+  max-width: 1520px;
+  margin: 0 auto;
+  position: relative;
+  align-items: stretch;
+}
+
+.login-page::before,
+.login-page::after {
+  content: "";
+  position: absolute;
+  inset: auto;
+  pointer-events: none;
+  border-radius: 999px;
+  filter: blur(10px);
+}
+
+.login-page::before {
+  top: 36px;
+  right: 18%;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(circle, rgba(74, 212, 154, 0.14), transparent 72%);
+}
+
+.login-page::after {
+  left: 4%;
+  bottom: 8%;
+  width: 420px;
+  height: 420px;
+  background: radial-gradient(circle, rgba(93, 151, 242, 0.16), transparent 74%);
 }
 
 .login-page__hero {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 32px;
+  position: relative;
+  display: grid;
+  align-content: center;
+  gap: 22px;
+  padding: clamp(34px, 4vw, 52px);
+  border: 1px solid rgba(149, 184, 223, 0.14);
+  border-radius: 34px;
+  background:
+    radial-gradient(circle at top right, rgba(74, 212, 154, 0.12), transparent 34%),
+    radial-gradient(circle at bottom left, rgba(93, 151, 242, 0.14), transparent 36%),
+    linear-gradient(145deg, rgba(11, 25, 43, 0.92), rgba(10, 22, 38, 0.82));
+  overflow: hidden;
+}
+
+.login-page__hero::before,
+.login-page__hero::after {
+  content: "";
+  position: absolute;
+  border: 1px solid rgba(149, 184, 223, 0.08);
+  border-radius: 28px;
+  pointer-events: none;
+}
+
+.login-page__hero::before {
+  top: 18px;
+  right: 18px;
+  width: 220px;
+  height: 120px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent);
+}
+
+.login-page__hero::after {
+  left: -72px;
+  bottom: -92px;
+  width: 260px;
+  height: 260px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(127, 228, 208, 0.08), transparent 70%);
+}
+
+.login-page__contest {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 640px);
+  padding: 18px 20px;
+  border: 1px solid rgba(149, 184, 223, 0.1);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(10px);
+}
+
+.login-page__contest-title {
+  margin: 0;
+  color: #e4eef8;
+  font-size: clamp(22px, 2.6vw, 32px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+}
+
+.login-page__contest-logo {
+  display: block;
+  width: min(100%, 420px);
+  filter: drop-shadow(0 16px 30px rgba(8, 18, 37, 0.24));
 }
 
 .login-page__eyebrow {
@@ -800,29 +896,41 @@ onMounted(() => {
 }
 
 .login-page__title {
-  margin: 18px 0 14px;
-  font-size: 64px;
-  line-height: 0.95;
+  margin: 0;
+  max-width: 720px;
+  font-size: clamp(50px, 5.5vw, 78px);
+  line-height: 0.92;
+  text-wrap: balance;
 }
 
 .login-page__description {
-  max-width: 720px;
+  max-width: 660px;
   color: var(--app-text-secondary);
-  font-size: 17px;
-  line-height: 1.9;
+  font-size: 16px;
+  line-height: 1.95;
 }
 
 .login-page__highlights {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-  margin-top: 28px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 6px;
 }
 
 .login-page__highlight {
   display: grid;
-  gap: 8px;
-  padding: 20px;
+  gap: 10px;
+  padding: 20px 22px;
+  border-radius: 22px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+    rgba(8, 19, 33, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.login-page__highlight:first-child {
+  grid-column: 1 / -1;
 }
 
 .login-page__highlight span {
@@ -832,8 +940,26 @@ onMounted(() => {
 }
 
 .login-page__form-card {
+  position: relative;
   align-self: center;
-  padding: 28px;
+  justify-self: end;
+  width: min(100%, 560px);
+  min-height: min(820px, calc(100vh - 56px));
+  padding: 34px 32px;
+  border-radius: 30px;
+  border: 1px solid rgba(149, 184, 223, 0.14);
+  background:
+    radial-gradient(circle at top center, rgba(127, 228, 208, 0.08), transparent 30%),
+    linear-gradient(180deg, rgba(13, 28, 48, 0.94), rgba(10, 22, 38, 0.92));
+  overflow: hidden;
+}
+
+.login-page__form-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: linear-gradient(90deg, rgba(127, 228, 208, 0.96), rgba(93, 151, 242, 0.92));
 }
 
 .login-page__tabs {
@@ -899,28 +1025,103 @@ onMounted(() => {
   min-height: 98px;
 }
 
+@media (max-width: 1360px) {
+  .login-page {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 500px);
+    gap: 22px;
+  }
+
+  .login-page__hero {
+    padding: 34px 30px;
+  }
+
+  .login-page__title {
+    font-size: clamp(46px, 5vw, 64px);
+  }
+}
+
 @media (max-width: 1180px) {
+  .login-page {
+    grid-template-columns: 1fr;
+  }
+
   .login-page__highlights {
     grid-template-columns: 1fr;
+  }
+
+  .login-page__highlight:first-child {
+    grid-column: auto;
+  }
+
+  .login-page__form-card {
+    justify-self: stretch;
+    width: 100%;
+    min-height: auto;
   }
 }
 
 @media (max-width: 960px) {
   .login-page {
-    grid-template-columns: 1fr;
     padding: 18px;
   }
 
   .login-page__hero {
-    padding: 12px 0;
+    padding: 28px 22px;
+  }
+
+  .login-page__contest {
+    width: 100%;
+  }
+
+  .login-page__contest-logo {
+    width: min(100%, 360px);
   }
 
   .login-page__title {
     font-size: 42px;
   }
 
+  .login-page__form-card {
+    min-height: auto;
+    padding: 26px 20px;
+  }
+
   .login-page__actions {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .login-page {
+    padding: 14px;
+  }
+
+  .login-page__hero {
+    padding: 24px 18px;
+    border-radius: 24px;
+  }
+
+  .login-page__contest {
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .login-page__contest-title {
+    font-size: 20px;
+  }
+
+  .login-page__description {
+    font-size: 14px;
+  }
+
+  .login-page__highlight {
+    padding: 18px;
+    border-radius: 18px;
+  }
+
+  .login-page__form-card {
+    padding: 22px 16px;
+    border-radius: 24px;
   }
 }
 </style>

@@ -3,6 +3,8 @@ import type {
   DefectDistributionResponseDto,
   StatisticsAIAnalysisRequestDto,
   StatisticsAIAnalysisResponseDto,
+  StatisticsAIChatRequestDto,
+  StatisticsAIChatResponseDto,
   StatisticsExportPdfRequestDto,
   StatisticsOverviewDto,
   StatisticsSampleGalleryResponseDto,
@@ -139,6 +141,41 @@ export function streamStatisticsAiAnalysis(
       }
       if (event.event === "done" && handlers.onDone) {
         handlers.onDone(event.data as StatisticsAIAnalysisResponseDto);
+      }
+    },
+  });
+}
+
+export interface StatisticsAiChatStreamHandlers {
+  readonly onMeta?: (payload: StatisticsAIChatResponseDto) => void;
+  readonly onDelta?: (deltaText: string) => void;
+  readonly onDone?: (payload: StatisticsAIChatResponseDto) => void;
+}
+
+/**
+ * 在当前统计窗口上下文下发起流式 AI 追问。
+ */
+export function streamStatisticsAiChat(
+  payload: StatisticsAIChatRequestDto,
+  handlers: StatisticsAiChatStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamSseRequest("/api/v1/statistics/ai-chat/stream", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+    onEvent: (event) => {
+      if (event.event === "meta" && handlers.onMeta) {
+        handlers.onMeta(event.data as StatisticsAIChatResponseDto);
+        return;
+      }
+      if (event.event === "delta" && handlers.onDelta) {
+        const payloadData = event.data as { text?: string };
+        handlers.onDelta(payloadData.text ?? "");
+        return;
+      }
+      if (event.event === "done" && handlers.onDone) {
+        handlers.onDone(event.data as StatisticsAIChatResponseDto);
       }
     },
   });

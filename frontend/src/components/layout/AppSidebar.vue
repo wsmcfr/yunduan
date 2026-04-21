@@ -10,6 +10,7 @@ import {
   TrendCharts,
 } from "@element-plus/icons-vue";
 
+import ContestChipMark from "@/components/branding/ContestChipMark.vue";
 import { appNavigationItems } from "@/router/routes";
 
 const route = useRoute();
@@ -29,6 +30,22 @@ const iconMap = {
  */
 const currentRouteName = computed(() => String(route.name ?? ""));
 
+/**
+ * 侧栏底部环境卡片文案。
+ * 线上部署时不再显示“本地联调模式”，避免看起来像忘记删除的开发提示。
+ */
+const runtimeEnvironmentLabel = computed(() => (import.meta.env.DEV ? "开发环境" : "云端控制台"));
+const runtimeEnvironmentTitle = computed(() => (import.meta.env.DEV ? "开发代理已启用" : "生产环境在线"));
+const runtimeEnvironmentHint = computed(() => (
+  import.meta.env.DEV
+    ? "当前前端通过开发代理访问后端接口，适合本地联调和功能验证。"
+    : "当前页面运行在已部署环境中，可直接使用系统能力和公司级配置。"
+));
+const runtimeEnvironmentApiTarget = computed(() => (
+  import.meta.env.DEV ? "127.0.0.1:8000" : "同域 /api/v1/*"
+));
+const runtimeEnvironmentHost = computed(() => window.location.host || "未记录主机");
+
 function navigate(routeName: string): void {
   void router.push({ name: routeName });
 }
@@ -37,10 +54,12 @@ function navigate(routeName: string): void {
 <template>
   <aside class="sidebar">
     <div class="sidebar__brand">
-      <span class="sidebar__brand-badge">DF</span>
-      <div>
+      <span class="sidebar__brand-badge">
+        <ContestChipMark class="sidebar__brand-mark" />
+      </span>
+      <div class="sidebar__brand-copy">
         <strong class="sidebar__brand-title">云端检测系统</strong>
-        <p class="sidebar__brand-subtitle">工业缺陷检测 MVP</p>
+        <p class="sidebar__brand-subtitle">第九届嵌入式芯片与系统设计竞赛</p>
       </div>
     </div>
 
@@ -59,12 +78,21 @@ function navigate(routeName: string): void {
     </nav>
 
     <div class="sidebar__footer app-panel">
-      <span class="sidebar__footer-label">连接状态</span>
-      <strong class="sidebar__footer-title">本地联调模式</strong>
+      <span class="sidebar__footer-label">{{ runtimeEnvironmentLabel }}</span>
+      <strong class="sidebar__footer-title">{{ runtimeEnvironmentTitle }}</strong>
       <p class="sidebar__footer-text">
-        前端默认通过 Vite 代理转发到
-        <code>127.0.0.1:8000</code>
+        {{ runtimeEnvironmentHint }}
       </p>
+      <div class="sidebar__footer-meta">
+        <div class="sidebar__footer-meta-item">
+          <span>接口来源</span>
+          <strong>{{ runtimeEnvironmentApiTarget }}</strong>
+        </div>
+        <div class="sidebar__footer-meta-item">
+          <span>当前主机</span>
+          <strong>{{ runtimeEnvironmentHost }}</strong>
+        </div>
+      </div>
     </div>
   </aside>
 </template>
@@ -80,20 +108,34 @@ function navigate(routeName: string): void {
 
 .sidebar__brand {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 14px;
+}
+
+.sidebar__brand-copy {
+  min-width: 0;
 }
 
 .sidebar__brand-badge {
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 18px;
-  background: linear-gradient(135deg, var(--app-primary), #7fe4d0);
-  color: #03211e;
-  font-size: 18px;
-  font-weight: 900;
+  width: 52px;
+  height: 52px;
+  padding: 6px;
+  border: 1px solid rgba(149, 184, 223, 0.18);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015)),
+    rgba(10, 24, 39, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 12px 30px rgba(4, 10, 18, 0.28);
+}
+
+.sidebar__brand-mark {
+  width: 100%;
+  --contest-brand-ink: #76a8dd;
+  --contest-brand-core: rgba(239, 247, 255, 0.96);
 }
 
 .sidebar__brand-title {
@@ -104,7 +146,8 @@ function navigate(routeName: string): void {
 .sidebar__brand-subtitle {
   margin: 4px 0 0;
   color: var(--app-text-secondary);
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .sidebar__nav {
@@ -164,8 +207,30 @@ function navigate(routeName: string): void {
   line-height: 1.6;
 }
 
-.sidebar__footer code {
-  color: var(--app-primary);
+.sidebar__footer-meta {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.sidebar__footer-meta-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.sidebar__footer-meta-item span {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+}
+
+.sidebar__footer-meta-item strong {
+  color: var(--app-text);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 @media (max-width: 1024px) {

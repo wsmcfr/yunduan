@@ -17,6 +17,7 @@ from src.schemas.statistics import (
     DefectDistributionResponse,
     StatisticsAIAnalysisRequest,
     StatisticsAIAnalysisResponse,
+    StatisticsAIChatRequest,
     StatisticsExportPdfRequest,
     StatisticsSampleGalleryResponse,
     StatisticsOverviewResponse,
@@ -148,6 +149,24 @@ def stream_statistics_ai_analysis(
 
     return StreamingResponse(
         StatisticsService(db).stream_ai_analysis(
+            company_id=current_user.company_id or 0,
+            payload=payload,
+        ),
+        media_type="text/event-stream",
+        headers=build_sse_headers(),
+    )
+
+
+@router.post("/ai-chat/stream")
+def stream_statistics_ai_chat(
+    payload: StatisticsAIChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_ai_enabled_user),
+) -> StreamingResponse:
+    """在当前统计窗口上下文下发起流式 AI 多轮追问。"""
+
+    return StreamingResponse(
+        StatisticsService(db).stream_ai_chat(
             company_id=current_user.company_id or 0,
             payload=payload,
         ),

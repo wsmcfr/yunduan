@@ -6,11 +6,13 @@ import { fetchParts } from "@/services/api/parts";
 import {
   downloadStatisticsPdf,
   fetchStatisticsOverview,
+  streamStatisticsAiChat,
   streamStatisticsAiAnalysis,
   type StatisticsOverviewQuery,
 } from "@/services/api/statistics";
 import { fetchRuntimeAIModels } from "@/services/api/settings";
 import {
+  mapStatisticsAIChatResponseDto,
   mapAIRuntimeModelOptionDto,
   mapDeviceDto,
   mapPartDto,
@@ -19,18 +21,27 @@ import {
 } from "@/services/mappers/commonMappers";
 import { useAuthStore } from "@/stores/auth";
 import type {
+  AIChatMessage,
   AIRuntimeModelOption,
   DeviceModel,
   PartModel,
   StatisticsAIAnalysisResponse,
+  StatisticsAIChatResponse,
   StatisticsOverview,
 } from "@/types/models";
-import type { StatisticsPdfExportMode } from "@/types/api";
+import type {
+  StatisticsExportConversationMessageDto,
+  StatisticsPdfExportMode,
+} from "@/types/api";
 import {
   getStoredPreferredRuntimeModelId,
   resolvePreferredRuntimeModelId,
   setStoredPreferredRuntimeModelId,
 } from "@/utils/aiModelSelection";
+import {
+  AI_CHAT_QUESTION_MAX_CHARACTERS,
+  buildAiChatHistoryPayload,
+} from "@/utils/aiChatHistory";
 import { exportStatisticsReportPng } from "@/utils/statisticsReport";
 
 const DEFAULT_DAYS = 14;
@@ -92,6 +103,16 @@ export function useStatisticsOverview() {
   const analysisNote = ref("");
 
   /**
+   * 统计 AI 工作台中的追问输入、多轮消息和推荐追问。
+   * 这里和单条复检页保持一致，统一用本地消息 ID 驱动流式更新。
+   */
+  const aiQuestion = ref("");
+  const aiMessages = ref<AIChatMessage[]>([]);
+  const aiSuggestedQuestions = ref<string[]>([]);
+  const chatSending = ref(false);
+  const streamingAssistantMessageId = ref<string | null>(null);
+
+  /**
    * 当前选中的运行时模型。
    */
   const activeRuntimeModel = computed<AIRuntimeModelOption | null>(() => {
@@ -121,6 +142,153 @@ export function useStatisticsOverview() {
     const matchedDevice = deviceOptions.value.find((item) => item.id === selectedDeviceId.value);
     return matchedDevice ? `${matchedDevice.name} / ${matchedDevice.deviceCode}` : null;
   });
+
+  /**
+   * 当前统计 AI 工作台是否存在正在进行的流式请求。
+   * 生成批次分析和继续追问共用同一条 SSE 中止控制器，因此这里统一收口。
+   */
+  const isAiStreaming = computed(() => aiLoading.value || chatSending.value);
+
+  /**
+   * 生成一条前端本地消息唯一 ID。
+   * 统计页和单条复检页都依赖稳定主键来定位当前流式占位消息，不能再依赖时间戳碰撞概率。
+   */
+  function createLocalMessageId(): string {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+
+    return `stats-chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  /**
+   * 统一创建统计 AI 工作台中的一条消息。
+   */
+  function createChatMessage(role: AIChatMessage["role"], content: string): AIChatMessage {
+    return {
+      localId: createLocalMessageId(),
+      role,
+      content,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * 基于当前统计概览生成一组默认推荐追问。
+   * 当后端尚未返回更细的推荐问题时，前端先给出一组稳定入口，避免工作台出现空白。
+   */
+  function buildDefaultSuggestedQuestions(
+    currentOverview: StatisticsOverview | null,
+  ): string[] {
+    const suggestions = [
+      "当前批次最需要优先处理的风险点是什么？",
+      "从现有统计看，更像设备问题还是零件批次问题？",
+      "待审核数量会不会掩盖真实良率？",
+      "接下来还需要补哪些数据，才能把结论说稳？",
+    ];
+
+    const topDefect = currentOverview?.defectDistribution[0];
+    if (topDefect?.defectType) {
+      suggestions.unshift(`围绕“${topDefect.defectType}”继续分析，当前最该先排查什么？`);
+    }
+
+    const topPart = currentOverview?.partQualityRanking[0];
+    if (topPart?.partName) {
+      suggestions.push(`${topPart.partName} 这类零件为什么会排到风险前列？`);
+    }
+
+    return suggestions.slice(0, 4);
+  }
+
+  /**
+   * 切换筛选窗口或重新生成分析时，重置统计 AI 工作台状态。
+   */
+  function resetAiWorkspace(): void {
+    aiAnalysis.value = null;
+    aiQuestion.value = "";
+    aiMessages.value = [];
+    aiSuggestedQuestions.value = buildDefaultSuggestedQuestions(overview.value);
+    aiError.value = "";
+    streamingAssistantMessageId.value = null;
+    aiLoading.value = false;
+    chatSending.value = false;
+  }
+
+  /**
+   * 把当前筛选窗口和模型选择统一转换成统计 AI 请求体公共部分。
+   * 单次分析、继续追问和 PDF 导出都复用这套映射，避免字段口径漂移。
+   */
+  function buildAiScopePayload() {
+    const [startDate, endDate] = dateRange.value.length === 2 ? dateRange.value : [null, null];
+    return {
+      model_profile_id: selectedModelId.value,
+      provider_hint: activeRuntimeModel.value?.displayName ?? null,
+      note: analysisNote.value.trim() || null,
+      start_date: startDate,
+      end_date: endDate,
+      days: days.value,
+      part_id: selectedPartId.value,
+      device_id: selectedDeviceId.value,
+    };
+  }
+
+  /**
+   * 提取统计 AI 工作台里真正需要导出的多轮追问消息。
+   * 主分析正文已经单独走 `cached_ai_answer`，这里从第一条用户消息开始截取，
+   * 避免把“主分析 assistant 首条消息”在 PDF/图片里重复渲染两遍。
+   */
+  function resolveExportConversationMessages(): AIChatMessage[] {
+    const firstUserMessageIndex = aiMessages.value.findIndex((item) => item.role === "user");
+    if (firstUserMessageIndex < 0) {
+      return [];
+    }
+
+    return aiMessages.value
+      .slice(firstUserMessageIndex)
+      .filter((item) => item.content.trim().length > 0);
+  }
+
+  /**
+   * 把前端会话消息转换成后端 PDF 导出接口需要的 DTO 结构。
+   * 导出链路只保留角色、正文和时间戳，避免把前端局部状态字段一并带到后端。
+   */
+  function buildExportConversationSnapshot(): StatisticsExportConversationMessageDto[] {
+    return resolveExportConversationMessages().map((item) => ({
+      role: item.role,
+      content: item.content,
+      created_at: item.createdAt,
+    }));
+  }
+
+  /**
+   * 只更新当前正在流式输出的那一条助手消息。
+   * 这里必须用本地消息 ID 精确定位，避免文本串到用户问题气泡里。
+   */
+  function appendToAssistantMessage(messageId: string, deltaText: string): void {
+    aiMessages.value = aiMessages.value.map((item) =>
+      item.role === "assistant" && item.localId === messageId
+        ? {
+            ...item,
+            content: `${item.content}${deltaText}`,
+          }
+        : item,
+    );
+  }
+
+  /**
+   * 用最终完成的文本覆盖当前助手占位消息。
+   * 这样即便上游在 `done` 事件里做了收尾修正，前端也能同步成最终版本。
+   */
+  function replaceAssistantMessage(messageId: string, content: string): void {
+    aiMessages.value = aiMessages.value.map((item) =>
+      item.role === "assistant" && item.localId === messageId
+        ? {
+            ...item,
+            content,
+          }
+        : item,
+    );
+  }
 
   /**
    * 把页面筛选条件转换成后端接口需要的查询参数。
@@ -203,8 +371,7 @@ export function useStatisticsOverview() {
     try {
       const overviewDto = await fetchStatisticsOverview(buildOverviewQuery());
       overview.value = mapStatisticsOverviewDto(overviewDto);
-      aiAnalysis.value = null;
-      aiError.value = "";
+      resetAiWorkspace();
     } catch (caughtError) {
       error.value = caughtError instanceof Error ? caughtError.message : "统计概览加载失败";
     } finally {
@@ -231,6 +398,7 @@ export function useStatisticsOverview() {
     selectedPartId.value = null;
     selectedDeviceId.value = null;
     analysisNote.value = "";
+    aiQuestion.value = "";
     await refresh();
   }
 
@@ -251,21 +419,15 @@ export function useStatisticsOverview() {
     abortAiAnalysisStream();
     aiLoading.value = true;
     aiError.value = "";
+    aiSuggestedQuestions.value = buildDefaultSuggestedQuestions(overview.value);
+    const assistantMessage = createChatMessage("assistant", "");
+    aiMessages.value = [assistantMessage];
+    streamingAssistantMessageId.value = assistantMessage.localId;
     const abortController = new AbortController();
     activeAiStreamAbortController.value = abortController;
 
     try {
-      const [startDate, endDate] = dateRange.value.length === 2 ? dateRange.value : [null, null];
-      await streamStatisticsAiAnalysis({
-        model_profile_id: selectedModelId.value,
-        provider_hint: activeRuntimeModel.value?.displayName ?? null,
-        note: analysisNote.value.trim() || null,
-        start_date: startDate,
-        end_date: endDate,
-        days: days.value,
-        part_id: selectedPartId.value,
-        device_id: selectedDeviceId.value,
-      }, {
+      await streamStatisticsAiAnalysis(buildAiScopePayload(), {
         onMeta: (responseDto) => {
           aiAnalysis.value = mapStatisticsAIAnalysisResponseDto(responseDto);
         },
@@ -288,9 +450,12 @@ export function useStatisticsOverview() {
             ...aiAnalysis.value,
             answer: `${aiAnalysis.value.answer}${deltaText}`,
           };
+          appendToAssistantMessage(assistantMessage.localId, deltaText);
         },
         onDone: (responseDto) => {
-          aiAnalysis.value = mapStatisticsAIAnalysisResponseDto(responseDto);
+          const response = mapStatisticsAIAnalysisResponseDto(responseDto);
+          aiAnalysis.value = response;
+          replaceAssistantMessage(assistantMessage.localId, response.answer);
         },
       }, abortController.signal);
     } catch (caughtError) {
@@ -304,7 +469,112 @@ export function useStatisticsOverview() {
       if (activeAiStreamAbortController.value === abortController) {
         activeAiStreamAbortController.value = null;
       }
+      if (streamingAssistantMessageId.value === assistantMessage.localId) {
+        streamingAssistantMessageId.value = null;
+      }
       aiLoading.value = false;
+    }
+  }
+
+  /**
+   * 将推荐追问一键回填到输入框，便于继续在当前统计窗口内深入追问。
+   */
+  function useSuggestedQuestion(question: string): void {
+    aiQuestion.value = question;
+  }
+
+  /**
+   * 在当前统计窗口上下文里继续追问 AI。
+   * 这里会带上已存在的会话消息，使后端能把本轮问题放到同一批次的连续对话里理解。
+   */
+  async function submitAiQuestion(): Promise<void> {
+    if (!overview.value) {
+      ElMessage.warning("请先加载统计概览，再发起 AI 追问。");
+      return;
+    }
+
+    if (!canUseAiAnalysis.value) {
+      ElMessage.warning("当前账号尚未开通 AI 分析权限。");
+      return;
+    }
+
+    const normalizedQuestion = aiQuestion.value.trim();
+    if (!normalizedQuestion) {
+      return;
+    }
+
+    /**
+     * 单次追问正文需要先满足后端 schema 的长度约束。
+     * 历史消息我们会自动裁剪，但当前问题属于用户当轮输入，超过上限时直接提示更清晰。
+     */
+    if (normalizedQuestion.length > AI_CHAT_QUESTION_MAX_CHARACTERS) {
+      ElMessage.warning(
+        `单次追问请控制在 ${AI_CHAT_QUESTION_MAX_CHARACTERS} 个字符以内，再重新发送。`,
+      );
+      return;
+    }
+
+    abortAiAnalysisStream();
+    chatSending.value = true;
+    aiError.value = "";
+    const previousMessages = [...aiMessages.value];
+
+    const nextMessages: AIChatMessage[] = [
+      ...previousMessages,
+      createChatMessage("user", normalizedQuestion),
+    ];
+    const assistantMessage = createChatMessage("assistant", "");
+    aiMessages.value = [
+      ...nextMessages,
+      assistantMessage,
+    ];
+    aiQuestion.value = "";
+    streamingAssistantMessageId.value = assistantMessage.localId;
+    const abortController = new AbortController();
+    activeAiStreamAbortController.value = abortController;
+
+    try {
+      await streamStatisticsAiChat({
+        ...buildAiScopePayload(),
+        question: normalizedQuestion,
+        /**
+         * 当前轮问题已经单独走 `question` 字段，不再重复塞进历史。
+         * 历史上下文统一经过共享工具裁剪，避免长会话把后端 4000 字符约束打爆。
+         */
+        history: buildAiChatHistoryPayload(previousMessages),
+      }, {
+        onMeta: (responseDto) => {
+          const response = mapStatisticsAIChatResponseDto(responseDto);
+          aiSuggestedQuestions.value = response.suggestedQuestions;
+        },
+        onDelta: (deltaText) => {
+          if (!deltaText) {
+            return;
+          }
+
+          appendToAssistantMessage(assistantMessage.localId, deltaText);
+        },
+        onDone: (responseDto) => {
+          const response: StatisticsAIChatResponse = mapStatisticsAIChatResponseDto(responseDto);
+          aiSuggestedQuestions.value = response.suggestedQuestions;
+          replaceAssistantMessage(assistantMessage.localId, response.answer);
+        },
+      }, abortController.signal);
+    } catch (caughtError) {
+      if (caughtError instanceof DOMException && caughtError.name === "AbortError") {
+        return;
+      }
+
+      aiError.value = caughtError instanceof Error ? caughtError.message : "统计 AI 追问失败";
+      throw caughtError;
+    } finally {
+      if (activeAiStreamAbortController.value === abortController) {
+        activeAiStreamAbortController.value = null;
+      }
+      if (streamingAssistantMessageId.value === assistantMessage.localId) {
+        streamingAssistantMessageId.value = null;
+      }
+      chatSending.value = false;
     }
   }
 
@@ -316,10 +586,13 @@ export function useStatisticsOverview() {
     activeAiStreamAbortController.value?.abort();
     activeAiStreamAbortController.value = null;
     aiLoading.value = false;
+    chatSending.value = false;
+    streamingAssistantMessageId.value = null;
   }
 
   /**
-   * 导出当前统计视图为 PNG 图片。
+   * 导出当前统计视图为 PNG 海报图。
+   * 图片强调汇报展示效果，完整 AI 正文和追问留给 PDF 导出。
    */
   async function exportPng(): Promise<void> {
     if (!overview.value) {
@@ -330,6 +603,7 @@ export function useStatisticsOverview() {
     await exportStatisticsReportPng({
       overview: overview.value,
       aiAnalysis: aiAnalysis.value,
+      aiConversation: resolveExportConversationMessages(),
       partLabel: selectedPartLabel.value,
       deviceLabel: selectedDeviceLabel.value,
     });
@@ -347,6 +621,7 @@ export function useStatisticsOverview() {
     pdfExporting.value = true;
     const [startDate, endDate] = dateRange.value.length === 2 ? dateRange.value : [null, null];
     const hasStableAiAnalysis = !aiLoading.value && Boolean(aiAnalysis.value?.answer.trim());
+    const cachedAiConversation = buildExportConversationSnapshot();
     const includeSampleImages = (
       exportMode === "visual"
       && overview.value.sampleGallery.totalImageCount > 0
@@ -370,6 +645,7 @@ export function useStatisticsOverview() {
       cached_ai_answer: hasStableAiAnalysis ? aiAnalysis.value?.answer ?? null : null,
       cached_ai_provider_hint: hasStableAiAnalysis ? aiAnalysis.value?.providerHint ?? null : null,
       cached_ai_generated_at: hasStableAiAnalysis ? aiAnalysis.value?.generatedAt ?? null : null,
+      cached_ai_conversation: cachedAiConversation,
       /**
        * 轻量报表版不嵌入 COS 样本图片，避免再次触发图片抓取与版面渲染开销。
        * 视觉版仍保留少量代表图片，满足汇报展示场景。
@@ -423,6 +699,9 @@ export function useStatisticsOverview() {
     pdfExporting,
     overview,
     aiAnalysis,
+    aiQuestion,
+    aiMessages,
+    aiSuggestedQuestions,
     error,
     aiError,
     referenceError,
@@ -431,14 +710,19 @@ export function useStatisticsOverview() {
     deviceOptions,
     selectedModelId,
     analysisNote,
+    chatSending,
+    streamingAssistantMessageId,
     activeRuntimeModel,
     canUseAiAnalysis,
+    isAiStreaming,
     selectedPartLabel,
     selectedDeviceLabel,
     refresh,
     applyQuickDays,
     resetFilters,
     runAiAnalysis,
+    useSuggestedQuestion,
+    submitAiQuestion,
     exportPng,
     exportPdf,
   };

@@ -24,6 +24,7 @@ from src.schemas.statistics import (
     ReviewStatusDistributionItem,
     StatisticsAIAnalysisRequest,
     StatisticsAIAnalysisResponse,
+    StatisticsAIChatRequest,
     StatisticsFiltersResponse,
     StatisticsPartImageGroup,
     StatisticsSampleGalleryResponse,
@@ -729,6 +730,59 @@ class StatisticsService:
             items=self._build_defect_distribution_from_records(records=records)
         )
 
+    def _build_statistics_ai_overview(
+        self,
+        *,
+        company_id: int,
+        start_date: date | None,
+        end_date: date | None,
+        days: int,
+        part_id: int | None,
+        device_id: int | None,
+    ) -> StatisticsOverviewResponse:
+        """为统计 AI 单次分析和多轮追问统一构造窗口快照。"""
+
+        return self.get_overview(
+            company_id=company_id,
+            start_date=start_date,
+            end_date=end_date,
+            days=days,
+            part_id=part_id,
+            device_id=device_id,
+        )
+
+    def _resolve_runtime_model_context(
+        self,
+        *,
+        company_id: int,
+        model_profile_id: int | None,
+    ) -> dict[str, Any] | None:
+        """把前端选中的统计运行时模型解析成后端可直接调用的上下文。"""
+
+        if model_profile_id is None:
+            return None
+
+        return AIGatewayService(self.db).build_runtime_model_context(
+            company_id=company_id,
+            model_id=model_profile_id,
+        )
+
+    def _resolve_provider_hint(
+        self,
+        *,
+        model_context: dict[str, Any] | None,
+        provider_hint: str | None,
+    ) -> str | None:
+        """统一生成统计 AI 响应里展示给前端的模型提示文案。"""
+
+        if provider_hint:
+            return provider_hint
+
+        if model_context is None:
+            return None
+
+        return f"{model_context['gateway_name']} / {model_context['display_name']}"
+
     def request_ai_analysis(
         self,
         *,
@@ -737,7 +791,7 @@ class StatisticsService:
     ) -> StatisticsAIAnalysisResponse:
         """基于当前统计窗口和运行时模型生成批次分析结论。"""
 
-        overview = self.get_overview(
+        overview = self._build_statistics_ai_overview(
             company_id=company_id,
             start_date=payload.start_date,
             end_date=payload.end_date,
@@ -745,18 +799,13 @@ class StatisticsService:
             part_id=payload.part_id,
             device_id=payload.device_id,
         )
-        model_context = (
-            AIGatewayService(self.db).build_runtime_model_context(
-                company_id=company_id,
-                model_id=payload.model_profile_id,
-            )
-            if payload.model_profile_id is not None
-            else None
+        model_context = self._resolve_runtime_model_context(
+            company_id=company_id,
+            model_profile_id=payload.model_profile_id,
         )
-        provider_hint = payload.provider_hint or (
-            f"{model_context['gateway_name']} / {model_context['display_name']}"
-            if model_context is not None
-            else None
+        provider_hint = self._resolve_provider_hint(
+            model_context=model_context,
+            provider_hint=payload.provider_hint,
         )
 
         if model_context is None:
@@ -788,7 +837,7 @@ class StatisticsService:
     ) -> Iterator[str]:
         """基于当前统计窗口流式返回批次 AI 分析结论。"""
 
-        overview = self.get_overview(
+        overview = self._build_statistics_ai_overview(
             company_id=company_id,
             start_date=payload.start_date,
             end_date=payload.end_date,
@@ -796,18 +845,13 @@ class StatisticsService:
             part_id=payload.part_id,
             device_id=payload.device_id,
         )
-        model_context = (
-            AIGatewayService(self.db).build_runtime_model_context(
-                company_id=company_id,
-                model_id=payload.model_profile_id,
-            )
-            if payload.model_profile_id is not None
-            else None
+        model_context = self._resolve_runtime_model_context(
+            company_id=company_id,
+            model_profile_id=payload.model_profile_id,
         )
-        provider_hint = payload.provider_hint or (
-            f"{model_context['gateway_name']} / {model_context['display_name']}"
-            if model_context is not None
-            else None
+        provider_hint = self._resolve_provider_hint(
+            model_context=model_context,
+            provider_hint=payload.provider_hint,
         )
 
         def event_stream() -> Iterator[str]:
@@ -873,6 +917,110 @@ class StatisticsService:
                         "status_code": 500,
                         "code": "stream_internal_error",
                         "message": "统计 AI 流式输出过程中发生未处理错误。",
+                        "details": {"reason": str(exc)},
+                    },
+                )
+
+        return event_stream()
+
+    def stream_ai_chat(
+        self,
+        *,
+        company_id: int,
+        payload: StatisticsAIChatRequest,
+    ) -> Iterator[str]:
+        """在当前统计窗口上下文下以 SSE 方式流式返回 AI 多轮追问结果。"""
+
+        overview = self._build_statistics_ai_overview(
+            company_id=company_id,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            days=payload.days,
+            part_id=payload.part_id,
+            device_id=payload.device_id,
+        )
+        statistics_context = overview.model_dump(mode="json")
+        model_context = self._resolve_runtime_model_context(
+            company_id=company_id,
+            model_profile_id=payload.model_profile_id,
+        )
+        provider_hint = self._resolve_provider_hint(
+            model_context=model_context,
+            provider_hint=payload.provider_hint,
+        )
+        suggested_questions = self.ai_review_client.build_suggested_questions_for_statistics(
+            statistics_context=statistics_context,
+        )
+        history = [item.model_dump() for item in payload.history]
+
+        def event_stream() -> Iterator[str]:
+            """封装统计 AI 多轮追问的 SSE 事件序列。"""
+
+            try:
+                started_at = datetime.now(timezone.utc).isoformat()
+                initial_status = "streaming" if model_context is not None else "reserved"
+                yield format_sse_event(
+                    event="meta",
+                    payload={
+                        "status": initial_status,
+                        "answer": "",
+                        "provider_hint": provider_hint,
+                        "generated_at": started_at,
+                        "suggested_questions": suggested_questions,
+                    },
+                )
+
+                if model_context is None:
+                    reserved_answer = "统计分析 AI 接口已预留，但当前尚未选择可用模型配置。"
+                    for text_chunk in self.ai_review_client._iter_text_chunks(text=reserved_answer):
+                        yield format_sse_event(event="delta", payload={"text": text_chunk})
+
+                    yield format_sse_event(
+                        event="done",
+                        payload={
+                            "status": "reserved",
+                            "answer": reserved_answer,
+                            "provider_hint": provider_hint,
+                            "generated_at": datetime.now(timezone.utc).isoformat(),
+                            "suggested_questions": suggested_questions,
+                        },
+                    )
+                    return
+
+                answer_chunks: list[str] = []
+                for text_chunk in self.ai_review_client.stream_statistics_chat(
+                    provider_hint=provider_hint,
+                    question=payload.question,
+                    note=payload.note,
+                    history=history,
+                    statistics_context=statistics_context,
+                    model_context=model_context,
+                ):
+                    answer_chunks.append(text_chunk)
+                    yield format_sse_event(event="delta", payload={"text": text_chunk})
+
+                yield format_sse_event(
+                    event="done",
+                    payload={
+                        "status": "completed",
+                        "answer": "".join(answer_chunks),
+                        "provider_hint": provider_hint,
+                        "generated_at": datetime.now(timezone.utc).isoformat(),
+                        "suggested_questions": suggested_questions,
+                    },
+                )
+            except AppError as exc:
+                yield format_sse_event(
+                    event="error",
+                    payload=build_sse_error_payload(exc),
+                )
+            except Exception as exc:  # noqa: BLE001
+                yield format_sse_event(
+                    event="error",
+                    payload={
+                        "status_code": 500,
+                        "code": "stream_internal_error",
+                        "message": "统计 AI 追问流式输出过程中发生未处理错误。",
                         "details": {"reason": str(exc)},
                     },
                 )
