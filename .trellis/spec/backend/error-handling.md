@@ -325,6 +325,103 @@ if payload.export_mode == "lightweight":
 
 ---
 
+## Scenario: Password Change Approval Error Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: any change to station-inside password-request submit/approve/reject routes, self-protection rules in system-user management, or admin actions that operate on password-request snapshots
+- Affected layers: settings route -> Pydantic schema validation -> `SystemUserService` domain checks -> standardized API error payload
+
+### 2. Signatures
+
+```http
+GET /api/v1/settings/users/me/password-request
+POST /api/v1/settings/users/me/password-request
+POST /api/v1/settings/users/{user_id}/password-request/approve
+POST /api/v1/settings/users/{user_id}/password-request/reject
+PATCH /api/v1/settings/users/{user_id}/status
+DELETE /api/v1/settings/users/{user_id}
+```
+
+```py
+class SubmitPasswordChangeRequest(BaseModel):
+    request_type: Literal["reset_to_default", "change_to_requested"]
+    new_password: str | None
+```
+
+### 3. Contracts
+
+| Situation | Expected handling |
+|---|---|
+| Current user submits while `password_change_request_status == "pending"` | `400` with `code="password_change_request_already_pending"` |
+| Admin approves/rejects when no pending snapshot exists | `400` with `code="password_change_request_not_pending"` |
+| Service receives `change_to_requested` without a password | `400` with `code="password_change_request_password_required"` if the service boundary is called directly |
+| Approved `change_to_requested` snapshot has no encrypted payload | `400` with `code="password_change_request_payload_missing"` |
+| Service receives an unsupported request type | `400` with `code="password_change_request_type_invalid"` |
+| Admin tries to approve/reject their own account | `400` with `code="cannot_approve_password_change_request_self"` or `cannot_reject_password_change_request_self` |
+| Admin tries to disable/delete themselves | `400` with `code="cannot_change_status_self"` or `cannot_delete_self` |
+| Target user is the platform default admin | `403` with `code="cannot_<action>_default_admin"` |
+| Target user is missing or outside the current company | `404` with `code="user_not_found"` |
+
+Additional rules:
+
+- route-schema validation and service-domain validation must stay distinguishable
+- do not collapse these errors into generic `"operation_failed"` or only human-readable text
+- the frontend settings page depends on stable error codes to explain why a password request cannot continue
+
+### 4. Validation & Error Matrix
+
+| Condition | Boundary | Expected behavior |
+|---|---|---|
+| Request body uses `request_type="reset_to_default"` and still sends `new_password` | Pydantic request validation | Reject with request-validation `4xx`; do not enter the service layer |
+| Request body omits `new_password` for `change_to_requested` | Pydantic request validation | Reject with request-validation `4xx`; do not rely only on UI checks |
+| Duplicate pending request reaches the service | domain boundary | Return stable `password_change_request_already_pending` instead of overwriting the snapshot |
+| Admin approves a corrupted pending snapshot without encrypted payload | domain boundary | Return `password_change_request_payload_missing` and keep DB state unchanged |
+| Admin operates on themselves or the default admin | authorization/domain boundary | Return stable self/default-admin protection codes, not generic forbidden text |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | User submits a second pending request and receives `400 password_change_request_already_pending`, which the frontend can render as a precise prompt |
+| Base | Admin clicks approve on a user whose request was already processed elsewhere and receives `400 password_change_request_not_pending` |
+| Bad | Backend catches every failure and returns `500` or `"操作失败"` so the UI cannot tell duplicate submit, missing payload, and self-protection apart |
+
+### 6. Tests Required
+
+- service test asserting duplicate pending submit returns `password_change_request_already_pending`
+- service test asserting approve/reject without a pending snapshot returns `password_change_request_not_pending`
+- service test asserting corrupted approval payload returns `password_change_request_payload_missing`
+- route/schema test asserting `reset_to_default + new_password` is rejected before the service runs
+- route/service test asserting self-protection codes for approve/reject/status/delete remain stable
+
+Assertion points:
+
+- stable error codes survive refactors
+- request-schema validation is not silently downgraded into generic service failures
+- self/default-admin protections remain distinguishable from missing-user errors
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+except Exception:
+    raise HTTPException(status_code=400, detail="操作失败")
+```
+
+#### Correct
+
+```py
+if user.password_change_request_status == "pending":
+    raise BadRequestError(
+        code="password_change_request_already_pending",
+        message="当前已有待审批的密码申请，请等待管理员处理后再重新提交。",
+    )
+```
+
+---
+
 ## Scenario: Public Auth and Password Reset Error Boundary
 
 ### 1. Scope / Trigger

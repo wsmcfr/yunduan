@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import type { DetectionRecordModel } from "@/types/models";
 import {
   buildAiPreviewUrl,
+  createDefaultAiSuggestedQuestions,
   createAiOpeningMessage,
   sortAiDisplayFiles,
 } from "./aiReview";
@@ -57,7 +59,7 @@ describe("ai review utilities", () => {
   });
 
   it("打开 AI 对话时会生成带记录上下文的首条引导语", () => {
-    const openingMessage = createAiOpeningMessage({
+    const record: DetectionRecordModel = {
       id: 1,
       recordNo: "REC-TEST-001",
       result: "uncertain",
@@ -90,10 +92,16 @@ describe("ai review utilities", () => {
         deviceCode: "MP157-VIS-01",
         name: "主视觉节点",
       },
-    });
+    };
+
+    const openingMessage = createAiOpeningMessage(record);
+    const suggestedQuestions = createDefaultAiSuggestedQuestions(record);
 
     expect(openingMessage).toContain("REC-TEST-001");
     expect(openingMessage).toContain("金属垫片样件");
     expect(openingMessage).toContain("MP157-VIS-01");
+    expect(openingMessage).toContain("单面图像");
+    expect(suggestedQuestions[0]).toContain("这一面");
+    expect(suggestedQuestions[1]).toContain("人工确认");
   });
 });

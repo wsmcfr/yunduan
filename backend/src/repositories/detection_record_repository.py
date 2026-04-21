@@ -72,10 +72,18 @@ class DetectionRecordRepository:
             stmt = stmt.where(DetectionRecord.uploaded_at <= uploaded_to)
         return stmt
 
-    def get_by_id(self, record_id: int, *, include_related: bool = False) -> DetectionRecord | None:
-        """按主键查询检测记录，可选加载详情关联。"""
+    def get_by_id(
+        self,
+        record_id: int,
+        *,
+        company_id: int | None = None,
+        include_related: bool = False,
+    ) -> DetectionRecord | None:
+        """按主键查询检测记录，可选附带公司边界。"""
 
         stmt = self._base_stmt().where(DetectionRecord.id == record_id)
+        if company_id is not None:
+            stmt = stmt.where(DetectionRecord.company_id == company_id)
         if include_related:
             stmt = stmt.options(
                 selectinload(DetectionRecord.part),
@@ -91,14 +99,18 @@ class DetectionRecordRepository:
             )
         return self.db.scalar(stmt)
 
-    def get_by_record_no(self, record_no: str) -> DetectionRecord | None:
+    def get_by_record_no(self, record_no: str, *, company_id: int | None = None) -> DetectionRecord | None:
         """按业务编号查询检测记录。"""
 
-        return self.db.scalar(self._base_stmt().where(DetectionRecord.record_no == record_no))
+        stmt = self._base_stmt().where(DetectionRecord.record_no == record_no)
+        if company_id is not None:
+            stmt = stmt.where(DetectionRecord.company_id == company_id)
+        return self.db.scalar(stmt)
 
     def list_records(
         self,
         *,
+        company_id: int,
         part_id: int | None,
         part_category: str | None,
         device_id: int | None,
@@ -114,7 +126,7 @@ class DetectionRecordRepository:
         """查询检测记录分页列表。"""
 
         stmt = self._apply_filters(
-            self._base_stmt(),
+            self._base_stmt().where(DetectionRecord.company_id == company_id),
             part_id=part_id,
             part_category=part_category,
             device_id=device_id,
@@ -142,6 +154,7 @@ class DetectionRecordRepository:
     def list_for_statistics(
         self,
         *,
+        company_id: int,
         part_id: int | None = None,
         part_category: str | None = None,
         device_id: int | None = None,
@@ -151,7 +164,7 @@ class DetectionRecordRepository:
         """查询统计所需的全量记录集合。"""
 
         stmt = self._apply_filters(
-            self._base_stmt(),
+            self._base_stmt().where(DetectionRecord.company_id == company_id),
             part_id=part_id,
             part_category=part_category,
             device_id=device_id,

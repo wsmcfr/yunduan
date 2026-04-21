@@ -24,24 +24,36 @@ class AIGatewayRepository:
             stmt = stmt.options(selectinload(AIGateway.models))
         return stmt
 
-    def get_by_id(self, gateway_id: int, *, include_models: bool = False) -> AIGateway | None:
+    def get_by_id(
+        self,
+        gateway_id: int,
+        *,
+        company_id: int | None = None,
+        include_models: bool = False,
+    ) -> AIGateway | None:
         """按主键查询 AI 网关。"""
 
-        return self.db.scalar(
-            self._base_stmt(include_models=include_models).where(AIGateway.id == gateway_id)
-        )
+        stmt = self._base_stmt(include_models=include_models).where(AIGateway.id == gateway_id)
+        if company_id is not None:
+            stmt = stmt.where(AIGateway.company_id == company_id)
+        return self.db.scalar(stmt)
 
-    def get_by_name(self, name: str) -> AIGateway | None:
+    def get_by_name(self, name: str, *, company_id: int | None = None) -> AIGateway | None:
         """按名称查询 AI 网关。"""
 
-        return self.db.scalar(self._base_stmt().where(AIGateway.name == name))
+        stmt = self._base_stmt().where(AIGateway.name == name)
+        if company_id is not None:
+            stmt = stmt.where(AIGateway.company_id == company_id)
+        return self.db.scalar(stmt)
 
-    def list_all(self) -> list[AIGateway]:
-        """按更新时间倒序返回全部 AI 网关，并带出模型配置。"""
+    def list_all(self, *, company_id: int) -> list[AIGateway]:
+        """按更新时间倒序返回公司内全部 AI 网关，并带出模型配置。"""
 
         return list(
             self.db.execute(
-                self._base_stmt(include_models=True).order_by(
+                self._base_stmt(include_models=True)
+                .where(AIGateway.company_id == company_id)
+                .order_by(
                     AIGateway.updated_at.desc(),
                     AIGateway.id.desc(),
                 )

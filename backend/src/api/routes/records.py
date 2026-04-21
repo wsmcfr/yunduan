@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from src.api.deps import get_current_ai_enabled_user, get_current_user, get_db
+from src.api.deps import get_current_ai_enabled_user, get_current_company_user, get_db
 from src.core.sse import build_sse_headers
 from src.db.models.enums import DetectionResult, ReviewStatus
 from src.db.models.user import User
@@ -39,11 +39,12 @@ def list_records(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_company_user),
 ) -> DetectionRecordListResponse:
     """分页获取检测记录列表。"""
 
     total, items = RecordService(db).list_records(
+        company_id=current_user.company_id or 0,
         part_id=part_id,
         part_category=part_category,
         device_id=device_id,
@@ -68,11 +69,11 @@ def list_records(
 def create_record(
     payload: DetectionRecordCreateRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_company_user),
 ) -> DetectionRecordDetailResponse:
     """创建新的检测记录。"""
 
-    record = RecordService(db).create_record(payload)
+    record = RecordService(db).create_record(company_id=current_user.company_id or 0, payload=payload)
     return DetectionRecordDetailResponse.model_validate(record)
 
 
@@ -80,11 +81,14 @@ def create_record(
 def get_record_detail(
     record_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_company_user),
 ) -> DetectionRecordDetailResponse:
     """获取单条检测记录详情。"""
 
-    record = RecordService(db).get_record_detail(record_id)
+    record = RecordService(db).get_record_detail(
+        company_id=current_user.company_id or 0,
+        record_id=record_id,
+    )
     return DetectionRecordDetailResponse.model_validate(record)
 
 
@@ -93,11 +97,15 @@ def create_file_object(
     record_id: int,
     payload: FileObjectCreateRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_company_user),
 ) -> FileObjectResponse:
     """登记检测记录关联的文件对象。"""
 
-    file_object = RecordService(db).create_file_object(record_id, payload)
+    file_object = RecordService(db).create_file_object(
+        company_id=current_user.company_id or 0,
+        record_id=record_id,
+        payload=payload,
+    )
     return FileObjectResponse.model_validate(file_object)
 
 
@@ -106,11 +114,15 @@ def request_ai_review(
     record_id: int,
     payload: AIReviewRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_ai_enabled_user),
+    current_user: User = Depends(get_current_ai_enabled_user),
 ) -> AIReviewResponse:
     """触发 AI 复核预留接口。"""
 
-    result = RecordService(db).request_ai_review(record_id, payload)
+    result = RecordService(db).request_ai_review(
+        company_id=current_user.company_id or 0,
+        record_id=record_id,
+        payload=payload,
+    )
     return AIReviewResponse.model_validate(result)
 
 
@@ -119,11 +131,15 @@ def request_ai_chat(
     record_id: int,
     payload: AIChatRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_ai_enabled_user),
+    current_user: User = Depends(get_current_ai_enabled_user),
 ) -> AIChatResponse:
     """在当前检测记录上下文下发起 AI 对话。"""
 
-    result = RecordService(db).request_ai_chat(record_id, payload)
+    result = RecordService(db).request_ai_chat(
+        company_id=current_user.company_id or 0,
+        record_id=record_id,
+        payload=payload,
+    )
     return AIChatResponse.model_validate(result)
 
 
@@ -132,12 +148,16 @@ def stream_ai_chat(
     record_id: int,
     payload: AIChatRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_ai_enabled_user),
+    current_user: User = Depends(get_current_ai_enabled_user),
 ) -> StreamingResponse:
     """在当前检测记录上下文下发起流式 AI 对话。"""
 
     return StreamingResponse(
-        RecordService(db).stream_ai_chat(record_id, payload),
+        RecordService(db).stream_ai_chat(
+            company_id=current_user.company_id or 0,
+            record_id=record_id,
+            payload=payload,
+        ),
         media_type="text/event-stream",
         headers=build_sse_headers(),
     )

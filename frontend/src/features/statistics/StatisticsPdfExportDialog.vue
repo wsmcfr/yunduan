@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
+import AppDialog from "@/components/common/AppDialog.vue";
 import type { StatisticsPdfExportMode } from "@/types/api";
 
 const props = defineProps<{
@@ -78,7 +79,7 @@ function handleSubmit(): void {
 </script>
 
 <template>
-  <ElDialog
+  <AppDialog
     v-model="visible"
     width="720px"
     destroy-on-close
@@ -117,7 +118,7 @@ function handleSubmit(): void {
         </ElButton>
       </div>
     </template>
-  </ElDialog>
+  </AppDialog>
 </template>
 
 <style scoped>

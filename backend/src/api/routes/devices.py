@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_current_company_admin_user, get_current_company_user, get_db
 from src.db.models.enums import DeviceStatus
 from src.db.models.user import User
 from src.schemas.device import DeviceCreateRequest, DeviceListResponse, DeviceResponse, DeviceUpdateRequest
@@ -21,11 +21,12 @@ def list_devices(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_company_user),
 ) -> DeviceListResponse:
     """分页获取设备列表。"""
 
     total, items = DeviceService(db).list_devices(
+        company_id=current_user.company_id or 0,
         keyword=keyword,
         status=status,
         skip=skip,
@@ -43,11 +44,11 @@ def list_devices(
 def create_device(
     payload: DeviceCreateRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_company_admin_user),
 ) -> DeviceResponse:
     """创建设备档案。"""
 
-    device = DeviceService(db).create_device(payload)
+    device = DeviceService(db).create_device(company_id=current_user.company_id or 0, payload=payload)
     return DeviceResponse.model_validate(device)
 
 
@@ -56,9 +57,13 @@ def update_device(
     device_id: int,
     payload: DeviceUpdateRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_company_admin_user),
 ) -> DeviceResponse:
     """更新指定设备档案。"""
 
-    device = DeviceService(db).update_device(device_id, payload)
+    device = DeviceService(db).update_device(
+        company_id=current_user.company_id or 0,
+        device_id=device_id,
+        payload=payload,
+    )
     return DeviceResponse.model_validate(device)

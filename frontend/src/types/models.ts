@@ -1,4 +1,5 @@
 import type {
+  AdminApplicationStatus,
   AIChatRole,
   AIAuthMode,
   AIGatewayVendor,
@@ -8,6 +9,8 @@ import type {
   DeviceStatus,
   DeviceType,
   FileKind,
+  PasswordChangeRequestStatus,
+  PasswordChangeRequestType,
   ReviewSource,
   ReviewStatus,
   StorageProvider,
@@ -26,18 +29,40 @@ export type StructuredContextValue =
 
 export type StructuredContextBlock = Record<string, StructuredContextValue>;
 
+export interface CompanyBrief {
+  id: number;
+  name: string;
+  isActive: boolean;
+  isSystemReserved: boolean;
+}
+
 export interface UserProfile {
   id: number;
   username: string;
   email: string | null;
   displayName: string;
   role: UserRole;
+  company: CompanyBrief | null;
+  isDefaultAdmin: boolean;
+  adminApplicationStatus: AdminApplicationStatus;
   isActive: boolean;
   canUseAiAnalysis: boolean;
   lastLoginAt: string | null;
   passwordChangedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RegisterResponse {
+  status: "authenticated" | "application_submitted";
+  message: string;
+  sessionExpiresAt: string | null;
+  user: UserProfile | null;
+}
+
+export interface AuthSessionState {
+  authenticated: boolean;
+  user: UserProfile | null;
 }
 
 export interface SystemUserListItem {
@@ -50,14 +75,69 @@ export interface SystemUserListItem {
   canUseAiAnalysis: boolean;
   lastLoginAt: string | null;
   passwordChangedAt: string | null;
+  passwordChangeRequestStatus: PasswordChangeRequestStatus | null;
+  passwordChangeRequestType: PasswordChangeRequestType | null;
+  passwordChangeRequestedAt: string | null;
+  passwordChangeReviewedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface UserPasswordChangeRequestInfo {
+  passwordChangeRequestStatus: PasswordChangeRequestStatus | null;
+  passwordChangeRequestType: PasswordChangeRequestType | null;
+  passwordChangeRequestedAt: string | null;
+  passwordChangeReviewedAt: string | null;
+  defaultResetPassword: string;
 }
 
 export interface AuthRuntimeOptions {
   registrationEnabled: boolean;
   passwordResetEnabled: boolean;
   passwordPolicyHint: string;
+}
+
+export interface CurrentCompany {
+  id: number;
+  name: string;
+  contactName: string | null;
+  note: string | null;
+  inviteCode: string;
+  isActive: boolean;
+  isSystemReserved: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CompanySummary {
+  id: number;
+  name: string;
+  contactName: string | null;
+  note: string | null;
+  inviteCode: string;
+  isActive: boolean;
+  isSystemReserved: boolean;
+  userCount: number;
+  partCount: number;
+  deviceCount: number;
+  recordCount: number;
+  gatewayCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CompanyAdminApplicationItem {
+  id: number;
+  username: string;
+  email: string | null;
+  displayName: string;
+  isActive: boolean;
+  adminApplicationStatus: AdminApplicationStatus;
+  requestedCompanyName: string | null;
+  requestedCompanyContactName: string | null;
+  requestedCompanyNote: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SummaryStatistics {

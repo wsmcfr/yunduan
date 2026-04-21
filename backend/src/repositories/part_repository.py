@@ -27,19 +27,29 @@ class PartRepository:
 
         return select(Part)
 
-    def get_by_id(self, part_id: int) -> Part | None:
-        """按主键查询零件。"""
+    def get_by_id(self, part_id: int, *, company_id: int | None = None) -> Part | None:
+        """按主键查询零件。
 
-        return self.db.scalar(self._base_stmt().where(Part.id == part_id))
+        当提供公司范围时，查询必须同时命中指定公司，避免跨租户越界读取。
+        """
 
-    def get_by_code(self, part_code: str) -> Part | None:
+        stmt = self._base_stmt().where(Part.id == part_id)
+        if company_id is not None:
+            stmt = stmt.where(Part.company_id == company_id)
+        return self.db.scalar(stmt)
+
+    def get_by_code(self, part_code: str, *, company_id: int | None = None) -> Part | None:
         """按零件编码查询零件。"""
 
-        return self.db.scalar(self._base_stmt().where(Part.part_code == part_code))
+        stmt = self._base_stmt().where(Part.part_code == part_code)
+        if company_id is not None:
+            stmt = stmt.where(Part.company_id == company_id)
+        return self.db.scalar(stmt)
 
     def list_parts(
         self,
         *,
+        company_id: int,
         keyword: str | None,
         is_active: bool | None,
         skip: int,
@@ -47,7 +57,7 @@ class PartRepository:
     ) -> tuple[int, list[Part]]:
         """按过滤条件返回分页后的零件列表。"""
 
-        stmt = self._base_stmt()
+        stmt = self._base_stmt().where(Part.company_id == company_id)
         if keyword:
             like_value = f"%{keyword}%"
             stmt = stmt.where(
@@ -71,6 +81,7 @@ class PartRepository:
     def summarize_detection_usage(
         self,
         *,
+        company_id: int,
         part_ids: list[int],
     ) -> dict[int, dict[str, Any]]:
         """汇总零件类型关联的记录量、图片量、来源设备和最近上传时间。"""
@@ -97,6 +108,7 @@ class PartRepository:
             )
             .select_from(DetectionRecord)
             .outerjoin(FileObject, FileObject.detection_record_id == DetectionRecord.id)
+            .where(DetectionRecord.company_id == company_id)
             .where(DetectionRecord.part_id.in_(part_ids))
             .group_by(DetectionRecord.part_id)
         )
@@ -122,6 +134,7 @@ class PartRepository:
             select(DetectionRecord.part_id, Device)
             .select_from(DetectionRecord)
             .join(Device, Device.id == DetectionRecord.device_id)
+            .where(DetectionRecord.company_id == company_id)
             .where(DetectionRecord.part_id.in_(part_ids))
             .order_by(
                 DetectionRecord.part_id.asc(),

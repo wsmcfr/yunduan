@@ -84,7 +84,8 @@ export function createAiOpeningMessage(record: DetectionRecordModel): string {
   return [
     `已进入记录 ${record.recordNo} 的 AI 对话模式。`,
     `当前零件为 ${record.part.name}（${record.part.partCode}），设备为 ${record.device.name}（${record.device.deviceCode}）。`,
-    `MP 初检结果是 ${record.result}，当前最终结果是 ${record.effectiveResult}。你可以直接围绕当前图片对象、检测结果、缺陷信息和复核历史继续追问。`,
+    `MP 初检结果是 ${record.result}，当前最终结果是 ${record.effectiveResult}。当前默认只分析这条记录已经上传的单面图像、检测结果和复核历史，不会跳到别的零件或凭空假设另一面。`,
+    "你可以直接追问：这面图像里最该人工确认什么、哪些证据支持当前判定、现场下一步应该怎么复核。",
   ].join("\n");
 }
 
@@ -93,9 +94,9 @@ export function createAiOpeningMessage(record: DetectionRecordModel): string {
  */
 export function createDefaultAiSuggestedQuestions(record: DetectionRecordModel): string[] {
   return [
-    `结合当前 ${record.part.name} 的图片对象和检测结果，先帮我总结风险点。`,
-    "根据当前记录给出人工复核建议。",
-    "如果这是误检，最可能出现在检测链路的哪一步？",
+    `结合当前 ${record.part.name} 这一面的图片和检测结果，用通俗的话先帮我总结风险点。`,
+    "如果只看当前这一面，哪些证据支持现在的判定，哪些地方还要人工确认？",
+    "给我一份现场可执行的人工复核建议，直接说清楚重点看哪里。",
     "解释这条记录的拍摄、检测完成和上传时间链路。",
   ];
 }

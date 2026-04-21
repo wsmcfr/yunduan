@@ -1,10 +1,12 @@
 """数据库模型导出。"""
 
+from src.db.models.company import Company
 from src.db.models.ai_gateway import AIGateway
 from src.db.models.ai_model_profile import AIModelProfile
 from src.db.models.detection_record import DetectionRecord
 from src.db.models.device import Device
 from src.db.models.enums import (
+    AdminApplicationStatus,
     AIAuthMode,
     AIGatewayVendor,
     AIModelVendor,
@@ -24,12 +26,14 @@ from src.db.models.review_record import ReviewRecord
 from src.db.models.user import User
 
 __all__ = [
+    "AdminApplicationStatus",
     "AIAuthMode",
     "AIGateway",
     "AIGatewayVendor",
     "AIModelProfile",
     "AIModelVendor",
     "AIProtocolType",
+    "Company",
     "DetectionRecord",
     "DetectionResult",
     "Device",

@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import type { FormInstance, FormRules } from "element-plus";
 
+import AppDialog from "@/components/common/AppDialog.vue";
 import type { PartCreateRequestDto, PartUpdateRequestDto } from "@/types/api";
 import type { PartModel } from "@/types/models";
 import { normalizeOptionalText } from "@/utils/form";
@@ -192,7 +193,7 @@ watch(
 </script>
 
 <template>
-  <ElDialog
+  <AppDialog
     :model-value="modelValue"
     :title="dialogTitle"
     width="620px"
@@ -266,7 +267,7 @@ watch(
         </ElButton>
       </div>
     </template>
-  </ElDialog>
+  </AppDialog>
 </template>
 
 <style scoped>

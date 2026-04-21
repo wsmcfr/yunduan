@@ -21,19 +21,26 @@ class DeviceRepository:
 
         return select(Device)
 
-    def get_by_id(self, device_id: int) -> Device | None:
+    def get_by_id(self, device_id: int, *, company_id: int | None = None) -> Device | None:
         """按主键查询设备。"""
 
-        return self.db.scalar(self._base_stmt().where(Device.id == device_id))
+        stmt = self._base_stmt().where(Device.id == device_id)
+        if company_id is not None:
+            stmt = stmt.where(Device.company_id == company_id)
+        return self.db.scalar(stmt)
 
-    def get_by_code(self, device_code: str) -> Device | None:
+    def get_by_code(self, device_code: str, *, company_id: int | None = None) -> Device | None:
         """按设备编码查询设备。"""
 
-        return self.db.scalar(self._base_stmt().where(Device.device_code == device_code))
+        stmt = self._base_stmt().where(Device.device_code == device_code)
+        if company_id is not None:
+            stmt = stmt.where(Device.company_id == company_id)
+        return self.db.scalar(stmt)
 
     def list_devices(
         self,
         *,
+        company_id: int,
         keyword: str | None,
         status: str | None,
         skip: int,
@@ -41,7 +48,7 @@ class DeviceRepository:
     ) -> tuple[int, list[Device]]:
         """按过滤条件返回分页后的设备列表。"""
 
-        stmt = self._base_stmt()
+        stmt = self._base_stmt().where(Device.company_id == company_id)
         if keyword:
             like_value = f"%{keyword}%"
             stmt = stmt.where(

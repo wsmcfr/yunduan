@@ -369,3 +369,105 @@ messages.value = messages.value.map((item) =>
     : item,
 );
 ```
+
+---
+
+## Scenario: Settings Password Request Ownership
+
+### 1. Scope / Trigger
+
+- Trigger: any change to the account-security card in `SettingsPage.vue`, the current-user password-request flow, or the admin user-management actions that approve/reject password requests
+- Affected layers: settings page local refs -> settings API service -> DTO mapper -> settings page table/card rendering
+
+### 2. Signatures
+
+```ts
+const passwordRequestLoading = ref(false);
+const passwordRequestSubmitting = ref(false);
+const passwordRequestInfo = ref<UserPasswordChangeRequestInfo | null>(null);
+const passwordRequestForm = ref({
+  newPassword: "",
+  confirmPassword: "",
+});
+const updatingUserIds = ref<number[]>([]);
+```
+
+```ts
+async function loadCurrentUserPasswordRequestInfo(): Promise<void>;
+async function handleRequestDefaultPasswordReset(): Promise<void>;
+async function handleSubmitRequestedPasswordChange(): Promise<void>;
+async function handleApproveUserPasswordRequest(user: SystemUserListItem): Promise<void>;
+async function handleRejectUserPasswordRequest(user: SystemUserListItem): Promise<void>;
+```
+
+### 3. Contracts
+
+| Concern | Owner | Contract |
+|---|---|---|
+| Current user password-request snapshot | `SettingsPage.vue` local state | `passwordRequestInfo` is page-local and is refreshed from `/api/v1/settings/users/me/password-request` |
+| Current user password form fields | `SettingsPage.vue` local state | `passwordRequestForm.newPassword` and `confirmPassword` stay local only and must be cleared after a successful submit |
+| Current user loading/submitting flags | `SettingsPage.vue` local state | `passwordRequestLoading` and `passwordRequestSubmitting` only block the account-security card, not the whole settings page |
+| Admin row action loading | `SettingsPage.vue` local state | `updatingUserIds` tracks row-level mutations by `userId` so one approve/reject/status action does not freeze the entire table |
+| Auth identity | `useAuthStore` | Auth store still owns only the logged-in identity, not password-request drafts or admin row progress |
+| Server-backed user table data | settings page list loader | Admin table rows may include password-request summary fields, but the mutation in-flight markers stay local to the page |
+
+Additional rules:
+
+- do not move pending-password drafts into Pinia, `localStorage`, or URL query params
+- do not reuse one page-wide boolean for every admin row mutation
+- after a successful current-user submit, reload `passwordRequestInfo` from the backend instead of synthesizing status locally
+- after an admin approve/reject action, refresh the affected user table data and, when needed, the current-user panel so both views converge on the same backend snapshot
+
+### 4. Validation & Error Matrix
+
+| Condition | Problem | Expected behavior |
+|---|---|---|
+| Current user already has a pending request | Repeated submit can overwrite the intended target password in UI memory | Keep the existing snapshot, surface the backend error, and leave the local form disabled by the pending-state guard |
+| Admin row action uses a single global loading flag | One row action blocks every user-management button | Track loading by `userId` in `updatingUserIds` |
+| Current user password draft is stored in a global store | Sensitive text can leak across routes or survive longer than necessary | Keep the draft in page-local refs only |
+| Submit succeeds but the page does not refetch the snapshot | UI can show stale status or old reviewed time | Reload the current-user request info after success |
+| Page is left or session changes | Old request snapshot can belong to a different session/company | Clear page-local password-request state on teardown or auth reset |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | `SettingsPage.vue` owns the password-request card state locally, submits through the settings API, then refetches the latest request snapshot |
+| Base | A non-admin user can only see their own request card; no admin row-action state exists in that view |
+| Bad | Requested password text is moved into a Pinia store or reused across page navigations because the feature wants "shared state" |
+
+### 6. Tests Required
+
+- page test asserting successful submit clears `passwordRequestForm` and refreshes `passwordRequestInfo`
+- page test asserting pending request state disables the current-user submit buttons
+- page test asserting `updatingUserIds` only blocks the targeted admin row while other rows remain interactive
+- page test asserting current-user password-request state is not persisted in auth/global store state
+
+Assertion points:
+
+- sensitive draft password text does not outlive the settings page
+- current-user status comes from the backend snapshot, not optimistic local fabrication
+- admin row updates are scoped by `userId`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+// Sensitive draft password is promoted to global state.
+export const useSettingsStore = defineStore("settings", () => {
+  const requestedPassword = ref("");
+  return { requestedPassword };
+});
+```
+
+#### Correct
+
+```ts
+const passwordRequestForm = ref({
+  newPassword: "",
+  confirmPassword: "",
+});
+
+const updatingUserIds = ref<number[]>([]);
+```

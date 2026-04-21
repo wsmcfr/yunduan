@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
-from src.db.models.enums import UserRole
+from src.db.models.enums import AdminApplicationStatus, UserRole
 from src.db.models.user import User
 
 
@@ -47,6 +47,7 @@ class UserRepository:
     def list_users(
         self,
         *,
+        company_id: int | None,
         keyword: str | None,
         role: UserRole | None,
         can_use_ai_analysis: bool | None,
@@ -58,6 +59,10 @@ class UserRepository:
 
         user_stmt = self._base_stmt()
         total_stmt = select(func.count()).select_from(User)
+
+        if company_id is not None:
+            user_stmt = user_stmt.where(User.company_id == company_id)
+            total_stmt = total_stmt.where(User.company_id == company_id)
 
         normalized_keyword = (keyword or "").strip()
         if normalized_keyword:
@@ -91,6 +96,50 @@ class UserRepository:
         total = int(self.db.scalar(total_stmt) or 0)
         return total, items
 
+    def list_admin_application_users(
+        self,
+        *,
+        keyword: str | None,
+        application_status: AdminApplicationStatus | None,
+        skip: int,
+        limit: int,
+    ) -> tuple[int, list[User]]:
+        """分页返回通过“新公司管理员申请”路径创建的用户。"""
+
+        user_stmt = self._base_stmt().where(User.role == UserRole.ADMIN)
+        total_stmt = select(func.count()).select_from(User).where(User.role == UserRole.ADMIN)
+
+        user_stmt = user_stmt.where(
+            User.admin_application_status != AdminApplicationStatus.NOT_APPLICABLE
+        )
+        total_stmt = total_stmt.where(
+            User.admin_application_status != AdminApplicationStatus.NOT_APPLICABLE
+        )
+
+        normalized_keyword = (keyword or "").strip()
+        if normalized_keyword:
+            fuzzy_keyword = f"%{normalized_keyword}%"
+            keyword_filter = or_(
+                User.username.ilike(fuzzy_keyword),
+                User.display_name.ilike(fuzzy_keyword),
+                User.email.ilike(fuzzy_keyword),
+                User.requested_company_name.ilike(fuzzy_keyword),
+            )
+            user_stmt = user_stmt.where(keyword_filter)
+            total_stmt = total_stmt.where(keyword_filter)
+
+        if application_status is not None:
+            user_stmt = user_stmt.where(User.admin_application_status == application_status)
+            total_stmt = total_stmt.where(User.admin_application_status == application_status)
+
+        items = list(
+            self.db.scalars(
+                user_stmt.order_by(User.created_at.desc(), User.id.desc()).offset(skip).limit(limit),
+            )
+        )
+        total = int(self.db.scalar(total_stmt) or 0)
+        return total, items
+
     def create(self, user: User) -> User:
         """创建用户并刷新主键。"""
 
@@ -104,6 +153,12 @@ class UserRepository:
         self.db.add(user)
         self.db.flush()
         return user
+
+    def delete(self, user: User) -> None:
+        """删除指定用户记录。"""
+
+        self.db.delete(user)
+        self.db.flush()
 
     def touch_last_login(self, user: User) -> User:
         """更新用户最近一次登录时间。"""

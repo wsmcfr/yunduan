@@ -91,6 +91,7 @@ class StatisticsService:
     def _load_records(
         self,
         *,
+        company_id: int,
         start_date: date | None,
         end_date: date | None,
         part_id: int | None = None,
@@ -101,6 +102,7 @@ class StatisticsService:
 
         captured_from, captured_to = self._to_datetime_range(start_date=start_date, end_date=end_date)
         return self.record_repository.list_for_statistics(
+            company_id=company_id,
             part_id=part_id,
             part_category=part_category,
             device_id=device_id,
@@ -582,6 +584,7 @@ class StatisticsService:
     def get_overview(
         self,
         *,
+        company_id: int,
         start_date: date | None,
         end_date: date | None,
         days: int,
@@ -603,6 +606,7 @@ class StatisticsService:
             device_id=device_id,
         )
         records = self._load_records(
+            company_id=company_id,
             start_date=resolved_start_date,
             end_date=resolved_end_date,
             part_id=part_id,
@@ -646,6 +650,7 @@ class StatisticsService:
     def get_sample_gallery(
         self,
         *,
+        company_id: int,
         start_date: date | None,
         end_date: date | None,
         days: int,
@@ -661,6 +666,7 @@ class StatisticsService:
             days=days,
         )
         records = self._load_records(
+            company_id=company_id,
             start_date=resolved_start_date,
             end_date=resolved_end_date,
             part_id=part_id,
@@ -672,17 +678,19 @@ class StatisticsService:
     def get_summary(
         self,
         *,
+        company_id: int,
         start_date: date | None,
         end_date: date | None,
     ) -> SummaryStatisticsResponse:
         """返回检测记录概览统计。"""
 
-        records = self._load_records(start_date=start_date, end_date=end_date)
+        records = self._load_records(company_id=company_id, start_date=start_date, end_date=end_date)
         return self._build_summary_from_records(records=records)
 
     def get_daily_trend(
         self,
         *,
+        company_id: int,
         start_date: date | None,
         end_date: date | None,
         days: int,
@@ -695,6 +703,7 @@ class StatisticsService:
             days=days,
         )
         records = self._load_records(
+            company_id=company_id,
             start_date=resolved_start_date,
             end_date=resolved_end_date,
         )
@@ -709,20 +718,27 @@ class StatisticsService:
     def get_defect_distribution(
         self,
         *,
+        company_id: int,
         start_date: date | None,
         end_date: date | None,
     ) -> DefectDistributionResponse:
         """返回缺陷类型分布统计。"""
 
-        records = self._load_records(start_date=start_date, end_date=end_date)
+        records = self._load_records(company_id=company_id, start_date=start_date, end_date=end_date)
         return DefectDistributionResponse(
             items=self._build_defect_distribution_from_records(records=records)
         )
 
-    def request_ai_analysis(self, payload: StatisticsAIAnalysisRequest) -> StatisticsAIAnalysisResponse:
+    def request_ai_analysis(
+        self,
+        *,
+        company_id: int,
+        payload: StatisticsAIAnalysisRequest,
+    ) -> StatisticsAIAnalysisResponse:
         """基于当前统计窗口和运行时模型生成批次分析结论。"""
 
         overview = self.get_overview(
+            company_id=company_id,
             start_date=payload.start_date,
             end_date=payload.end_date,
             days=payload.days,
@@ -730,7 +746,10 @@ class StatisticsService:
             device_id=payload.device_id,
         )
         model_context = (
-            AIGatewayService(self.db).build_runtime_model_context(payload.model_profile_id)
+            AIGatewayService(self.db).build_runtime_model_context(
+                company_id=company_id,
+                model_id=payload.model_profile_id,
+            )
             if payload.model_profile_id is not None
             else None
         )
@@ -761,10 +780,16 @@ class StatisticsService:
             generated_at=datetime.now(timezone.utc),
         )
 
-    def stream_ai_analysis(self, payload: StatisticsAIAnalysisRequest) -> Iterator[str]:
+    def stream_ai_analysis(
+        self,
+        *,
+        company_id: int,
+        payload: StatisticsAIAnalysisRequest,
+    ) -> Iterator[str]:
         """基于当前统计窗口流式返回批次 AI 分析结论。"""
 
         overview = self.get_overview(
+            company_id=company_id,
             start_date=payload.start_date,
             end_date=payload.end_date,
             days=payload.days,
@@ -772,7 +797,10 @@ class StatisticsService:
             device_id=payload.device_id,
         )
         model_context = (
-            AIGatewayService(self.db).build_runtime_model_context(payload.model_profile_id)
+            AIGatewayService(self.db).build_runtime_model_context(
+                company_id=company_id,
+                model_id=payload.model_profile_id,
+            )
             if payload.model_profile_id is not None
             else None
         )

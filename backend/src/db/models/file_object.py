@@ -20,10 +20,13 @@ class FileObject(Base, IdMixin, CreatedAtMixin):
 
     __tablename__ = "file_objects"
     __table_args__ = (
+        Index("ix_file_objects_company_id", "company_id"),
         Index("ix_file_objects_detection_record_id", "detection_record_id"),
         Index("ix_file_objects_object_key", "object_key"),
     )
 
+    # 文件冗余保存 company_id，便于后续按公司做空间清理和对象排查。
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
     detection_record_id: Mapped[int] = mapped_column(ForeignKey("detection_records.id"), nullable=False)
     file_kind: Mapped[FileKind] = mapped_column(
         SqlEnum(FileKind, name="file_kind_enum", values_callable=enum_values),

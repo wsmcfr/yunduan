@@ -9,9 +9,13 @@ import type {
   AIModelProfileDto,
   AIModelProfileUpdateRequestDto,
   AIRuntimeModelOptionListResponseDto,
+  ApprovePasswordChangeRequestResponseDto,
   ApiMessageResponseDto,
+  SubmitPasswordChangeRequestDto,
   SystemUserAiPermissionUpdateRequestDto,
   SystemUserListResponseDto,
+  SystemUserStatusUpdateRequestDto,
+  UserPasswordChangeRequestInfoDto,
 } from "@/types/api";
 
 import { apiRequest } from "./client";
@@ -174,4 +178,73 @@ export function updateSystemUserAiPermission(
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+/**
+ * 修改指定用户的启停状态。
+ */
+export function updateSystemUserStatus(
+  userId: number,
+  payload: SystemUserStatusUpdateRequestDto,
+): Promise<void> {
+  return apiRequest<void>(`/api/v1/settings/users/${userId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * 删除指定用户账号。
+ */
+export function deleteSystemUser(userId: number): Promise<ApiMessageResponseDto> {
+  return apiRequest<ApiMessageResponseDto>(`/api/v1/settings/users/${userId}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * 读取当前登录用户的站内改密申请状态。
+ */
+export function fetchCurrentUserPasswordChangeRequest(): Promise<UserPasswordChangeRequestInfoDto> {
+  return apiRequest<UserPasswordChangeRequestInfoDto>("/api/v1/settings/users/me/password-request");
+}
+
+/**
+ * 由当前登录用户提交站内改密申请。
+ */
+export function submitCurrentUserPasswordChangeRequest(
+  payload: SubmitPasswordChangeRequestDto,
+): Promise<ApiMessageResponseDto> {
+  return apiRequest<ApiMessageResponseDto>("/api/v1/settings/users/me/password-request", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * 批准指定用户的站内改密申请。
+ */
+export function approveSystemUserPasswordChangeRequest(
+  userId: number,
+): Promise<ApprovePasswordChangeRequestResponseDto> {
+  return apiRequest<ApprovePasswordChangeRequestResponseDto>(
+    `/api/v1/settings/users/${userId}/password-request/approve`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+/**
+ * 拒绝指定用户的站内改密申请。
+ */
+export function rejectSystemUserPasswordChangeRequest(
+  userId: number,
+): Promise<ApiMessageResponseDto> {
+  return apiRequest<ApiMessageResponseDto>(
+    `/api/v1/settings/users/${userId}/password-request/reject`,
+    {
+      method: "POST",
+    },
+  );
 }

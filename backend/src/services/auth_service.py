@@ -16,9 +16,10 @@ from src.core.security import (
     hash_password_reset_token,
     verify_password_and_update_hash,
 )
-from src.db.models.enums import UserRole
+from src.db.models.enums import AdminApplicationStatus, UserRole
 from src.db.models.user import User
 from src.integrations.password_reset_mailer import PasswordResetMailer
+from src.repositories.company_repository import CompanyRepository
 from src.repositories.user_repository import UserRepository
 
 logger = get_logger(__name__)
@@ -36,6 +37,7 @@ class AuthService:
 
         self.db = db
         self.user_repository = UserRepository(db)
+        self.company_repository = CompanyRepository(db)
         self.password_reset_mailer = password_reset_mailer or PasswordResetMailer()
         self.settings = get_settings()
 
@@ -48,6 +50,11 @@ class AuthService:
         """规整邮箱字段，保证查询和唯一性判断一致。"""
 
         return email.strip().lower()
+
+    def _normalize_invite_code(self, invite_code: str) -> str:
+        """规整公司邀请码。"""
+
+        return invite_code.strip().upper()
 
     def _resolve_login_user(self, account: str) -> User | None:
         """根据用户名或邮箱查找当前要登录的用户。"""
@@ -90,9 +97,28 @@ class AuthService:
         if user is None or not verified:
             logger.warning("auth.login_failed account=%s reason=invalid_credentials", account.strip())
             raise UnauthorizedError(code="invalid_credentials", message="账号或密码错误。")
+        if user.role == UserRole.ADMIN and not user.is_default_admin:
+            if user.admin_application_status == AdminApplicationStatus.PENDING:
+                raise ForbiddenError(
+                    code="admin_application_pending",
+                    message="新公司管理员申请尚未通过平台管理员审批，请稍后再试。",
+                )
+            if user.admin_application_status == AdminApplicationStatus.REJECTED:
+                raise ForbiddenError(
+                    code="admin_application_rejected",
+                    message="新公司管理员申请已被拒绝，请联系平台管理员。",
+                )
+            if user.company_id is None:
+                raise ForbiddenError(code="company_unavailable", message="当前管理员账号尚未绑定公司。")
         if not user.is_active:
             logger.warning("auth.login_failed account=%s reason=user_disabled", account.strip())
             raise UnauthorizedError(code="user_disabled", message="当前用户已被禁用。")
+        if user.company_id is not None:
+            company = user.company
+            if company is None:
+                raise UnauthorizedError(code="company_unavailable", message="当前用户所属公司不存在。")
+            if not company.is_active:
+                raise ForbiddenError(code="company_inactive", message="当前所属公司已停用，请联系平台管理员。")
 
         # 老哈希在登录成功时自动升级，避免一次性强制所有账号重置密码。
         if next_hash:
@@ -111,15 +137,107 @@ class AuthService:
         )
         return token, expires_at, user
 
-    def register(
+    def _build_authenticated_register_result(self, *, user: User) -> dict:
+        """为已自动登录的注册结果构造统一返回结构。"""
+
+        token, expires_at = create_access_token(
+            subject=str(user.id),
+            extra_claims={"username": user.username, "role": user.role.value},
+        )
+        return {
+            "status": "authenticated",
+            "message": "注册成功，已自动登录。",
+            "token": token,
+            "expires_at": expires_at,
+            "user": user,
+        }
+
+    def _register_invite_join_user(
         self,
         *,
         username: str,
         display_name: str,
         email: str,
         password: str,
-    ) -> tuple[str, datetime, User]:
-        """创建新账号并直接签发登录会话。"""
+        invite_code: str,
+    ) -> dict:
+        """通过公司邀请码直接注册并加入现有公司。"""
+
+        normalized_invite_code = self._normalize_invite_code(invite_code)
+        company = self.company_repository.get_by_invite_code(normalized_invite_code)
+        if company is None:
+            raise BadRequestError(code="invite_code_invalid", message="邀请码无效，请确认后重试。")
+        if not company.is_active:
+            raise BadRequestError(code="company_inactive", message="目标公司已停用，当前邀请码不可用。")
+
+        user = User(
+            username=username,
+            email=email,
+            password_hash=hash_password(password),
+            password_changed_at=datetime.now(timezone.utc),
+            display_name=display_name,
+            role=UserRole.OPERATOR,
+            company_id=company.id,
+            is_active=True,
+            can_use_ai_analysis=False,
+        )
+        self.user_repository.create(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return self._build_authenticated_register_result(user=user)
+
+    def _register_company_admin_request_user(
+        self,
+        *,
+        username: str,
+        display_name: str,
+        email: str,
+        password: str,
+        company_name: str,
+        company_contact_name: str,
+        company_note: str | None,
+    ) -> dict:
+        """提交“新公司管理员申请”。"""
+
+        user = User(
+            username=username,
+            email=email,
+            password_hash=hash_password(password),
+            password_changed_at=datetime.now(timezone.utc),
+            display_name=display_name,
+            role=UserRole.ADMIN,
+            is_active=True,
+            can_use_ai_analysis=False,
+            admin_application_status=AdminApplicationStatus.PENDING,
+            requested_company_name=company_name,
+            requested_company_contact_name=company_contact_name,
+            requested_company_note=company_note,
+        )
+        self.user_repository.create(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return {
+            "status": "application_submitted",
+            "message": "已提交新公司管理员申请，请等待平台默认管理员审批。",
+            "token": None,
+            "expires_at": None,
+            "user": None,
+        }
+
+    def register(
+        self,
+        *,
+        register_mode: str,
+        username: str,
+        display_name: str,
+        email: str,
+        password: str,
+        invite_code: str | None,
+        company_name: str | None,
+        company_contact_name: str | None,
+        company_note: str | None,
+    ) -> dict:
+        """根据不同注册模式创建账号。"""
 
         if not self.settings.allow_public_registration:
             raise ForbiddenError(code="public_registration_disabled", message="当前环境未开放自助注册。")
@@ -129,27 +247,24 @@ class AuthService:
         normalized_email = self._normalize_email(email)
         self._ensure_username_unique(normalized_username)
         self._ensure_email_unique(normalized_email)
+        if register_mode == "invite_join":
+            return self._register_invite_join_user(
+                username=normalized_username,
+                display_name=normalized_display_name,
+                email=normalized_email,
+                password=password,
+                invite_code=invite_code or "",
+            )
 
-        user = User(
+        return self._register_company_admin_request_user(
             username=normalized_username,
-            email=normalized_email,
-            password_hash=hash_password(password),
-            password_changed_at=datetime.now(timezone.utc),
             display_name=normalized_display_name,
-            role=UserRole.OPERATOR,
-            is_active=True,
-            # 新注册账号默认不开放 AI 能力，必须由管理员在系统设置里显式授权。
-            can_use_ai_analysis=False,
+            email=normalized_email,
+            password=password,
+            company_name=company_name or "",
+            company_contact_name=company_contact_name or "",
+            company_note=company_note,
         )
-        self.user_repository.create(user)
-        self.db.commit()
-        self.db.refresh(user)
-
-        token, expires_at = create_access_token(
-            subject=str(user.id),
-            extra_claims={"username": user.username, "role": user.role.value},
-        )
-        return token, expires_at, user
 
     def request_password_reset(
         self,

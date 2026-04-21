@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="YunDuan">
+  <defs>
+    <linearGradient id="yd-gradient" x1="10%" x2="90%" y1="10%" y2="90%">
+      <stop offset="0%" stop-color="#0f766e" />
+      <stop offset="100%" stop-color="#2563eb" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="#081225" />
+  <path
+    d="M15 18h10l7 13 7-13h10L37 39v9h-10v-9L15 18Z"
+    fill="url(#yd-gradient)"
+  />
+  <circle cx="48" cy="48" r="7" fill="#f8fafc" fill-opacity="0.92" />
+  <path d="M46 48.5 48.2 50.7 52 46.8" fill="none" stroke="#081225" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4" />
+</svg>

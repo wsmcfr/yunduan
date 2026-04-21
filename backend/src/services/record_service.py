@@ -54,6 +54,7 @@ class RecordService:
     def list_records(
         self,
         *,
+        company_id: int,
         part_id: int | None,
         part_category: str | None,
         device_id: int | None,
@@ -69,6 +70,7 @@ class RecordService:
         """分页查询检测记录。"""
 
         return self.record_repository.list_records(
+            company_id=company_id,
             part_id=part_id,
             part_category=part_category,
             device_id=device_id,
@@ -82,12 +84,12 @@ class RecordService:
             limit=limit,
         )
 
-    def create_record(self, payload: DetectionRecordCreateRequest) -> DetectionRecord:
+    def create_record(self, *, company_id: int, payload: DetectionRecordCreateRequest) -> DetectionRecord:
         """创建新的检测主记录。"""
 
-        if self.part_repository.get_by_id(payload.part_id) is None:
+        if self.part_repository.get_by_id(payload.part_id, company_id=company_id) is None:
             raise NotFoundError(code="part_not_found", message="零件不存在。")
-        if self.device_repository.get_by_id(payload.device_id) is None:
+        if self.device_repository.get_by_id(payload.device_id, company_id=company_id) is None:
             raise NotFoundError(code="device_not_found", message="设备不存在。")
 
         record_no = payload.record_no or self._generate_record_no()
@@ -95,6 +97,7 @@ class RecordService:
             raise ConflictError(code="record_no_exists", message="检测记录编号已存在。")
 
         record = DetectionRecord(
+            company_id=company_id,
             record_no=record_no,
             part_id=payload.part_id,
             device_id=payload.device_id,
@@ -117,7 +120,11 @@ class RecordService:
         )
         self.record_repository.create(record)
         self.db.commit()
-        record = self.record_repository.get_by_id(record.id, include_related=True)
+        record = self.record_repository.get_by_id(
+            record.id,
+            company_id=company_id,
+            include_related=True,
+        )
         logger.info(
             "record.created event=record.created record_id=%s record_no=%s part_id=%s device_id=%s",
             record.id,
@@ -127,10 +134,14 @@ class RecordService:
         )
         return record
 
-    def get_record_detail(self, record_id: int) -> DetectionRecord:
+    def get_record_detail(self, *, company_id: int, record_id: int) -> DetectionRecord:
         """读取检测记录详情。"""
 
-        record = self.record_repository.get_by_id(record_id, include_related=True)
+        record = self.record_repository.get_by_id(
+            record_id,
+            company_id=company_id,
+            include_related=True,
+        )
         if record is None:
             raise NotFoundError(code="record_not_found", message="检测记录不存在。")
 
@@ -230,23 +241,42 @@ class RecordService:
 
         return referenced_files
 
-    def _resolve_runtime_model_context(self, model_profile_id: int | None) -> dict | None:
+    def _resolve_runtime_model_context(
+        self,
+        *,
+        company_id: int,
+        model_profile_id: int | None,
+    ) -> dict | None:
         """把前端选择的模型配置解析成运行时上下文摘要。"""
 
         if model_profile_id is None:
             return None
 
-        return AIGatewayService(self.db).build_runtime_model_context(model_profile_id)
+        return AIGatewayService(self.db).build_runtime_model_context(
+            company_id=company_id,
+            model_id=model_profile_id,
+        )
 
-    def create_file_object(self, record_id: int, payload: FileObjectCreateRequest) -> FileObject:
+    def create_file_object(
+        self,
+        *,
+        company_id: int,
+        record_id: int,
+        payload: FileObjectCreateRequest,
+    ) -> FileObject:
         """为指定检测记录登记文件对象元数据。"""
 
-        record = self.record_repository.get_by_id(record_id, include_related=False)
+        record = self.record_repository.get_by_id(
+            record_id,
+            company_id=company_id,
+            include_related=False,
+        )
         if record is None:
             raise NotFoundError(code="record_not_found", message="检测记录不存在。")
 
         uploaded_at = payload.uploaded_at or datetime.now(timezone.utc)
         file_object = FileObject(
+            company_id=company_id,
             detection_record_id=record_id,
             file_kind=payload.file_kind,
             storage_provider=payload.storage_provider,
@@ -275,12 +305,15 @@ class RecordService:
         file_object.preview_url = self._build_file_preview_url(file_object=file_object)
         return file_object
 
-    def request_ai_review(self, record_id: int, payload: AIReviewRequest) -> dict:
+    def request_ai_review(self, *, company_id: int, record_id: int, payload: AIReviewRequest) -> dict:
         """触发 AI 复核接口。"""
 
-        record = self.get_record_detail(record_id)
+        record = self.get_record_detail(company_id=company_id, record_id=record_id)
 
-        model_context = self._resolve_runtime_model_context(payload.model_profile_id)
+        model_context = self._resolve_runtime_model_context(
+            company_id=company_id,
+            model_profile_id=payload.model_profile_id,
+        )
         provider_hint = payload.provider_hint or (
             f"{model_context['gateway_name']} / {model_context['display_name']}"
             if model_context is not None
@@ -298,13 +331,16 @@ class RecordService:
             model_context=model_context,
         )
 
-    def request_ai_chat(self, record_id: int, payload: AIChatRequest) -> dict:
+    def request_ai_chat(self, *, company_id: int, record_id: int, payload: AIChatRequest) -> dict:
         """在当前检测记录上下文下发起 AI 对话。"""
 
-        record = self.get_record_detail(record_id)
+        record = self.get_record_detail(company_id=company_id, record_id=record_id)
         context = self._build_ai_chat_context(record=record)
         referenced_files = self._build_ai_referenced_files(record=record)
-        model_context = self._resolve_runtime_model_context(payload.model_profile_id)
+        model_context = self._resolve_runtime_model_context(
+            company_id=company_id,
+            model_profile_id=payload.model_profile_id,
+        )
         provider_hint = payload.provider_hint or (
             f"{model_context['gateway_name']} / {model_context['display_name']}"
             if model_context is not None
@@ -321,13 +357,22 @@ class RecordService:
             model_context=model_context,
         )
 
-    def stream_ai_chat(self, record_id: int, payload: AIChatRequest) -> Iterator[str]:
+    def stream_ai_chat(
+        self,
+        *,
+        company_id: int,
+        record_id: int,
+        payload: AIChatRequest,
+    ) -> Iterator[str]:
         """在当前检测记录上下文下以 SSE 方式流式返回 AI 对话结果。"""
 
-        record = self.get_record_detail(record_id)
+        record = self.get_record_detail(company_id=company_id, record_id=record_id)
         context = self._build_ai_chat_context(record=record)
         referenced_files = self._build_ai_referenced_files(record=record)
-        model_context = self._resolve_runtime_model_context(payload.model_profile_id)
+        model_context = self._resolve_runtime_model_context(
+            company_id=company_id,
+            model_profile_id=payload.model_profile_id,
+        )
         provider_hint = payload.provider_hint or (
             f"{model_context['gateway_name']} / {model_context['display_name']}"
             if model_context is not None

@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import type { FormInstance, FormRules } from "element-plus";
 
+import AppDialog from "@/components/common/AppDialog.vue";
 import { aiGatewayPresets, gatewayVendorLabels } from "@/features/settings/aiSettingsCatalog";
 import { previewGatewayModels } from "@/services/api/settings";
 import { mapAIDiscoveredModelCandidateDto } from "@/services/mappers/commonMappers";
@@ -59,11 +60,15 @@ const props = withDefaults(
     submitting?: boolean;
     initialValue?: AIGatewayModel | null;
     presetId?: string | null;
+    submitError?: string;
+    submitErrorCode?: string;
   }>(),
   {
     submitting: false,
     initialValue: null,
     presetId: null,
+    submitError: "",
+    submitErrorCode: "",
   },
 );
 
@@ -73,6 +78,7 @@ const emit = defineEmits<{
     payload: AIGatewayCreateRequestDto | AIGatewayUpdateRequestDto,
     selectedCandidates: AIDiscoveredModelCandidate[],
   ];
+  "clear-submit-error": [];
 }>();
 
 /**
@@ -98,6 +104,19 @@ const activePreset = computed(
 const dialogTitle = computed(() =>
   mode.value === "create" ? "新增 AI 网关" : "编辑 AI 网关",
 );
+
+/**
+ * 为网关保存失败提示生成短标题，避免把很长的后端说明直接挤进标题行。
+ */
+const submitErrorTitle = computed(() => {
+  if (props.submitErrorCode === "ai_gateway_name_exists") {
+    return "当前公司内已存在同名网关";
+  }
+  if (props.submitErrorCode === "ai_gateway_global_name_conflict") {
+    return "数据库仍残留旧的全局唯一索引";
+  }
+  return "网关保存失败";
+});
 
 /**
  * 表单状态统一托管，便于重置与编辑回填。
@@ -199,6 +218,7 @@ function syncFormState(): void {
     ? createFormFromGateway(props.initialValue)
     : createFormFromPreset(props.presetId);
   Object.assign(formState, nextValue);
+  emit("clear-submit-error");
   discoveryError.value = "";
   discoveredModels.value = [];
   selectedCandidateKeys.value = [];
@@ -209,6 +229,7 @@ function syncFormState(): void {
  * 关闭弹窗。
  */
 function closeDialog(): void {
+  emit("clear-submit-error");
   emit("update:modelValue", false);
 }
 
@@ -327,6 +348,7 @@ function clearSelectedCandidates(): void {
  * 这里不要求先保存网关，所以你在这个弹窗里就能直接看到可选模型。
  */
 async function handlePreviewModels(): Promise<void> {
+  emit("clear-submit-error");
   const normalizedBaseUrl = formState.baseUrl.trim();
   const normalizedApiKey = formState.apiKey.trim();
 
@@ -375,6 +397,7 @@ async function handlePreviewModels(): Promise<void> {
  * 编辑模式下如果 API Key 留空，表示保留后端现有密钥。
  */
 async function submitForm(): Promise<void> {
+  emit("clear-submit-error");
   const isValid = await formRef.value?.validate().catch(() => false);
   if (!isValid) {
     return;
@@ -417,6 +440,7 @@ watch(
       return;
     }
     formRef.value?.clearValidate();
+    emit("clear-submit-error");
   },
   { immediate: true },
 );
@@ -433,6 +457,7 @@ watch(
 watch(
   () => formState.vendor,
   (nextVendor) => {
+    emit("clear-submit-error");
     selectedSourceTemplateLabels.value = createDefaultSourceTemplateLabels(nextVendor);
     discoveryError.value = "";
     discoveredModels.value = [];
@@ -448,10 +473,27 @@ watch(
     }
   },
 );
+
+watch(
+  () => [
+    formState.name,
+    formState.baseUrl,
+    formState.apiKey,
+    formState.officialUrl,
+    formState.note,
+    formState.isEnabled,
+    formState.isCustom,
+  ],
+  () => {
+    if (props.modelValue && props.submitError) {
+      emit("clear-submit-error");
+    }
+  },
+);
 </script>
 
 <template>
-  <ElDialog
+  <AppDialog
     class="gateway-dialog"
     :model-value="modelValue"
     :title="dialogTitle"
@@ -478,6 +520,16 @@ watch(
         :closable="false"
         :title="`当前已保存密钥：${initialValue.apiKeyMask ?? '已配置'}`"
         description="编辑时 API Key 留空表示继续保留现有密钥，前端不会拿到旧密钥原文。"
+        class="gateway-dialog__alert"
+      />
+
+      <ElAlert
+        v-if="submitError"
+        type="error"
+        show-icon
+        :closable="false"
+        :title="submitErrorTitle"
+        :description="submitError"
         class="gateway-dialog__alert"
       />
 
@@ -581,7 +633,7 @@ watch(
               <ElCheckbox
                 v-for="option in availableSourceTemplateOptions"
                 :key="option.sourceLabel"
-                :label="option.sourceLabel"
+                :value="option.sourceLabel"
                 class="gateway-dialog__framework-item"
               >
                 <div class="gateway-dialog__framework-item-copy">
@@ -659,7 +711,7 @@ watch(
                   <ElCheckbox
                     v-for="candidate in group.items"
                     :key="createCandidateKey(candidate)"
-                    :label="createCandidateKey(candidate)"
+                    :value="createCandidateKey(candidate)"
                     class="gateway-dialog__candidate-item"
                   >
                     <div class="gateway-dialog__candidate-main">
@@ -684,7 +736,7 @@ watch(
               <ElCheckbox
                 v-for="candidate in discoveredModels"
                 :key="createCandidateKey(candidate)"
-                :label="createCandidateKey(candidate)"
+                :value="createCandidateKey(candidate)"
                 class="gateway-dialog__candidate-item"
               >
                 <div class="gateway-dialog__candidate-main">
@@ -731,7 +783,7 @@ watch(
         </ElButton>
       </div>
     </template>
-  </ElDialog>
+  </AppDialog>
 </template>
 
 <style scoped>

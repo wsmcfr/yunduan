@@ -22,6 +22,7 @@ class DeviceService:
     def list_devices(
         self,
         *,
+        company_id: int,
         keyword: str | None,
         status: str | None,
         skip: int,
@@ -30,19 +31,21 @@ class DeviceService:
         """分页查询设备列表。"""
 
         return self.device_repository.list_devices(
+            company_id=company_id,
             keyword=keyword,
             status=status,
             skip=skip,
             limit=limit,
         )
 
-    def create_device(self, payload: DeviceCreateRequest) -> Device:
+    def create_device(self, *, company_id: int, payload: DeviceCreateRequest) -> Device:
         """创建设备档案。"""
 
-        if self.device_repository.get_by_code(payload.device_code) is not None:
+        if self.device_repository.get_by_code(payload.device_code, company_id=company_id) is not None:
             raise ConflictError(code="device_code_exists", message="设备编码已存在。")
 
         device = Device(
+            company_id=company_id,
             device_code=payload.device_code,
             name=payload.name,
             device_type=payload.device_type,
@@ -56,15 +59,15 @@ class DeviceService:
         self.db.refresh(device)
         return device
 
-    def update_device(self, device_id: int, payload: DeviceUpdateRequest) -> Device:
+    def update_device(self, *, company_id: int, device_id: int, payload: DeviceUpdateRequest) -> Device:
         """更新设备档案。"""
 
-        device = self.device_repository.get_by_id(device_id)
+        device = self.device_repository.get_by_id(device_id, company_id=company_id)
         if device is None:
             raise NotFoundError(code="device_not_found", message="设备不存在。")
 
         if payload.device_code and payload.device_code != device.device_code:
-            existed = self.device_repository.get_by_code(payload.device_code)
+            existed = self.device_repository.get_by_code(payload.device_code, company_id=company_id)
             if existed is not None and existed.id != device_id:
                 raise ConflictError(code="device_code_exists", message="设备编码已存在。")
             device.device_code = payload.device_code

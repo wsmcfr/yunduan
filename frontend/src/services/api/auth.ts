@@ -1,6 +1,8 @@
 import type {
   ApiMessageResponseDto,
   AuthRuntimeOptionsDto,
+  RegisterResponseDto,
+  AuthSessionStateDto,
   AuthSessionResponseDto,
   ForgotPasswordRequestDto,
   LoginRequestDto,
@@ -29,10 +31,11 @@ export function loginRequest(payload: LoginRequestDto): Promise<AuthSessionRespo
 }
 
 /**
- * 调用注册接口创建账号并直接建立会话。
+ * 调用注册接口创建账号。
+ * 邀请码加入公司会直接登录，申请新公司管理员则只返回申请结果。
  */
-export function registerRequest(payload: RegisterRequestDto): Promise<AuthSessionResponseDto> {
-  return apiRequest<AuthSessionResponseDto>("/api/v1/auth/register", {
+export function registerRequest(payload: RegisterRequestDto): Promise<RegisterResponseDto> {
+  return apiRequest<RegisterResponseDto>("/api/v1/auth/register", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -56,6 +59,14 @@ export function resetPasswordRequest(payload: ResetPasswordRequestDto): Promise<
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+/**
+ * 读取当前浏览器上的会话状态。
+ * 未登录时也返回 200，便于前端静默恢复会话而不制造 401 噪音。
+ */
+export function fetchSessionStateRequest(): Promise<AuthSessionStateDto> {
+  return apiRequest<AuthSessionStateDto>("/api/v1/auth/session");
 }
 
 /**

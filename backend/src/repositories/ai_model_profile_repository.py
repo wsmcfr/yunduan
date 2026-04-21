@@ -24,19 +24,28 @@ class AIModelProfileRepository:
             stmt = stmt.options(selectinload(AIModelProfile.gateway))
         return stmt
 
-    def get_by_id(self, model_id: int, *, include_gateway: bool = False) -> AIModelProfile | None:
+    def get_by_id(
+        self,
+        model_id: int,
+        *,
+        company_id: int | None = None,
+        include_gateway: bool = False,
+    ) -> AIModelProfile | None:
         """按主键查询 AI 模型配置。"""
 
-        return self.db.scalar(
-            self._base_stmt(include_gateway=include_gateway).where(AIModelProfile.id == model_id)
-        )
+        stmt = self._base_stmt(include_gateway=include_gateway).where(AIModelProfile.id == model_id)
+        if company_id is not None:
+            stmt = stmt.where(AIModelProfile.gateway.has(company_id=company_id))
+        return self.db.scalar(stmt)
 
-    def list_runtime_enabled(self) -> list[AIModelProfile]:
-        """返回运行时可能被使用的模型配置。"""
+    def list_runtime_enabled(self, *, company_id: int) -> list[AIModelProfile]:
+        """返回公司内运行时可能被使用的模型配置。"""
 
         return list(
             self.db.execute(
-                self._base_stmt(include_gateway=True).where(AIModelProfile.is_enabled.is_(True))
+                self._base_stmt(include_gateway=True)
+                .where(AIModelProfile.is_enabled.is_(True))
+                .where(AIModelProfile.gateway.has(company_id=company_id))
             ).scalars()
         )
 

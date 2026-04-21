@@ -18,7 +18,10 @@ from src.core.security import (
     verify_password_and_update_hash,
 )
 from src.db.base import Base
+from src.db.models.company import Company
+from src.db.models.enums import AdminApplicationStatus
 from src.db.models.user import User
+from src.repositories.company_repository import CompanyRepository
 from src.repositories.user_repository import UserRepository
 from src.services.auth_service import AuthService
 
@@ -63,13 +66,15 @@ class AuthServiceTestCase(unittest.TestCase):
         """为每个测试准备独立的内存数据库。"""
 
         self.engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
-        Base.metadata.create_all(bind=self.engine, tables=[User.__table__])
+        Base.metadata.create_all(bind=self.engine, tables=[Company.__table__, User.__table__])
         self.session_factory = sessionmaker(bind=self.engine, autoflush=False, autocommit=False, class_=Session)
         self.db = self.session_factory()
         self.mailer = StubPasswordResetMailer()
         self.service = AuthService(self.db, password_reset_mailer=self.mailer)
         self.service.settings.allow_public_registration = True
+        self.company_repository = CompanyRepository(self.db)
         self.user_repository = UserRepository(self.db)
+        self.demo_company = self._create_demo_company()
 
     def tearDown(self) -> None:
         """释放数据库连接和内存引擎。"""
@@ -77,16 +82,37 @@ class AuthServiceTestCase(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
-    def _register_demo_user(self) -> tuple[str, User]:
-        """创建一个标准测试用户，便于后续复用。"""
+    def _create_demo_company(self) -> Company:
+        """创建一个标准测试公司，供邀请码注册链路复用。"""
 
-        token, _, user = self.service.register(
+        company = Company(
+            name="演示公司",
+            contact_name="测试联系人",
+            note="用于认证单测的固定公司。",
+            invite_code="JOINCODE01",
+            is_active=True,
+            is_system_reserved=False,
+        )
+        self.company_repository.create(company)
+        self.db.commit()
+        self.db.refresh(company)
+        return company
+
+    def _register_demo_user(self) -> tuple[str, User]:
+        """通过邀请码创建一个标准测试用户，便于后续复用。"""
+
+        register_result = self.service.register(
+            register_mode="invite_join",
             username="demo-user",
             display_name="演示用户",
             email="Demo@Example.com",
             password="StrongPass#2026",
+            invite_code=self.demo_company.invite_code,
+            company_name=None,
+            company_contact_name=None,
+            company_note=None,
         )
-        return token, user
+        return str(register_result["token"]), register_result["user"]
 
     def test_register_hashes_password_and_normalizes_email(self) -> None:
         """注册后数据库中只能看到规整后的邮箱和密码哈希。"""
@@ -109,11 +135,40 @@ class AuthServiceTestCase(unittest.TestCase):
 
         with self.assertRaises(ConflictError):
             self.service.register(
+                register_mode="invite_join",
                 username="another-user",
                 display_name="另一个用户",
                 email="demo@example.com",
                 password="AnotherPass#2026",
+                invite_code=self.demo_company.invite_code,
+                company_name=None,
+                company_contact_name=None,
+                company_note=None,
             )
+
+    def test_company_admin_request_registers_pending_admin_without_session(self) -> None:
+        """申请新公司管理员时，应只生成待审批账号，不直接建立会话。"""
+
+        register_result = self.service.register(
+            register_mode="company_admin_request",
+            username="tenant-admin",
+            display_name="租户管理员",
+            email="tenant-admin@example.com",
+            password="StrongPass#2026",
+            invite_code=None,
+            company_name="全新公司",
+            company_contact_name="张三",
+            company_note="申请创建全新租户。",
+        )
+
+        persisted_user = self.user_repository.get_by_username("tenant-admin")
+        self.assertEqual(register_result["status"], "application_submitted")
+        self.assertIsNone(register_result["token"])
+        self.assertIsNotNone(persisted_user)
+        assert persisted_user is not None
+        self.assertEqual(persisted_user.role.value, "admin")
+        self.assertIsNone(persisted_user.company_id)
+        self.assertEqual(persisted_user.admin_application_status, AdminApplicationStatus.PENDING)
 
     def test_request_password_reset_only_persists_token_hash(self) -> None:
         """忘记密码流程只能把令牌哈希落库，不能落明文 token。"""

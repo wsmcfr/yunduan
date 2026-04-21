@@ -1,9 +1,14 @@
 import type {
   AuthRuntimeOptionsDto,
+  AuthSessionStateDto,
   AIChatResponseDto,
   AIContextFileDto,
   AIDiscoveredModelCandidateDto,
   AIRecordContextDto,
+  CompanyAdminApplicationItemDto,
+  CompanyBriefDto,
+  CompanySummaryResponseDto,
+  CurrentCompanyResponseDto,
   AIGatewayDto,
   AIModelProfileDto,
   AIRuntimeModelOptionDto,
@@ -16,6 +21,7 @@ import type {
   FileObjectDto,
   PartDto,
   PartQualityItemDto,
+  RegisterResponseDto,
   ResultDistributionItemDto,
   ReviewRecordDto,
   ReviewStatusDistributionItemDto,
@@ -26,15 +32,21 @@ import type {
   StatisticsSampleGalleryResponseDto,
   StatisticsSampleImageItemDto,
   SummaryStatisticsDto,
+  UserPasswordChangeRequestInfoDto,
   SystemUserListItemDto,
   UserProfileDto,
 } from "@/types/api";
 import type {
   AuthRuntimeOptions,
+  AuthSessionState,
   AIChatResponse,
   AIContextFile,
   AIDiscoveredModelCandidate,
   AIRecordContext,
+  CompanyAdminApplicationItem,
+  CompanyBrief,
+  CompanySummary,
+  CurrentCompany,
   AIGatewayModel,
   AIModelProfile,
   AIRuntimeModelOption,
@@ -46,6 +58,7 @@ import type {
   FileObjectModel,
   PartModel,
   PartQualityItem,
+  RegisterResponse,
   ResultDistributionItem,
   ReviewRecordModel,
   ReviewStatusDistributionItem,
@@ -57,6 +70,7 @@ import type {
   StatisticsSampleImageItem,
   SummaryStatistics,
   SystemUserListItem,
+  UserPasswordChangeRequestInfo,
   UserProfile,
 } from "@/types/models";
 
@@ -72,6 +86,28 @@ export function mapAuthRuntimeOptionsDto(dto: AuthRuntimeOptionsDto): AuthRuntim
 }
 
 /**
+ * 将公开会话探针 DTO 映射为前端模型。
+ */
+export function mapAuthSessionStateDto(dto: AuthSessionStateDto): AuthSessionState {
+  return {
+    authenticated: dto.authenticated,
+    user: dto.user ? mapUserProfileDto(dto.user) : null,
+  };
+}
+
+/**
+ * 将公司简要 DTO 映射为前端模型。
+ */
+export function mapCompanyBriefDto(dto: CompanyBriefDto): CompanyBrief {
+  return {
+    id: dto.id,
+    name: dto.name,
+    isActive: dto.is_active,
+    isSystemReserved: dto.is_system_reserved,
+  };
+}
+
+/**
  * 将后端用户 DTO 映射为前端展示模型。
  */
 export function mapUserProfileDto(dto: UserProfileDto): UserProfile {
@@ -81,12 +117,27 @@ export function mapUserProfileDto(dto: UserProfileDto): UserProfile {
     email: dto.email,
     displayName: dto.display_name,
     role: dto.role,
+    company: dto.company ? mapCompanyBriefDto(dto.company) : null,
+    isDefaultAdmin: dto.is_default_admin,
+    adminApplicationStatus: dto.admin_application_status,
     isActive: dto.is_active,
     canUseAiAnalysis: dto.can_use_ai_analysis,
     lastLoginAt: dto.last_login_at,
     passwordChangedAt: dto.password_changed_at,
     createdAt: dto.created_at,
     updatedAt: dto.updated_at,
+  };
+}
+
+/**
+ * 将注册响应 DTO 映射为前端模型。
+ */
+export function mapRegisterResponseDto(dto: RegisterResponseDto): RegisterResponse {
+  return {
+    status: dto.status,
+    message: dto.message,
+    sessionExpiresAt: dto.session_expires_at,
+    user: dto.user ? mapUserProfileDto(dto.user) : null,
   };
 }
 
@@ -104,6 +155,85 @@ export function mapSystemUserListItemDto(dto: SystemUserListItemDto): SystemUser
     canUseAiAnalysis: dto.can_use_ai_analysis,
     lastLoginAt: dto.last_login_at,
     passwordChangedAt: dto.password_changed_at,
+    passwordChangeRequestStatus: dto.password_change_request_status,
+    passwordChangeRequestType: dto.password_change_request_type,
+    passwordChangeRequestedAt: dto.password_change_requested_at,
+    passwordChangeReviewedAt: dto.password_change_reviewed_at,
+    createdAt: dto.created_at,
+    updatedAt: dto.updated_at,
+  };
+}
+
+/**
+ * 将当前用户的密码申请状态 DTO 映射为前端模型。
+ */
+export function mapUserPasswordChangeRequestInfoDto(
+  dto: UserPasswordChangeRequestInfoDto,
+): UserPasswordChangeRequestInfo {
+  return {
+    passwordChangeRequestStatus: dto.password_change_request_status,
+    passwordChangeRequestType: dto.password_change_request_type,
+    passwordChangeRequestedAt: dto.password_change_requested_at,
+    passwordChangeReviewedAt: dto.password_change_reviewed_at,
+    defaultResetPassword: dto.default_reset_password,
+  };
+}
+
+/**
+ * 将当前公司详情 DTO 映射为前端模型。
+ */
+export function mapCurrentCompanyResponseDto(dto: CurrentCompanyResponseDto): CurrentCompany {
+  return {
+    id: dto.id,
+    name: dto.name,
+    contactName: dto.contact_name,
+    note: dto.note,
+    inviteCode: dto.invite_code,
+    isActive: dto.is_active,
+    isSystemReserved: dto.is_system_reserved,
+    createdAt: dto.created_at,
+    updatedAt: dto.updated_at,
+  };
+}
+
+/**
+ * 将平台公司摘要 DTO 映射为前端模型。
+ */
+export function mapCompanySummaryResponseDto(dto: CompanySummaryResponseDto): CompanySummary {
+  return {
+    id: dto.id,
+    name: dto.name,
+    contactName: dto.contact_name,
+    note: dto.note,
+    inviteCode: dto.invite_code,
+    isActive: dto.is_active,
+    isSystemReserved: dto.is_system_reserved,
+    userCount: dto.user_count,
+    partCount: dto.part_count,
+    deviceCount: dto.device_count,
+    recordCount: dto.record_count,
+    gatewayCount: dto.gateway_count,
+    createdAt: dto.created_at,
+    updatedAt: dto.updated_at,
+  };
+}
+
+/**
+ * 将管理员申请 DTO 映射为前端模型。
+ */
+export function mapCompanyAdminApplicationItemDto(
+  dto: CompanyAdminApplicationItemDto,
+): CompanyAdminApplicationItem {
+  return {
+    id: dto.id,
+    username: dto.username,
+    email: dto.email,
+    displayName: dto.display_name,
+    isActive: dto.is_active,
+    adminApplicationStatus: dto.admin_application_status,
+    requestedCompanyName: dto.requested_company_name,
+    requestedCompanyContactName: dto.requested_company_contact_name,
+    requestedCompanyNote: dto.requested_company_note,
     createdAt: dto.created_at,
     updatedAt: dto.updated_at,
   };

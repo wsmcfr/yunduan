@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
-from src.db.models.enums import UserRole
+from src.db.models.enums import AdminApplicationStatus, UserRole
+from src.schemas.company import CompanyBrief
 from src.schemas.common import ORMBaseModel
 
 # 用户名、邮箱、密码强度都在入口层做一次明确校验，避免脏数据扩散到服务层。
@@ -68,6 +70,15 @@ def _validate_password_policy(value: str) -> str:
     return normalized_value
 
 
+def _normalize_company_field(value: str, *, field_label: str, min_length: int = 2) -> str:
+    """规整公司申请资料字段。"""
+
+    normalized_value = value.strip()
+    if len(normalized_value) < min_length:
+        raise ValueError(f"{field_label}至少需要 {min_length} 个字符。")
+    return normalized_value
+
+
 class AuthRuntimeOptionsResponse(BaseModel):
     """认证页运行时能力描述。"""
 
@@ -97,10 +108,15 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     """注册请求体。"""
 
+    register_mode: Literal["invite_join", "company_admin_request"] = "invite_join"
     username: str = Field(min_length=3, max_length=64)
     display_name: str = Field(min_length=2, max_length=64)
     email: str = Field(min_length=5, max_length=128)
     password: str = Field(min_length=8, max_length=128)
+    invite_code: str | None = Field(default=None, min_length=4, max_length=32)
+    company_name: str | None = Field(default=None, min_length=2, max_length=128)
+    company_contact_name: str | None = Field(default=None, min_length=2, max_length=64)
+    company_note: str | None = None
 
     @field_validator("username")
     @classmethod
@@ -133,6 +149,61 @@ class RegisterRequest(BaseModel):
         """校验密码复杂度。"""
 
         return _validate_password_policy(value)
+
+    @field_validator("invite_code")
+    @classmethod
+    def validate_invite_code(cls, value: str | None) -> str | None:
+        """规整邀请码。"""
+
+        if value is None:
+            return None
+        normalized_value = value.strip().upper()
+        if len(normalized_value) < 4:
+            raise ValueError("请输入有效的邀请码。")
+        return normalized_value
+
+    @field_validator("company_name")
+    @classmethod
+    def validate_company_name(cls, value: str | None) -> str | None:
+        """规整申请资料中的公司名称。"""
+
+        if value is None:
+            return None
+        return _normalize_company_field(value, field_label="公司名称", min_length=2)
+
+    @field_validator("company_contact_name")
+    @classmethod
+    def validate_company_contact_name(cls, value: str | None) -> str | None:
+        """规整申请资料中的联系人名称。"""
+
+        if value is None:
+            return None
+        return _normalize_company_field(value, field_label="联系人", min_length=2)
+
+    @field_validator("company_note")
+    @classmethod
+    def validate_company_note(cls, value: str | None) -> str | None:
+        """规整申请资料中的备注。"""
+
+        if value is None:
+            return None
+        normalized_value = value.strip()
+        return normalized_value or None
+
+    @model_validator(mode="after")
+    def validate_register_mode_fields(self) -> "RegisterRequest":
+        """根据注册模式校验必填字段。"""
+
+        if self.register_mode == "invite_join":
+            if not self.invite_code:
+                raise ValueError("通过邀请码加入公司时，必须填写邀请码。")
+        else:
+            if not self.company_name:
+                raise ValueError("申请新公司管理员时，必须填写公司名称。")
+            if not self.company_contact_name:
+                raise ValueError("申请新公司管理员时，必须填写联系人。")
+
+        return self
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -181,6 +252,9 @@ class UserProfile(ORMBaseModel):
     email: str | None
     display_name: str
     role: UserRole
+    company: CompanyBrief | None
+    is_default_admin: bool
+    admin_application_status: AdminApplicationStatus
     is_active: bool
     can_use_ai_analysis: bool
     last_login_at: datetime | None
@@ -189,8 +263,32 @@ class UserProfile(ORMBaseModel):
     updated_at: datetime
 
 
+class AuthSessionStateResponse(BaseModel):
+    """公开会话探针响应。
+
+    用于前端刷新页面后静默判断“当前浏览器是否仍然带着有效 Cookie”，
+    未登录时返回 authenticated=false，而不是抛 401。
+    """
+
+    authenticated: bool
+    user: UserProfile | None = None
+
+
 class AuthSessionResponse(BaseModel):
     """登录或注册成功后的会话响应体。"""
 
     session_expires_at: datetime
     user: UserProfile
+
+
+class RegisterResponse(BaseModel):
+    """注册接口响应体。
+
+    邀请码注册会直接返回登录会话；
+    新公司管理员申请只返回申请结果，不会直接建立登录态。
+    """
+
+    status: Literal["authenticated", "application_submitted"]
+    message: str
+    session_expires_at: datetime | None = None
+    user: UserProfile | None = None

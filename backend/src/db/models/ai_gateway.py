@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Enum as SqlEnum, Index, String, Text, text
+from sqlalchemy import Boolean, Enum as SqlEnum, ForeignKey, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base, IdMixin, TimestampMixin
 from src.db.models.enums import AIGatewayVendor, enum_values
 
 if TYPE_CHECKING:
+    from src.db.models.company import Company
     from src.db.models.ai_model_profile import AIModelProfile
 
 
@@ -27,11 +28,14 @@ class AIGateway(Base, IdMixin, TimestampMixin):
 
     __tablename__ = "ai_gateways"
     __table_args__ = (
+        UniqueConstraint("company_id", "name", name="uq_ai_gateways_company_name"),
+        Index("ix_ai_gateways_company_id", "company_id"),
         Index("ix_ai_gateways_vendor", "vendor"),
         Index("ix_ai_gateways_is_enabled", "is_enabled"),
     )
 
-    name: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
     vendor: Mapped[AIGatewayVendor] = mapped_column(
         SqlEnum(AIGatewayVendor, name="ai_gateway_vendor_enum", values_callable=enum_values),
         nullable=False,
@@ -54,6 +58,7 @@ class AIGateway(Base, IdMixin, TimestampMixin):
     api_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     api_key_last4: Mapped[str] = mapped_column(String(4), nullable=False)
 
+    company: Mapped["Company"] = relationship("Company", back_populates="ai_gateways")
     # 一个网关可以配置多个模型条目，例如同一个中转站下的 Claude / Gemini / Codex。
     models: Mapped[list["AIModelProfile"]] = relationship(
         "AIModelProfile",

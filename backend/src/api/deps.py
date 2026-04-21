@@ -63,21 +63,50 @@ def get_current_user(
     user = UserRepository(db).get_by_id(user_id)
     if user is None or not user.is_active:
         raise UnauthorizedError(code="user_unavailable", message="当前登录用户不存在或已被禁用。")
+    if user.company_id is not None:
+        if user.company is None:
+            raise UnauthorizedError(code="company_unavailable", message="当前用户所属公司不存在。")
+        if not user.company.is_active:
+            raise UnauthorizedError(code="company_inactive", message="当前所属公司已停用，请联系平台管理员。")
 
     validate_token_freshness(token_payload, password_changed_at=user.password_changed_at)
     return user
 
 
-def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:
-    """要求当前登录用户必须拥有管理员角色。"""
+def get_current_company_user(current_user: User = Depends(get_current_user)) -> User:
+    """要求当前登录用户已经归属到某个公司。"""
 
-    if current_user.role != UserRole.ADMIN:
-        raise ForbiddenError(code="permission_denied", message="只有管理员可以执行当前操作。")
+    if current_user.company_id is None:
+        raise ForbiddenError(code="company_context_required", message="当前账号尚未归属公司。")
 
     return current_user
 
 
-def get_current_ai_enabled_user(current_user: User = Depends(get_current_user)) -> User:
+def get_current_company_admin_user(current_user: User = Depends(get_current_company_user)) -> User:
+    """要求当前登录用户必须是公司管理员。"""
+
+    if current_user.role != UserRole.ADMIN:
+        raise ForbiddenError(code="permission_denied", message="只有公司管理员可以执行当前操作。")
+
+    return current_user
+
+
+def get_current_platform_admin_user(current_user: User = Depends(get_current_company_admin_user)) -> User:
+    """要求当前登录用户必须是平台默认管理员。"""
+
+    if not current_user.is_default_admin:
+        raise ForbiddenError(code="platform_admin_required", message="只有平台默认管理员可以执行当前操作。")
+
+    return current_user
+
+
+def get_current_admin_user(current_user: User = Depends(get_current_company_admin_user)) -> User:
+    """兼容历史依赖名，实际语义已经收敛为“当前公司管理员”。"""
+
+    return current_user
+
+
+def get_current_ai_enabled_user(current_user: User = Depends(get_current_company_user)) -> User:
     """要求当前登录用户已被管理员授予 AI 分析权限。"""
 
     if not current_user.can_use_ai_analysis:

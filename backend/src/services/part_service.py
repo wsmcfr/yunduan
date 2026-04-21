@@ -22,6 +22,7 @@ class PartService:
     def list_parts(
         self,
         *,
+        company_id: int,
         keyword: str | None,
         is_active: bool | None,
         skip: int,
@@ -30,18 +31,20 @@ class PartService:
         """分页查询零件列表。"""
 
         total, items = self.part_repository.list_parts(
+            company_id=company_id,
             keyword=keyword,
             is_active=is_active,
             skip=skip,
             limit=limit,
         )
-        self._attach_usage_summary(items=items)
+        self._attach_usage_summary(company_id=company_id, items=items)
         return total, items
 
-    def _attach_usage_summary(self, *, items: list[Part]) -> None:
+    def _attach_usage_summary(self, *, company_id: int, items: list[Part]) -> None:
         """为零件类型对象补充检测使用情况，便于前端展示活跃度。"""
 
         usage_map = self.part_repository.summarize_detection_usage(
+            company_id=company_id,
             part_ids=[item.id for item in items],
         )
 
@@ -54,13 +57,14 @@ class PartService:
             setattr(item, "latest_captured_at", usage_summary.get("latest_captured_at"))
             setattr(item, "latest_uploaded_at", usage_summary.get("latest_uploaded_at"))
 
-    def create_part(self, payload: PartCreateRequest) -> Part:
+    def create_part(self, *, company_id: int, payload: PartCreateRequest) -> Part:
         """创建新的零件定义。"""
 
-        if self.part_repository.get_by_code(payload.part_code) is not None:
+        if self.part_repository.get_by_code(payload.part_code, company_id=company_id) is not None:
             raise ConflictError(code="part_code_exists", message="零件编码已存在。")
 
         part = Part(
+            company_id=company_id,
             part_code=payload.part_code,
             name=payload.name,
             category=payload.category,
@@ -72,15 +76,15 @@ class PartService:
         self.db.refresh(part)
         return part
 
-    def update_part(self, part_id: int, payload: PartUpdateRequest) -> Part:
+    def update_part(self, *, company_id: int, part_id: int, payload: PartUpdateRequest) -> Part:
         """更新指定零件定义。"""
 
-        part = self.part_repository.get_by_id(part_id)
+        part = self.part_repository.get_by_id(part_id, company_id=company_id)
         if part is None:
             raise NotFoundError(code="part_not_found", message="零件不存在。")
 
         if payload.part_code and payload.part_code != part.part_code:
-            existed = self.part_repository.get_by_code(payload.part_code)
+            existed = self.part_repository.get_by_code(payload.part_code, company_id=company_id)
             if existed is not None and existed.id != part_id:
                 raise ConflictError(code="part_code_exists", message="零件编码已存在。")
             part.part_code = payload.part_code

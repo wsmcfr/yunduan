@@ -13,6 +13,19 @@ class UserRole(str, Enum):
     REVIEWER = "reviewer"
 
 
+class AdminApplicationStatus(str, Enum):
+    """新公司管理员申请状态枚举。
+
+    `not_applicable` 表示该用户不是通过“申请开新公司”路径创建的，
+    例如默认管理员、通过邀请码加入公司的普通成员等。
+    """
+
+    NOT_APPLICABLE = "not_applicable"
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class DeviceType(str, Enum):
     """设备类型枚举。"""
 

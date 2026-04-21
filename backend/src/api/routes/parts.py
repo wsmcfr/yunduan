@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_current_company_admin_user, get_current_company_user, get_db
 from src.db.models.user import User
 from src.schemas.part import PartCreateRequest, PartListResponse, PartResponse, PartUpdateRequest
 from src.services.part_service import PartService
@@ -20,11 +20,12 @@ def list_parts(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_company_user),
 ) -> PartListResponse:
     """分页获取零件列表。"""
 
     total, items = PartService(db).list_parts(
+        company_id=current_user.company_id or 0,
         keyword=keyword,
         is_active=is_active,
         skip=skip,
@@ -42,11 +43,11 @@ def list_parts(
 def create_part(
     payload: PartCreateRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_company_admin_user),
 ) -> PartResponse:
     """创建新的零件定义。"""
 
-    part = PartService(db).create_part(payload)
+    part = PartService(db).create_part(company_id=current_user.company_id or 0, payload=payload)
     return PartResponse.model_validate(part)
 
 
@@ -55,9 +56,13 @@ def update_part(
     part_id: int,
     payload: PartUpdateRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_company_admin_user),
 ) -> PartResponse:
     """更新指定零件定义。"""
 
-    part = PartService(db).update_part(part_id, payload)
+    part = PartService(db).update_part(
+        company_id=current_user.company_id or 0,
+        part_id=part_id,
+        payload=payload,
+    )
     return PartResponse.model_validate(part)

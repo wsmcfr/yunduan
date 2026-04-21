@@ -2,6 +2,7 @@
 import { reactive, ref, watch } from "vue";
 import type { FormInstance, FormRules } from "element-plus";
 
+import AppDialog from "@/components/common/AppDialog.vue";
 import { detectionResultOptions } from "@/constants/options";
 import type { DetectionRecordCreateRequestDto, DetectionResult } from "@/types/api";
 import type { DeviceModel, PartModel } from "@/types/models";
@@ -150,7 +151,7 @@ watch(
 </script>
 
 <template>
-  <ElDialog
+  <AppDialog
     :model-value="modelValue"
     title="新增检测记录"
     width="860px"
@@ -331,7 +332,7 @@ watch(
         </ElButton>
       </div>
     </template>
-  </ElDialog>
+  </AppDialog>
 </template>
 
 <style scoped>

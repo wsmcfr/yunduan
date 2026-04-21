@@ -190,6 +190,38 @@ class AIReviewClientTestCase(unittest.TestCase):
         self.assertIn("时间链路", response["answer"])
         self.assertIn("已保留你当前会话中的追问上下文", response["answer"])
 
+    def test_prompt_contract_explicitly_limits_analysis_to_single_side_images(self) -> None:
+        """验证系统提示词会明确声明当前业务默认只分析单面图像。"""
+
+        instruction = self.client._build_system_instruction(  # type: ignore[attr-defined]
+            model_context={
+                "display_name": "OpenClaudeCode Codex",
+                "model_identifier": "gpt-5.4",
+                "protocol_type": "openai_responses",
+                "gateway_name": "OpenClaudeCode",
+            },
+            has_loaded_images=True,
+            task_mode="chat",
+        )
+
+        self.assertIn("当前业务默认只检测零件的单面图像", instruction)
+        self.assertIn("不要要求补拍另一面", instruction)
+        self.assertIn("一线质检员和普通管理人员", instruction)
+
+    def test_review_prompt_requires_same_side_recheck_instead_of_other_side_images(self) -> None:
+        """验证 AI 复核提示词会把补充建议限制在当前这一面。"""
+
+        prompt = self.client._build_review_user_prompt(  # type: ignore[attr-defined]
+            note="请给出人工复核建议。",
+            context=self.context,
+            referenced_files=self.referenced_files,
+            image_assets=[{"object_key": "detections/demo/source/raw.png"}],
+        )
+
+        self.assertIn("当前业务默认只检测单面图像", prompt)
+        self.assertIn("不要建议补拍另一面", prompt)
+        self.assertIn("重点看哪里", prompt)
+
     def test_chat_about_record_builds_openai_responses_request_for_codex(self) -> None:
         """验证 Codex / OpenAI Responses 模式会带上 Bearer、UA 和图片输入。"""
 

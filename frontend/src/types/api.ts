@@ -1,4 +1,7 @@
 export type UserRole = "admin" | "operator" | "reviewer";
+export type AdminApplicationStatus = "not_applicable" | "pending" | "approved" | "rejected";
+export type PasswordChangeRequestStatus = "pending" | "approved" | "rejected";
+export type PasswordChangeRequestType = "reset_to_default" | "change_to_requested";
 export type DeviceType = "mp157" | "f4" | "gateway" | "other";
 export type DeviceStatus = "online" | "offline" | "fault";
 export type DetectionResult = "good" | "bad" | "uncertain";
@@ -8,6 +11,7 @@ export type FileKind = "source" | "annotated" | "thumbnail";
 export type StorageProvider = "cos";
 export type AIChatRole = "user" | "assistant";
 export type StatisticsPdfExportMode = "visual" | "lightweight";
+export type RegisterMode = "invite_join" | "company_admin_request";
 export type AIGatewayVendor =
   | "openai"
   | "anthropic"
@@ -66,12 +70,22 @@ export interface AuthRuntimeOptionsDto {
   password_policy_hint: string;
 }
 
+export interface CompanyBriefDto {
+  id: number;
+  name: string;
+  is_active: boolean;
+  is_system_reserved: boolean;
+}
+
 export interface UserProfileDto {
   id: number;
   username: string;
   email: string | null;
   display_name: string;
   role: UserRole;
+  company: CompanyBriefDto | null;
+  is_default_admin: boolean;
+  admin_application_status: AdminApplicationStatus;
   is_active: boolean;
   can_use_ai_analysis: boolean;
   last_login_at: string | null;
@@ -85,6 +99,18 @@ export interface AuthSessionResponseDto {
   user: UserProfileDto;
 }
 
+export interface AuthSessionStateDto {
+  authenticated: boolean;
+  user: UserProfileDto | null;
+}
+
+export interface RegisterResponseDto {
+  status: "authenticated" | "application_submitted";
+  message: string;
+  session_expires_at: string | null;
+  user: UserProfileDto | null;
+}
+
 export interface SystemUserListItemDto {
   id: number;
   username: string;
@@ -95,6 +121,10 @@ export interface SystemUserListItemDto {
   can_use_ai_analysis: boolean;
   last_login_at: string | null;
   password_changed_at: string | null;
+  password_change_request_status: PasswordChangeRequestStatus | null;
+  password_change_request_type: PasswordChangeRequestType | null;
+  password_change_requested_at: string | null;
+  password_change_reviewed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -110,16 +140,43 @@ export interface SystemUserAiPermissionUpdateRequestDto {
   can_use_ai_analysis: boolean;
 }
 
+export interface SystemUserStatusUpdateRequestDto {
+  is_active: boolean;
+}
+
+export interface UserPasswordChangeRequestInfoDto {
+  password_change_request_status: PasswordChangeRequestStatus | null;
+  password_change_request_type: PasswordChangeRequestType | null;
+  password_change_requested_at: string | null;
+  password_change_reviewed_at: string | null;
+  default_reset_password: string;
+}
+
+export interface SubmitPasswordChangeRequestDto {
+  request_type: PasswordChangeRequestType;
+  new_password: string | null;
+}
+
+export interface ApprovePasswordChangeRequestResponseDto {
+  message: string;
+  applied_password: string | null;
+}
+
 export interface LoginRequestDto {
   account: string;
   password: string;
 }
 
 export interface RegisterRequestDto {
+  register_mode: RegisterMode;
   username: string;
   display_name: string;
   email: string;
   password: string;
+  invite_code?: string | null;
+  company_name?: string | null;
+  company_contact_name?: string | null;
+  company_note?: string | null;
 }
 
 export interface ForgotPasswordRequestDto {
@@ -129,6 +186,72 @@ export interface ForgotPasswordRequestDto {
 export interface ResetPasswordRequestDto {
   token: string;
   new_password: string;
+}
+
+export interface CurrentCompanyResponseDto {
+  id: number;
+  name: string;
+  contact_name: string | null;
+  note: string | null;
+  invite_code: string;
+  is_active: boolean;
+  is_system_reserved: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanySummaryResponseDto {
+  id: number;
+  name: string;
+  contact_name: string | null;
+  note: string | null;
+  invite_code: string;
+  is_active: boolean;
+  is_system_reserved: boolean;
+  user_count: number;
+  part_count: number;
+  device_count: number;
+  record_count: number;
+  gateway_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanyListResponseDto {
+  items: CompanySummaryResponseDto[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+export interface CompanyInviteCodeResetResponseDto {
+  invite_code: string;
+  message: string;
+}
+
+export interface CompanyAdminApplicationItemDto {
+  id: number;
+  username: string;
+  email: string | null;
+  display_name: string;
+  is_active: boolean;
+  admin_application_status: AdminApplicationStatus;
+  requested_company_name: string | null;
+  requested_company_contact_name: string | null;
+  requested_company_note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanyAdminApplicationListResponseDto {
+  items: CompanyAdminApplicationItemDto[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+export interface PurgeCompanyRequestDto {
+  confirm_name: string;
 }
 
 export interface SummaryStatisticsDto {

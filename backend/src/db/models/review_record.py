@@ -21,10 +21,13 @@ class ReviewRecord(Base, IdMixin, CreatedAtMixin):
 
     __tablename__ = "review_records"
     __table_args__ = (
+        Index("ix_review_records_company_id", "company_id"),
         Index("ix_review_records_detection_record_id", "detection_record_id"),
         Index("ix_review_records_reviewer_id", "reviewer_id"),
     )
 
+    # 审核记录冗余保存 company_id，便于公司级筛选和彻底删除。
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
     detection_record_id: Mapped[int] = mapped_column(ForeignKey("detection_records.id"), nullable=False)
     reviewer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     review_source: Mapped[ReviewSource] = mapped_column(

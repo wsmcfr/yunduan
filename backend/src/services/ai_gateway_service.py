@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse, urlunparse
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.core.errors import BadRequestError, ConflictError, NotFoundError
@@ -39,6 +40,13 @@ class AIGatewayService:
         self.model_repository = AIModelProfileRepository(db)
         self.cipher = cipher or SecretCipher()
         self.discovery_client = discovery_client or AIModelDiscoveryClient()
+        # 每次调用前都会写入当前公司范围，避免服务内的重复查询忘记带租户条件。
+        self._company_id = 0
+
+    def _set_company_scope(self, *, company_id: int) -> None:
+        """记录当前调用所属的公司范围。"""
+
+        self._company_id = company_id
 
     def _normalize_api_key(self, api_key: str | None) -> str:
         """把 API Key 规整成适合持久化的形式。"""
@@ -52,7 +60,7 @@ class AIGatewayService:
     def _ensure_gateway_name_unique(self, *, name: str, exclude_id: int | None = None) -> None:
         """校验 AI 网关名称唯一。"""
 
-        existed = self.gateway_repository.get_by_name(name)
+        existed = self.gateway_repository.get_by_name(name, company_id=self._company_id)
         if existed is not None and existed.id != exclude_id:
             raise ConflictError(code="ai_gateway_name_exists", message="AI 网关名称已存在。")
 
@@ -63,10 +71,26 @@ class AIGatewayService:
         encrypted_value = self.cipher.encrypt(normalized_api_key)
         return encrypted_value, normalized_api_key[-4:]
 
-    def list_gateways(self) -> list[AIGateway]:
+    def _raise_gateway_name_integrity_error(self, exc: IntegrityError) -> None:
+        """把数据库唯一约束冲突转换成更清晰的业务错误。"""
+
+        raw_message = str(getattr(exc, "orig", exc))
+        if "ix_ai_gateways_name" in raw_message:
+            raise ConflictError(
+                code="ai_gateway_global_name_conflict",
+                message="数据库仍残留旧的全局唯一索引，不同公司暂时不能使用同名 AI 网关。请先执行最新数据库迁移后再重试。",
+            ) from exc
+
+        raise ConflictError(
+            code="ai_gateway_name_exists",
+            message="当前公司下已存在同名 AI 网关，请修改名称后再试。",
+        ) from exc
+
+    def list_gateways(self, *, company_id: int) -> list[AIGateway]:
         """返回配置中心所需的全部网关与模型配置。"""
 
-        gateways = self.gateway_repository.list_all()
+        self._set_company_scope(company_id=company_id)
+        gateways = self.gateway_repository.list_all(company_id=company_id)
         for gateway in gateways:
             gateway.models = sorted(
                 gateway.models,
@@ -75,20 +99,26 @@ class AIGatewayService:
             )
         return gateways
 
-    def list_runtime_model_options(self) -> list[AIModelProfile]:
+    def list_runtime_model_options(self, *, company_id: int) -> list[AIModelProfile]:
         """返回业务运行时可用的模型配置。"""
 
-        enabled_models = self.model_repository.list_runtime_enabled()
+        self._set_company_scope(company_id=company_id)
+        enabled_models = self.model_repository.list_runtime_enabled(company_id=company_id)
         return [
             item
             for item in enabled_models
             if item.gateway.is_enabled and item.gateway.has_api_key and item.is_enabled
         ]
 
-    def get_model_for_runtime(self, model_id: int) -> AIModelProfile:
+    def get_model_for_runtime(self, *, company_id: int, model_id: int) -> AIModelProfile:
         """获取业务运行时实际可用的模型配置。"""
 
-        model = self.model_repository.get_by_id(model_id, include_gateway=True)
+        self._set_company_scope(company_id=company_id)
+        model = self.model_repository.get_by_id(
+            model_id,
+            company_id=company_id,
+            include_gateway=True,
+        )
         if model is None:
             raise NotFoundError(code="ai_model_not_found", message="AI 模型配置不存在。")
         if not model.is_enabled:
@@ -130,10 +160,15 @@ class AIGatewayService:
 
         return normalized_base_url
 
-    def build_runtime_model_context(self, model_id: int) -> dict[str, str | int | bool | None]:
+    def build_runtime_model_context(
+        self,
+        *,
+        company_id: int,
+        model_id: int,
+    ) -> dict[str, str | int | bool | None]:
         """把模型配置转换成运行时可直接消费的上下文摘要。"""
 
-        model = self.get_model_for_runtime(model_id)
+        model = self.get_model_for_runtime(company_id=company_id, model_id=model_id)
         runtime_base_url = self._normalize_runtime_base_url(
             base_url=model.base_url_override or model.gateway.base_url,
             protocol_type=model.protocol_type,
@@ -157,10 +192,11 @@ class AIGatewayService:
             "api_key": self.cipher.decrypt(model.gateway.api_key_encrypted),
         }
 
-    def discover_gateway_models(self, gateway_id: int) -> list[dict]:
+    def discover_gateway_models(self, *, company_id: int, gateway_id: int) -> list[dict]:
         """根据已保存的网关 URL 和密钥自动探测可选模型。"""
 
-        gateway = self.gateway_repository.get_by_id(gateway_id)
+        self._set_company_scope(company_id=company_id)
+        gateway = self.gateway_repository.get_by_id(gateway_id, company_id=company_id)
         if gateway is None:
             raise NotFoundError(code="ai_gateway_not_found", message="AI 网关不存在。")
         if not gateway.has_api_key:
@@ -182,14 +218,16 @@ class AIGatewayService:
             api_key=payload.api_key,
         )
 
-    def create_gateway(self, payload: AIGatewayCreateRequest) -> AIGateway:
+    def create_gateway(self, *, company_id: int, payload: AIGatewayCreateRequest) -> AIGateway:
         """创建新的 AI 网关。"""
 
+        self._set_company_scope(company_id=company_id)
         gateway_name = payload.name.strip()
         self._ensure_gateway_name_unique(name=gateway_name)
         encrypted_api_key, api_key_last4 = self._build_api_key_fields(payload.api_key)
 
         gateway = AIGateway(
+            company_id=company_id,
             name=gateway_name,
             vendor=payload.vendor,
             official_url=(payload.official_url or "").strip() or None,
@@ -200,14 +238,36 @@ class AIGatewayService:
             api_key_encrypted=encrypted_api_key,
             api_key_last4=api_key_last4,
         )
-        self.gateway_repository.create(gateway)
-        self.db.commit()
-        return self.gateway_repository.get_by_id(gateway.id, include_models=True) or gateway
+        try:
+            self.gateway_repository.create(gateway)
+            self.db.commit()
+        except IntegrityError as exc:
+            # flush / commit 命中唯一约束后会把当前事务打脏，
+            # 必须先回滚再把错误映射成前端可读的业务提示。
+            self.db.rollback()
+            self._raise_gateway_name_integrity_error(exc)
 
-    def update_gateway(self, gateway_id: int, payload: AIGatewayUpdateRequest) -> AIGateway:
+        return self.gateway_repository.get_by_id(
+            gateway.id,
+            company_id=company_id,
+            include_models=True,
+        ) or gateway
+
+    def update_gateway(
+        self,
+        *,
+        company_id: int,
+        gateway_id: int,
+        payload: AIGatewayUpdateRequest,
+    ) -> AIGateway:
         """更新指定 AI 网关。"""
 
-        gateway = self.gateway_repository.get_by_id(gateway_id, include_models=True)
+        self._set_company_scope(company_id=company_id)
+        gateway = self.gateway_repository.get_by_id(
+            gateway_id,
+            company_id=company_id,
+            include_models=True,
+        )
         if gateway is None:
             raise NotFoundError(code="ai_gateway_not_found", message="AI 网关不存在。")
 
@@ -235,24 +295,41 @@ class AIGatewayService:
                 gateway.api_key_encrypted = encrypted_api_key
                 gateway.api_key_last4 = api_key_last4
 
-        self.gateway_repository.save(gateway)
-        self.db.commit()
-        return self.gateway_repository.get_by_id(gateway_id, include_models=True) or gateway
+        try:
+            self.gateway_repository.save(gateway)
+            self.db.commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            self._raise_gateway_name_integrity_error(exc)
 
-    def delete_gateway(self, gateway_id: int) -> None:
+        return self.gateway_repository.get_by_id(
+            gateway_id,
+            company_id=company_id,
+            include_models=True,
+        ) or gateway
+
+    def delete_gateway(self, *, company_id: int, gateway_id: int) -> None:
         """删除指定 AI 网关。"""
 
-        gateway = self.gateway_repository.get_by_id(gateway_id)
+        self._set_company_scope(company_id=company_id)
+        gateway = self.gateway_repository.get_by_id(gateway_id, company_id=company_id)
         if gateway is None:
             raise NotFoundError(code="ai_gateway_not_found", message="AI 网关不存在。")
 
         self.gateway_repository.delete(gateway)
         self.db.commit()
 
-    def create_model(self, gateway_id: int, payload: AIModelProfileCreateRequest) -> AIModelProfile:
+    def create_model(
+        self,
+        *,
+        company_id: int,
+        gateway_id: int,
+        payload: AIModelProfileCreateRequest,
+    ) -> AIModelProfile:
         """在指定网关下创建模型配置。"""
 
-        gateway = self.gateway_repository.get_by_id(gateway_id)
+        self._set_company_scope(company_id=company_id)
+        gateway = self.gateway_repository.get_by_id(gateway_id, company_id=company_id)
         if gateway is None:
             raise NotFoundError(code="ai_gateway_not_found", message="AI 网关不存在。")
 
@@ -272,12 +349,27 @@ class AIGatewayService:
         )
         self.model_repository.create(model)
         self.db.commit()
-        return self.model_repository.get_by_id(model.id, include_gateway=True) or model
+        return self.model_repository.get_by_id(
+            model.id,
+            company_id=company_id,
+            include_gateway=True,
+        ) or model
 
-    def update_model(self, model_id: int, payload: AIModelProfileUpdateRequest) -> AIModelProfile:
+    def update_model(
+        self,
+        *,
+        company_id: int,
+        model_id: int,
+        payload: AIModelProfileUpdateRequest,
+    ) -> AIModelProfile:
         """更新指定模型配置。"""
 
-        model = self.model_repository.get_by_id(model_id, include_gateway=True)
+        self._set_company_scope(company_id=company_id)
+        model = self.model_repository.get_by_id(
+            model_id,
+            company_id=company_id,
+            include_gateway=True,
+        )
         if model is None:
             raise NotFoundError(code="ai_model_not_found", message="AI 模型配置不存在。")
 
@@ -306,12 +398,17 @@ class AIGatewayService:
 
         self.model_repository.save(model)
         self.db.commit()
-        return self.model_repository.get_by_id(model_id, include_gateway=True) or model
+        return self.model_repository.get_by_id(
+            model_id,
+            company_id=company_id,
+            include_gateway=True,
+        ) or model
 
-    def delete_model(self, model_id: int) -> None:
+    def delete_model(self, *, company_id: int, model_id: int) -> None:
         """删除指定模型配置。"""
 
-        model = self.model_repository.get_by_id(model_id)
+        self._set_company_scope(company_id=company_id)
+        model = self.model_repository.get_by_id(model_id, company_id=company_id)
         if model is None:
             raise NotFoundError(code="ai_model_not_found", message="AI 模型配置不存在。")
 

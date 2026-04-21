@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import type { FormInstance, FormRules } from "element-plus";
 
+import AppDialog from "@/components/common/AppDialog.vue";
 import { deviceStatusOptions, deviceTypeOptions } from "@/constants/options";
 import type { DeviceCreateRequestDto, DeviceUpdateRequestDto } from "@/types/api";
 import type { DeviceModel } from "@/types/models";
@@ -175,7 +176,7 @@ watch(
 </script>
 
 <template>
-  <ElDialog
+  <AppDialog
     :model-value="modelValue"
     :title="dialogTitle"
     width="720px"
@@ -256,7 +257,7 @@ watch(
         </ElButton>
       </div>
     </template>
-  </ElDialog>
+  </AppDialog>
 </template>
 
 <style scoped>

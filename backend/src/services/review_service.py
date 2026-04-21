@@ -30,17 +30,23 @@ class ReviewService:
     def create_manual_review(
         self,
         *,
+        company_id: int,
         record_id: int,
         reviewer_id: int,
         payload: ManualReviewCreateRequest,
     ) -> ReviewRecord:
         """为指定检测记录新增一条人工审核记录。"""
 
-        record = self.record_repository.get_by_id(record_id, include_related=False)
+        record = self.record_repository.get_by_id(
+            record_id,
+            company_id=company_id,
+            include_related=False,
+        )
         if record is None:
             raise NotFoundError(code="record_not_found", message="检测记录不存在。")
 
         review = ReviewRecord(
+            company_id=company_id,
             detection_record_id=record_id,
             reviewer_id=reviewer_id,
             review_source=ReviewSource.MANUAL,
@@ -62,10 +68,14 @@ class ReviewService:
         )
         return review
 
-    def list_reviews(self, record_id: int) -> list[ReviewRecord]:
+    def list_reviews(self, *, company_id: int, record_id: int) -> list[ReviewRecord]:
         """返回指定检测记录的全部审核记录。"""
 
-        record = self.record_repository.get_by_id(record_id, include_related=False)
+        record = self.record_repository.get_by_id(
+            record_id,
+            company_id=company_id,
+            include_related=False,
+        )
         if record is None:
             raise NotFoundError(code="record_not_found", message="检测记录不存在。")
 

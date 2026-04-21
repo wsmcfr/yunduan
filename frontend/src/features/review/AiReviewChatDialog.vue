@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
 
+import AppDialog from "@/components/common/AppDialog.vue";
 import { ApiClientError } from "@/services/api/client";
 import { streamAiChat } from "@/services/api/records";
 import { fetchRuntimeAIModels } from "@/services/api/settings";
@@ -768,7 +769,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <ElDialog
+  <AppDialog
     class="ai-chat-dialog"
     :model-value="modelValue"
     title="AI 对话分析"
@@ -1102,7 +1103,7 @@ onBeforeUnmount(() => {
         <p class="muted-text">请先返回详情页加载一条记录，再打开 AI 对话分析。</p>
       </section>
     </div>
-  </ElDialog>
+  </AppDialog>
 </template>
 
 <style scoped>

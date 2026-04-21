@@ -197,6 +197,7 @@ class StatisticsExportService:
     def _load_sample_images(
         self,
         *,
+        company_id: int,
         overview: StatisticsOverviewResponse,
         sample_image_limit: int,
     ) -> list[dict[str, str]]:
@@ -207,6 +208,7 @@ class StatisticsExportService:
             end_date=overview.filters.end_date,
         )
         records = self.record_repository.list_for_statistics(
+            company_id=company_id,
             part_id=overview.filters.part_id,
             device_id=overview.filters.device_id,
             captured_from=captured_from,
@@ -745,6 +747,7 @@ class StatisticsExportService:
     def _build_ai_analysis(
         self,
         *,
+        company_id: int,
         payload: StatisticsExportPdfRequest,
     ) -> StatisticsAIAnalysisResponse | None:
         """按需生成或复用统计 AI 分析文本。"""
@@ -758,7 +761,8 @@ class StatisticsExportService:
 
         try:
             return self.statistics_service.request_ai_analysis(
-                StatisticsAIAnalysisRequest(
+                company_id=company_id,
+                payload=StatisticsAIAnalysisRequest(
                     model_profile_id=payload.model_profile_id,
                     provider_hint=payload.provider_hint,
                     note=payload.note,
@@ -781,17 +785,18 @@ class StatisticsExportService:
                 generated_at=datetime.now(timezone.utc),
             )
 
-    def build_pdf(self, payload: StatisticsExportPdfRequest) -> tuple[bytes, str]:
+    def build_pdf(self, *, company_id: int, payload: StatisticsExportPdfRequest) -> tuple[bytes, str]:
         """构造统计报表 PDF 二进制和推荐文件名。"""
 
         overview = self.statistics_service.get_overview(
+            company_id=company_id,
             start_date=payload.start_date,
             end_date=payload.end_date,
             days=payload.days,
             part_id=payload.part_id,
             device_id=payload.device_id,
         )
-        ai_analysis = self._build_ai_analysis(payload=payload)
+        ai_analysis = self._build_ai_analysis(company_id=company_id, payload=payload)
 
         if payload.export_mode == "lightweight":
             # 轻量版走直接绘制链路，不再继续抓 COS 样本图，也不依赖 WeasyPrint。
@@ -802,6 +807,7 @@ class StatisticsExportService:
 
         sample_images = (
             self._load_sample_images(
+                company_id=company_id,
                 overview=overview,
                 sample_image_limit=payload.sample_image_limit,
             )

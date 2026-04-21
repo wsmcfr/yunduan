@@ -448,3 +448,122 @@ await resetPasswordRequest({
   new_password: newPassword,
 });
 ```
+
+---
+
+## Scenario: Password Change Request DTO Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: any change touching the settings password-request card, admin user-management password actions, or the password-request-related API contracts
+- Affected layers: FastAPI settings schemas -> frontend `src/types/api.ts` -> mapper -> `src/types/models.ts` -> `SettingsPage.vue`
+
+### 2. Signatures
+
+```ts
+export interface UserPasswordChangeRequestInfoDto {
+  password_change_request_status: PasswordChangeRequestStatus | null;
+  password_change_request_type: PasswordChangeRequestType | null;
+  password_change_requested_at: string | null;
+  password_change_reviewed_at: string | null;
+  default_reset_password: string;
+}
+
+export interface SubmitPasswordChangeRequestDto {
+  request_type: PasswordChangeRequestType;
+  new_password: string | null;
+}
+
+export interface ApprovePasswordChangeRequestResponseDto {
+  message: string;
+  applied_password: string | null;
+}
+```
+
+```ts
+export interface UserPasswordChangeRequestInfo {
+  passwordChangeRequestStatus: PasswordChangeRequestStatus | null;
+  passwordChangeRequestType: PasswordChangeRequestType | null;
+  passwordChangeRequestedAt: string | null;
+  passwordChangeReviewedAt: string | null;
+  defaultResetPassword: string;
+}
+
+export interface SystemUserListItem {
+  passwordChangeRequestStatus: PasswordChangeRequestStatus | null;
+  passwordChangeRequestType: PasswordChangeRequestType | null;
+  passwordChangeRequestedAt: string | null;
+  passwordChangeReviewedAt: string | null;
+}
+```
+
+### 3. Contracts
+
+| Boundary / field | Contract |
+|---|---|
+| `SubmitPasswordChangeRequestDto.request_type` | Must stay snake_case in the outbound JSON body |
+| `SubmitPasswordChangeRequestDto.new_password` | Nullable in DTO because `reset_to_default` does not submit a new password |
+| `UserPasswordChangeRequestInfoDto.default_reset_password` | Backend-owned display value for the "reset to default" path; frontend may render it but must not infer it from unrelated constants once DTO data exists |
+| `ApprovePasswordChangeRequestResponseDto.applied_password` | Nullable because only `reset_to_default` returns the applied temporary password; `change_to_requested` returns `null` |
+| `SystemUserListItemDto.password_change_request_*` | Nullable summary fields used for the admin table only; components must handle `null` safely |
+| Mapper boundary | `mapUserPasswordChangeRequestInfoDto(...)` and `mapSystemUserListItemDto(...)` are the only snake_case -> camelCase conversion points for these password-request fields |
+
+Additional rules:
+
+- do not let components read fields such as `password_change_request_status` or `default_reset_password` directly
+- keep `PasswordChangeRequestType` narrow to `"reset_to_default" | "change_to_requested"`
+- do not widen approval responses to `any` just because one branch returns `applied_password = null`
+
+### 4. Validation & Error Matrix
+
+| Condition | Boundary | Expected behavior |
+|---|---|---|
+| Frontend sends `requestType` instead of `request_type` | API boundary | Request is wrong; keep DTO field names aligned with backend schema |
+| Component consumes `dto.password_change_request_status` directly | mapper boundary is bypassed | Fix the caller to map first and use camelCase |
+| Approval response is treated as always having `applied_password` | branch-specific contract is ignored | Handle `null` for `change_to_requested` |
+| Password-request timestamps are `null` | rendering boundary | Render fallback text instead of an invalid date |
+| DTO enum is widened to `string` | UI loses exhaustiveness for request-type/status rendering | Keep literal unions in `src/types/api.ts` and `src/types/models.ts` |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | Page submits `{ request_type: "change_to_requested", new_password: "..." }`, then maps the returned request snapshot into camelCase before rendering |
+| Base | `password_change_request_status` is `null`, so the account card shows "no active request" without crashing |
+| Bad | Component mixes snake_case and camelCase fields in the same branch and special-cases `applied_password` with `as any` |
+
+### 6. Tests Required
+
+- mapper test for `mapUserPasswordChangeRequestInfoDto(...)`, including all-null status fields and a populated `default_reset_password`
+- mapper test for `mapSystemUserListItemDto(...)`, including password-request summary fields
+- API payload test asserting the submit body uses `request_type` and `new_password`
+- consumer test asserting approval-result UI handles `applied_password = null` safely
+
+Assertion points:
+
+- snake_case stays at the API boundary only
+- frontend models expose camelCase only
+- approval branches remain type-safe without `any`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+await apiRequest("/api/v1/settings/users/me/password-request", {
+  method: "POST",
+  body: JSON.stringify({
+    requestType: "change_to_requested",
+    newPassword,
+  }),
+});
+```
+
+#### Correct
+
+```ts
+await submitCurrentUserPasswordChangeRequest({
+  request_type: "change_to_requested",
+  new_password: newPassword,
+});
+```

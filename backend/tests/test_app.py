@@ -42,7 +42,12 @@ class AppSmokeTestCase(unittest.TestCase):
         self.assertIn("/api/v1/settings/ai-gateways/{gateway_id}/discovered-models", route_paths)
         self.assertIn("/api/v1/settings/ai-gateways/discovery-preview", route_paths)
         self.assertIn("/api/v1/settings/users", route_paths)
+        self.assertIn("/api/v1/settings/users/me/password-request", route_paths)
         self.assertIn("/api/v1/settings/users/{user_id}/ai-permission", route_paths)
+        self.assertIn("/api/v1/settings/users/{user_id}/status", route_paths)
+        self.assertIn("/api/v1/settings/users/{user_id}/password-request/approve", route_paths)
+        self.assertIn("/api/v1/settings/users/{user_id}/password-request/reject", route_paths)
+        self.assertIn("/api/v1/settings/users/{user_id}", route_paths)
 
     def test_auth_public_routes_are_mounted(self) -> None:
         """验证正式认证所需的公开路由都已经挂载。"""
@@ -50,7 +55,19 @@ class AppSmokeTestCase(unittest.TestCase):
         route_paths = {route.path for route in app.routes}
 
         self.assertIn("/api/v1/auth/runtime-options", route_paths)
+        self.assertIn("/api/v1/auth/session", route_paths)
         self.assertIn("/api/v1/auth/register", route_paths)
         self.assertIn("/api/v1/auth/logout", route_paths)
         self.assertIn("/api/v1/auth/forgot-password", route_paths)
         self.assertIn("/api/v1/auth/reset-password", route_paths)
+
+    def test_company_management_routes_are_mounted(self) -> None:
+        """验证多租户公司管理与审批路由已挂载。"""
+
+        route_paths = {route.path for route in app.routes}
+
+        self.assertIn("/api/v1/companies/current", route_paths)
+        self.assertIn("/api/v1/companies/current/reset-invite-code", route_paths)
+        self.assertIn("/api/v1/companies", route_paths)
+        self.assertIn("/api/v1/companies/admin-applications", route_paths)
+        self.assertIn("/api/v1/companies/admin-applications/{user_id}/approve", route_paths)

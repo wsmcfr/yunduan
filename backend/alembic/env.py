@@ -9,7 +9,7 @@ from sqlalchemy import engine_from_config, pool
 
 from src.core.config import get_settings
 from src.db.base import Base
-from src.db.models import ai_gateway, ai_model_profile, device, detection_record, file_object, part, review_record, user  # noqa: F401
+from src.db.models import ai_gateway, ai_model_profile, company, device, detection_record, file_object, part, review_record, user  # noqa: F401
 
 # 这里读取 Alembic 配置对象，后续用于构建数据库连接。
 config = context.config

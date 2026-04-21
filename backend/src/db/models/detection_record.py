@@ -12,6 +12,7 @@ from src.db.base import Base, IdMixin, TimestampMixin
 from src.db.models.enums import DetectionResult, ReviewStatus, enum_values
 
 if TYPE_CHECKING:
+    from src.db.models.company import Company
     from src.db.models.device import Device
     from src.db.models.file_object import FileObject
     from src.db.models.part import Part
@@ -23,12 +24,14 @@ class DetectionRecord(Base, IdMixin, TimestampMixin):
 
     __tablename__ = "detection_records"
     __table_args__ = (
+        Index("ix_detection_records_company_id", "company_id"),
         Index("ix_detection_records_part_id", "part_id"),
         Index("ix_detection_records_device_id", "device_id"),
         Index("ix_detection_records_captured_at", "captured_at"),
         Index("ix_detection_records_uploaded_at", "uploaded_at"),
     )
 
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
     record_no: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False)
     device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), nullable=False)
@@ -69,6 +72,7 @@ class DetectionRecord(Base, IdMixin, TimestampMixin):
     storage_last_modified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # 检测记录与零件、设备、文件、审核均形成聚合关系。
+    company: Mapped["Company"] = relationship("Company", back_populates="detection_records")
     part: Mapped["Part"] = relationship("Part", back_populates="detection_records")
     device: Mapped["Device"] = relationship("Device", back_populates="detection_records")
     files: Mapped[list["FileObject"]] = relationship(

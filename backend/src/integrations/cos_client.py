@@ -276,3 +276,42 @@ class CosClient:
                 "expires_in_seconds": None,
                 "message": "COS 预签名生成失败，当前已退化为占位模式。",
             }
+
+    def delete_object(
+        self,
+        *,
+        bucket_name: str,
+        region: str,
+        object_key: str,
+    ) -> None:
+        """删除指定 COS 对象。
+
+        多租户彻底删除公司时，需要先释放对象存储空间，再删除数据库中的元数据记录。
+        """
+
+        if not bucket_name or not region or not object_key:
+            return
+        if not self.is_configured():
+            # 当前环境未配置 COS 时，数据库里只可能是联调占位数据，不执行远端删除。
+            return
+
+        try:
+            client = self._get_sdk_client(region=region)
+            client.delete_object(Bucket=bucket_name, Key=object_key)
+        except Exception as exc:
+            logger.warning(
+                "cos.delete_failed event=cos.delete_failed bucket=%s region=%s object_key=%s error=%s",
+                bucket_name,
+                region,
+                object_key,
+                str(exc),
+            )
+            raise IntegrationError(
+                code="cos_delete_failed",
+                message="COS 文件删除失败。",
+                details={
+                    "bucket_name": bucket_name,
+                    "region": region,
+                    "object_key": object_key,
+                },
+            ) from exc

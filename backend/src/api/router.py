@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from src.api.routes import auth, devices, parts, records, reviews, settings, statistics, uploads
+from src.api.routes import auth, companies, devices, parts, records, reviews, settings, statistics, uploads
 
 # 顶层路由负责汇总所有业务子模块路由。
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(companies.router, prefix="/companies", tags=["companies"])
 api_router.include_router(parts.router, prefix="/parts", tags=["parts"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
 api_router.include_router(records.router, prefix="/records", tags=["records"])

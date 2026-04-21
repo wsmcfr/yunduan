@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import type { FormInstance, FormRules } from "element-plus";
 
+import AppDialog from "@/components/common/AppDialog.vue";
 import {
   aiModelTemplates,
   authModeLabels,
@@ -454,7 +455,7 @@ watch(
 </script>
 
 <template>
-  <ElDialog
+  <AppDialog
     class="model-dialog"
     :model-value="modelValue"
     :title="mode === 'create' ? '新增模型配置' : '编辑模型配置'"
@@ -641,7 +642,7 @@ watch(
         </ElButton>
       </div>
     </template>
-  </ElDialog>
+  </AppDialog>
 </template>
 
 <style scoped>
