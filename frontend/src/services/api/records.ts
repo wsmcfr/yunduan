@@ -14,6 +14,7 @@ import { apiRequest, streamSseRequest } from "./client";
 
 export interface RecordListQuery {
   readonly partId?: number;
+  readonly partCategory?: string;
   readonly deviceId?: number;
   readonly result?: DetectionResult;
   readonly reviewStatus?: ReviewStatus;
@@ -32,6 +33,9 @@ export function fetchRecords(query: RecordListQuery = {}): Promise<DetectionReco
    */
   if (query.partId !== undefined) {
     params.set("part_id", String(query.partId));
+  }
+  if (query.partCategory) {
+    params.set("part_category", query.partCategory);
   }
   if (query.deviceId !== undefined) {
     params.set("device_id", String(query.deviceId));

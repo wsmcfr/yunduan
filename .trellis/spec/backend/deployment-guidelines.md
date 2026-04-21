@@ -104,7 +104,7 @@ Assertion points:
 #### Wrong
 
 ```powershell
-scp backend/src/services/record_service.py ubuntu@119.91.65.122:/home/ubuntu/
+scp backend/src/services/record_service.py ubuntu@<server-ip>:/home/ubuntu/
 ```
 
 ```powershell

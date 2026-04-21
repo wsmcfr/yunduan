@@ -48,6 +48,28 @@ const mode = computed(() => (props.initialValue ? "edit" : "create"));
 const dialogTitle = computed(() => (mode.value === "create" ? "新增零件类型" : "编辑零件类型"));
 
 /**
+ * 编辑已有类型时，展示最近一次实际来源设备与设备覆盖范围。
+ * 这是只读信息，真正的隶属关系由设备上报记录自动沉淀，不允许在前端手工伪造。
+ */
+const affiliationSummary = computed(() => {
+  if (!props.initialValue) {
+    return {
+      latestDeviceLabel: "待设备上报后自动识别",
+      coverageLabel: "新建后会根据上传记录自动关联来源设备",
+    };
+  }
+
+  return {
+    latestDeviceLabel: props.initialValue.latestSourceDevice
+      ? `${props.initialValue.latestSourceDevice.name} / ${props.initialValue.latestSourceDevice.deviceCode}`
+      : "暂无来源设备记录",
+    coverageLabel: props.initialValue.deviceCount > 0
+      ? `已关联 ${props.initialValue.deviceCount} 台设备的上传记录`
+      : "当前还没有任何设备上传到该类别",
+  };
+});
+
+/**
  * 表单状态统一放在一个响应式对象里，便于重置与回填。
  */
 const formState = reactive<PartFormValue>(createEmptyForm());
@@ -178,6 +200,23 @@ watch(
     @close="closeDialog"
   >
     <ElForm ref="formRef" :model="formState" :rules="formRules" label-position="top">
+      <ElAlert
+        type="info"
+        show-icon
+        :closable="false"
+        class="dialog-affiliation"
+      >
+        <template #title>
+          设备隶属会根据检测记录自动识别，不在这里手工指定
+        </template>
+        <template #default>
+          <div class="dialog-affiliation__content">
+            <span>最近来源设备：{{ affiliationSummary.latestDeviceLabel }}</span>
+            <span>{{ affiliationSummary.coverageLabel }}</span>
+          </div>
+        </template>
+      </ElAlert>
+
       <ElRow :gutter="16">
         <ElCol :span="12">
           <ElFormItem label="类型编码" prop="partCode">
@@ -231,6 +270,16 @@ watch(
 </template>
 
 <style scoped>
+.dialog-affiliation {
+  margin-bottom: 18px;
+}
+
+.dialog-affiliation__content {
+  display: grid;
+  gap: 6px;
+  line-height: 1.7;
+}
+
 .dialog-footer {
   display: flex;
   justify-content: flex-end;

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from src.db.models.detection_record import DetectionRecord
+from src.db.models.device import Device
 from src.db.models.file_object import FileObject
 from src.db.models.part import Part
 
@@ -70,8 +72,8 @@ class PartRepository:
         self,
         *,
         part_ids: list[int],
-    ) -> dict[int, dict[str, int | datetime | None]]:
-        """汇总零件类型关联的记录量、图片量和最近上传时间。"""
+    ) -> dict[int, dict[str, Any]]:
+        """汇总零件类型关联的记录量、图片量、来源设备和最近上传时间。"""
 
         if not part_ids:
             return {}
@@ -89,6 +91,7 @@ class PartRepository:
                 DetectionRecord.part_id.label("part_id"),
                 func.count(func.distinct(DetectionRecord.id)).label("record_count"),
                 func.count(FileObject.id).label("image_count"),
+                func.count(func.distinct(DetectionRecord.device_id)).label("device_count"),
                 func.max(DetectionRecord.captured_at).label("latest_captured_at"),
                 latest_uploaded_expr.label("latest_uploaded_at"),
             )
@@ -98,14 +101,50 @@ class PartRepository:
             .group_by(DetectionRecord.part_id)
         )
 
-        usage_map: dict[int, dict[str, int | datetime | None]] = {}
+        usage_map: dict[int, dict[str, Any]] = {}
         for row in self.db.execute(stmt):
             usage_map[int(row.part_id)] = {
                 "record_count": int(row.record_count or 0),
                 "image_count": int(row.image_count or 0),
+                "device_count": int(row.device_count or 0),
                 "latest_captured_at": row.latest_captured_at,
                 "latest_uploaded_at": row.latest_uploaded_at,
+                "latest_source_device": None,
             }
+
+        latest_source_at_expr = func.coalesce(
+            DetectionRecord.uploaded_at,
+            DetectionRecord.detected_at,
+            DetectionRecord.captured_at,
+            DetectionRecord.created_at,
+        )
+        latest_device_stmt = (
+            select(DetectionRecord.part_id, Device)
+            .select_from(DetectionRecord)
+            .join(Device, Device.id == DetectionRecord.device_id)
+            .where(DetectionRecord.part_id.in_(part_ids))
+            .order_by(
+                DetectionRecord.part_id.asc(),
+                latest_source_at_expr.desc(),
+                DetectionRecord.id.desc(),
+            )
+        )
+
+        for row in self.db.execute(latest_device_stmt):
+            part_id = int(row.part_id)
+            usage_state = usage_map.setdefault(
+                part_id,
+                {
+                    "record_count": 0,
+                    "image_count": 0,
+                    "device_count": 0,
+                    "latest_captured_at": None,
+                    "latest_uploaded_at": None,
+                    "latest_source_device": None,
+                },
+            )
+            if usage_state["latest_source_device"] is None:
+                usage_state["latest_source_device"] = row[1]
 
         return usage_map
 

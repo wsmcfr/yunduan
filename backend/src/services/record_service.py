@@ -55,6 +55,7 @@ class RecordService:
         self,
         *,
         part_id: int | None,
+        part_category: str | None,
         device_id: int | None,
         result: DetectionResult | None,
         review_status: ReviewStatus | None,
@@ -69,6 +70,7 @@ class RecordService:
 
         return self.record_repository.list_records(
             part_id=part_id,
+            part_category=part_category,
             device_id=device_id,
             result=result,
             review_status=review_status,

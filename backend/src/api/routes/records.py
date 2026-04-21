@@ -28,6 +28,7 @@ router = APIRouter()
 @router.get("", response_model=DetectionRecordListResponse)
 def list_records(
     part_id: int | None = Query(default=None, ge=1),
+    part_category: str | None = Query(default=None, min_length=1, max_length=64),
     device_id: int | None = Query(default=None, ge=1),
     result: DetectionResult | None = Query(default=None),
     review_status: ReviewStatus | None = Query(default=None),
@@ -44,6 +45,7 @@ def list_records(
 
     total, items = RecordService(db).list_records(
         part_id=part_id,
+        part_category=part_category,
         device_id=device_id,
         result=result,
         review_status=review_status,

@@ -60,21 +60,49 @@ export interface ApiMessageResponseDto {
   message: string;
 }
 
+export interface AuthRuntimeOptionsDto {
+  registration_enabled: boolean;
+  password_reset_enabled: boolean;
+  password_policy_hint: string;
+}
+
 export interface UserProfileDto {
   id: number;
   username: string;
+  email: string | null;
   display_name: string;
   role: UserRole;
   is_active: boolean;
   last_login_at: string | null;
+  password_changed_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface LoginResponseDto {
-  access_token: string;
-  token_type: string;
+export interface AuthSessionResponseDto {
+  session_expires_at: string;
   user: UserProfileDto;
+}
+
+export interface LoginRequestDto {
+  account: string;
+  password: string;
+}
+
+export interface RegisterRequestDto {
+  username: string;
+  display_name: string;
+  email: string;
+  password: string;
+}
+
+export interface ForgotPasswordRequestDto {
+  email: string;
+}
+
+export interface ResetPasswordRequestDto {
+  token: string;
+  new_password: string;
 }
 
 export interface SummaryStatisticsDto {
@@ -248,6 +276,8 @@ export interface PartDto {
   is_active: boolean;
   record_count: number;
   image_count: number;
+  device_count: number;
+  latest_source_device: DeviceBriefDto | null;
   latest_captured_at: string | null;
   latest_uploaded_at: string | null;
   created_at: string;
@@ -289,6 +319,7 @@ export interface PartBriefDto {
   id: number;
   part_code: string;
   name: string;
+  category: string | null;
 }
 
 export interface DeviceBriefDto {

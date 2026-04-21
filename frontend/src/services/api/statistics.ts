@@ -8,7 +8,6 @@ import type {
   StatisticsSampleGalleryResponseDto,
   SummaryStatisticsDto,
 } from "@/types/api";
-import { getStoredAuthToken } from "@/utils/storage";
 
 import { ApiClientError, apiRequest, streamSseRequest } from "./client";
 
@@ -17,6 +16,7 @@ export interface StatisticsOverviewQuery {
   readonly endDate?: string | null;
   readonly days?: number;
   readonly partId?: number | null;
+  readonly partCategory?: string | null;
   readonly deviceId?: number | null;
 }
 
@@ -38,6 +38,9 @@ function buildStatisticsQueryString(query: StatisticsOverviewQuery = {}): string
   }
   if (query.partId !== undefined && query.partId !== null) {
     params.set("part_id", String(query.partId));
+  }
+  if (query.partCategory) {
+    params.set("part_category", query.partCategory);
   }
   if (query.deviceId !== undefined && query.deviceId !== null) {
     params.set("device_id", String(query.deviceId));
@@ -148,17 +151,12 @@ export function streamStatisticsAiAnalysis(
 export async function downloadStatisticsPdf(
   payload: StatisticsExportPdfRequestDto,
 ): Promise<void> {
-  const headers = new Headers({
-    "Content-Type": "application/json",
-  });
-  const token = getStoredAuthToken();
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-
   const response = await fetch("/api/v1/statistics/export-pdf", {
     method: "POST",
-    headers,
+    headers: new Headers({
+      "Content-Type": "application/json",
+    }),
+    credentials: "include",
     body: JSON.stringify(payload),
   });
 

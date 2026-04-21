@@ -62,6 +62,36 @@ The web app should preserve those strengths.
 
 ---
 
+## Convention: Temporary Public Login Helper Copy Must Stay Non-Production
+
+**What**: While the current login page is still a temporary helper-style screen, any helper text, placeholder credential hint, or demo copy on the public login page must use non-working placeholder credentials.
+
+**Why**:
+
+- this project is deployed on the public internet, not only on a local LAN
+- the login page source is part of the shipped frontend bundle and is visible to anyone who loads the page
+- real production credentials must never be documented in frontend copy, placeholders, or static assets
+- this rule is about the temporary helper copy only; it does not prevent replacing the whole screen later with a proper login / registration flow
+
+**Example**:
+
+```vue
+<p class="login-tip">
+  Demo only: `admin / admin123`
+</p>
+```
+
+```vue
+<!-- Do not ship the real public-production credential pair in the UI. -->
+<p class="login-tip">
+  admin / <real-production-password>
+</p>
+```
+
+**Related**: keep real credentials in backend config, secret stores, or operator-only runbooks, not in frontend code or public hints. When the product later moves to a real login / registration UI, this temporary helper-copy rule can be removed together with the placeholder text itself.
+
+---
+
 ## Examples
 
 | Repository evidence | Quality takeaway |
@@ -80,3 +110,20 @@ The web app should preserve those strengths.
 | Keeping business logic in template expressions | Hard to test and review |
 | Forgetting empty/error states while focusing only on the success path | Users lose trust quickly |
 | Repeating status text and badge logic in every page | Causes inconsistent UI behavior |
+| Shipping real production credentials in login helper copy | Exposes operator secrets through public frontend assets |
+
+---
+
+## Convention: Formal Auth Pages Must Not Prefill or Expose Credentials
+
+Once the project moves beyond the temporary helper login screen and into a real login / registration / password-reset flow:
+
+- do not prefill usernames, demo passwords, or real operator credentials into auth form state
+- do not render any “current production account” hint in the public auth UI
+- do not expose readable access tokens in page state, hidden fields, or browser storage
+
+Why:
+
+- real auth pages are part of the public internet surface
+- prefilled credentials drift into screenshots, screen recordings, and browser autofill snapshots
+- token exposure undermines the security benefit of moving the session to `HttpOnly Cookie`

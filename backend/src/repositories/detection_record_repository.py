@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from src.db.models.detection_record import DetectionRecord
 from src.db.models.enums import DetectionResult, ReviewStatus
 from src.db.models.file_object import FileObject
+from src.db.models.part import Part
 from src.db.models.review_record import ReviewRecord
+
+UNCATEGORIZED_PART_CATEGORY_LABEL = "未分类"
 
 
 class DetectionRecordRepository:
@@ -31,6 +34,7 @@ class DetectionRecordRepository:
         stmt: Select[tuple[DetectionRecord]],
         *,
         part_id: int | None = None,
+        part_category: str | None = None,
         device_id: int | None = None,
         result: DetectionResult | None = None,
         review_status: ReviewStatus | None = None,
@@ -43,6 +47,15 @@ class DetectionRecordRepository:
 
         if part_id is not None:
             stmt = stmt.where(DetectionRecord.part_id == part_id)
+        if part_category:
+            if part_category == UNCATEGORIZED_PART_CATEGORY_LABEL:
+                stmt = stmt.where(
+                    DetectionRecord.part.has(
+                        or_(Part.category.is_(None), Part.category == "")
+                    )
+                )
+            else:
+                stmt = stmt.where(DetectionRecord.part.has(Part.category == part_category))
         if device_id is not None:
             stmt = stmt.where(DetectionRecord.device_id == device_id)
         if result is not None:
@@ -87,6 +100,7 @@ class DetectionRecordRepository:
         self,
         *,
         part_id: int | None,
+        part_category: str | None,
         device_id: int | None,
         result: DetectionResult | None,
         review_status: ReviewStatus | None,
@@ -102,6 +116,7 @@ class DetectionRecordRepository:
         stmt = self._apply_filters(
             self._base_stmt(),
             part_id=part_id,
+            part_category=part_category,
             device_id=device_id,
             result=result,
             review_status=review_status,
@@ -128,6 +143,7 @@ class DetectionRecordRepository:
         self,
         *,
         part_id: int | None = None,
+        part_category: str | None = None,
         device_id: int | None = None,
         captured_from: datetime | None,
         captured_to: datetime | None,
@@ -137,6 +153,7 @@ class DetectionRecordRepository:
         stmt = self._apply_filters(
             self._base_stmt(),
             part_id=part_id,
+            part_category=part_category,
             device_id=device_id,
             captured_from=captured_from,
             captured_to=captured_to,

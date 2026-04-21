@@ -55,6 +55,7 @@ def get_statistics_sample_gallery(
     end_date: date | None = Query(default=None),
     days: int = Query(default=7, ge=1, le=90),
     part_id: int | None = Query(default=None, ge=1),
+    part_category: str | None = Query(default=None, min_length=1, max_length=64),
     device_id: int | None = Query(default=None, ge=1),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
@@ -66,6 +67,7 @@ def get_statistics_sample_gallery(
         end_date=end_date,
         days=days,
         part_id=part_id,
+        part_category=part_category,
         device_id=device_id,
     )
 

@@ -49,6 +49,8 @@ class PartService:
             usage_summary = usage_map.get(item.id, {})
             setattr(item, "record_count", int(usage_summary.get("record_count", 0) or 0))
             setattr(item, "image_count", int(usage_summary.get("image_count", 0) or 0))
+            setattr(item, "device_count", int(usage_summary.get("device_count", 0) or 0))
+            setattr(item, "latest_source_device", usage_summary.get("latest_source_device"))
             setattr(item, "latest_captured_at", usage_summary.get("latest_captured_at"))
             setattr(item, "latest_uploaded_at", usage_summary.get("latest_uploaded_at"))
 

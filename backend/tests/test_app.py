@@ -41,3 +41,14 @@ class AppSmokeTestCase(unittest.TestCase):
 
         self.assertIn("/api/v1/settings/ai-gateways/{gateway_id}/discovered-models", route_paths)
         self.assertIn("/api/v1/settings/ai-gateways/discovery-preview", route_paths)
+
+    def test_auth_public_routes_are_mounted(self) -> None:
+        """验证正式认证所需的公开路由都已经挂载。"""
+
+        route_paths = {route.path for route in app.routes}
+
+        self.assertIn("/api/v1/auth/runtime-options", route_paths)
+        self.assertIn("/api/v1/auth/register", route_paths)
+        self.assertIn("/api/v1/auth/logout", route_paths)
+        self.assertIn("/api/v1/auth/forgot-password", route_paths)
+        self.assertIn("/api/v1/auth/reset-password", route_paths)

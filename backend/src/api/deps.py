@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from src.core.errors import ForbiddenError, UnauthorizedError
 from src.db.models.enums import UserRole
-from src.core.security import decode_access_token
+from src.core.config import get_settings
+from src.core.security import decode_access_token, validate_token_freshness
 from src.db.models.user import User
 from src.repositories.user_repository import UserRepository
 from src.db.session import get_db_session
@@ -26,14 +27,22 @@ def get_db() -> Session:
 
 
 def get_current_token_payload(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> dict[str, Any]:
     """获取当前登录用户的令牌载荷。"""
 
-    if credentials is None:
+    token = ""
+    if credentials is not None:
+        token = credentials.credentials.strip()
+
+    if not token:
+        token = request.cookies.get(get_settings().auth_cookie_name, "").strip()
+
+    if not token:
         raise UnauthorizedError(code="missing_token", message="请求缺少登录凭证。")
 
-    return decode_access_token(credentials.credentials)
+    return decode_access_token(token)
 
 
 def get_current_user(
@@ -55,6 +64,7 @@ def get_current_user(
     if user is None or not user.is_active:
         raise UnauthorizedError(code="user_unavailable", message="当前登录用户不存在或已被禁用。")
 
+    validate_token_freshness(token_payload, password_changed_at=user.password_changed_at)
     return user
 
 

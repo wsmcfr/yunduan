@@ -43,6 +43,8 @@ const filters = computed(() => {
     endDate: parseSingleQueryValue(route.query.end_date),
     days: parsedDays ?? 14,
     partId: parseOptionalNumber(route.query.part_id),
+    partCategory: parseSingleQueryValue(route.query.part_category)
+      ?? parseSingleQueryValue(route.query.category),
     deviceId: parseOptionalNumber(route.query.device_id),
     initialCategoryLabel: parseSingleQueryValue(route.query.category),
   };
@@ -56,6 +58,7 @@ const scopeDescription = computed(() => {
     `${filters.value.startDate ?? "未限定"} 至 ${filters.value.endDate ?? "未限定"}`,
     `窗口 ${filters.value.days} 天`,
     filters.value.partId !== null ? `零件类型 ID ${filters.value.partId}` : null,
+    filters.value.partCategory ? `零件分类 ${filters.value.partCategory}` : null,
     filters.value.deviceId !== null ? `设备 ID ${filters.value.deviceId}` : null,
   ]
     .filter(Boolean)
@@ -75,6 +78,7 @@ async function loadGallery(): Promise<void> {
       endDate: filters.value.endDate,
       days: filters.value.days,
       partId: filters.value.partId,
+      partCategory: filters.value.partCategory,
       deviceId: filters.value.deviceId,
     });
     gallery.value = mapStatisticsSampleGalleryResponseDto(response);

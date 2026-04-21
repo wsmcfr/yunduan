@@ -1,5 +1,4 @@
 import type { ApiErrorResponseDto } from "@/types/api";
-import { getStoredAuthToken } from "@/utils/storage";
 
 export class ApiClientError extends Error {
   code: string;
@@ -21,10 +20,54 @@ export class ApiClientError extends Error {
 }
 
 /**
- * 统一构造带鉴权信息的请求头。
- * 普通 JSON 请求和流式 SSE 请求都复用这套逻辑，避免两边各维护一份令牌注入规则。
+ * 把后端错误响应归一化成前端可展示的消息结构。
+ * FastAPI 默认的 422 校验错误只有 `detail`，没有 `message`，这里统一补成人能看懂的提示。
  */
-function buildAuthorizedHeaders(init: RequestInit = {}): Headers {
+function normalizeApiErrorPayload(
+  payload: unknown,
+): Partial<ApiErrorResponseDto> & { message?: string } {
+  if (typeof payload !== "object" || payload === null) {
+    return {};
+  }
+
+  const normalizedPayload = payload as Partial<ApiErrorResponseDto> & {
+    message?: string;
+    detail?: unknown;
+  };
+
+  if (normalizedPayload.message) {
+    return normalizedPayload;
+  }
+
+  if (Array.isArray(normalizedPayload.detail) && normalizedPayload.detail.length > 0) {
+    const firstDetail = normalizedPayload.detail[0] as {
+      msg?: string;
+      loc?: unknown[];
+    };
+    const fieldPath = Array.isArray(firstDetail?.loc) ? firstDetail.loc.join(".") : "";
+    return {
+      ...normalizedPayload,
+      message: fieldPath
+        ? `请求参数无效：${fieldPath}，${firstDetail?.msg ?? "请检查输入。"}`
+        : `请求参数无效：${firstDetail?.msg ?? "请检查输入。"}`,
+    };
+  }
+
+  if (typeof normalizedPayload.detail === "string" && normalizedPayload.detail.trim()) {
+    return {
+      ...normalizedPayload,
+      message: normalizedPayload.detail.trim(),
+    };
+  }
+
+  return normalizedPayload;
+}
+
+/**
+ * 统一构造请求头和请求参数。
+ * 当前正式认证使用服务端 HttpOnly Cookie，因此这里不再从前端注入 Bearer Token。
+ */
+function buildRequestInit(init: RequestInit = {}): RequestInit {
   const headers = new Headers(init.headers ?? {});
   const hasBody = init.body !== undefined && init.body !== null;
 
@@ -32,12 +75,11 @@ function buildAuthorizedHeaders(init: RequestInit = {}): Headers {
     headers.set("Content-Type", "application/json");
   }
 
-  const token = getStoredAuthToken();
-  if (token && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-
-  return headers;
+  return {
+    ...init,
+    headers,
+    credentials: init.credentials ?? "include",
+  };
 }
 
 /**
@@ -52,30 +94,25 @@ async function throwApiError(response: Response): Promise<never> {
         message: (await response.text()) || "接口请求失败",
       };
 
-  throw new ApiClientError(response.status, payload);
+  throw new ApiClientError(response.status, normalizeApiErrorPayload(payload));
 }
 
 /**
  * 基础请求封装。
- * 负责统一附加令牌、解析 JSON 和转换后端错误格式。
+ * 负责统一附带 Cookie、解析 JSON 和转换后端错误格式。
  */
 export async function apiRequest<TResponse>(
   input: string,
   init: RequestInit = {},
 ): Promise<TResponse> {
-  const headers = buildAuthorizedHeaders(init);
-
-  const response = await fetch(input, {
-    ...init,
-    headers,
-  });
+  const response = await fetch(input, buildRequestInit(init));
 
   const contentType = response.headers.get("content-type") ?? "";
   const isJsonResponse = contentType.includes("application/json");
   const payload = isJsonResponse ? await response.json() : null;
 
   if (!response.ok) {
-    throw new ApiClientError(response.status, payload ?? {});
+    throw new ApiClientError(response.status, normalizeApiErrorPayload(payload ?? {}));
   }
 
   return payload as TResponse;
@@ -166,11 +203,7 @@ export async function streamSseRequest(
     onEvent: (event: SseEventMessage) => void | Promise<void>;
   },
 ): Promise<void> {
-  const headers = buildAuthorizedHeaders(init);
-  const response = await fetch(input, {
-    ...init,
-    headers,
-  });
+  const response = await fetch(input, buildRequestInit(init));
 
   if (!response.ok) {
     await throwApiError(response);

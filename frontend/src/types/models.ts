@@ -29,12 +29,20 @@ export type StructuredContextBlock = Record<string, StructuredContextValue>;
 export interface UserProfile {
   id: number;
   username: string;
+  email: string | null;
   displayName: string;
   role: UserRole;
   isActive: boolean;
   lastLoginAt: string | null;
+  passwordChangedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AuthRuntimeOptions {
+  registrationEnabled: boolean;
+  passwordResetEnabled: boolean;
+  passwordPolicyHint: string;
 }
 
 export interface SummaryStatistics {
@@ -171,6 +179,12 @@ export interface PartModel {
   isActive: boolean;
   recordCount: number;
   imageCount: number;
+  deviceCount: number;
+  latestSourceDevice: {
+    id: number;
+    deviceCode: string;
+    name: string;
+  } | null;
   latestCapturedAt: string | null;
   latestUploadedAt: string | null;
   createdAt: string;
@@ -362,6 +376,7 @@ export interface DetectionRecordModel {
     id: number;
     partCode: string;
     name: string;
+    category: string | null;
   };
   device: {
     id: number;

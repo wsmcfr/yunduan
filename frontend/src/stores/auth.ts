@@ -1,29 +1,49 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
-import { fetchCurrentUserRequest, loginRequest } from "@/services/api/auth";
+import {
+  fetchCurrentUserRequest,
+  loginRequest,
+  logoutRequest,
+  registerRequest,
+} from "@/services/api/auth";
 import { mapUserProfileDto } from "@/services/mappers/commonMappers";
 import type { UserProfile } from "@/types/models";
-import {
-  clearStoredAuthToken,
-  getStoredAuthToken,
-  setStoredAuthToken,
-} from "@/utils/storage";
 
 export const useAuthStore = defineStore("auth", () => {
-  const token = ref<string>(getStoredAuthToken());
+  // 正式认证改为服务端 HttpOnly Cookie，因此前端只保留“当前用户是谁”的最小状态。
   const currentUser = ref<UserProfile | null>(null);
   const isReady = ref(false);
 
-  const isAuthenticated = computed(() => token.value.length > 0 && currentUser.value !== null);
+  const isAuthenticated = computed(() => currentUser.value !== null);
 
   /**
-   * 登录并写入本地会话状态。
+   * 登录并同步当前用户信息。
    */
-  async function login(username: string, password: string): Promise<void> {
-    const response = await loginRequest(username, password);
-    token.value = response.access_token;
-    setStoredAuthToken(response.access_token);
+  async function login(account: string, password: string): Promise<void> {
+    const response = await loginRequest({
+      account,
+      password,
+    });
+    currentUser.value = mapUserProfileDto(response.user);
+    isReady.value = true;
+  }
+
+  /**
+   * 注册并同步当前用户信息。
+   */
+  async function register(payload: {
+    username: string;
+    displayName: string;
+    email: string;
+    password: string;
+  }): Promise<void> {
+    const response = await registerRequest({
+      username: payload.username,
+      display_name: payload.displayName,
+      email: payload.email,
+      password: payload.password,
+    });
     currentUser.value = mapUserProfileDto(response.user);
     isReady.value = true;
   }
@@ -37,44 +57,40 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   /**
-   * 恢复本地已保存的令牌，并同步服务端用户信息。
+   * 刷新页面后尝试根据服务端 Cookie 恢复会话。
    */
   async function restoreSession(): Promise<void> {
     if (isReady.value) {
       return;
     }
 
-    token.value = getStoredAuthToken();
-    if (!token.value) {
-      isReady.value = true;
-      return;
-    }
-
     try {
       await fetchCurrentUser();
     } catch {
-      logout();
+      currentUser.value = null;
     } finally {
       isReady.value = true;
     }
   }
 
   /**
-   * 清理本地会话。
+   * 请求后端清理 Cookie，并同步前端本地状态。
    */
-  function logout(): void {
-    token.value = "";
-    currentUser.value = null;
-    clearStoredAuthToken();
-    isReady.value = true;
+  async function logout(): Promise<void> {
+    try {
+      await logoutRequest();
+    } finally {
+      currentUser.value = null;
+      isReady.value = true;
+    }
   }
 
   return {
-    token,
     currentUser,
     isReady,
     isAuthenticated,
     login,
+    register,
     fetchCurrentUser,
     restoreSession,
     logout,

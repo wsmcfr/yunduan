@@ -83,6 +83,7 @@ describe("ai review utilities", () => {
         id: 1,
         partCode: "PART-METAL-01",
         name: "金属垫片样件",
+        category: "垫片",
       },
       device: {
         id: 1,

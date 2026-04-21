@@ -27,8 +27,8 @@ function refreshPage(): void {
   void router.go(0);
 }
 
-function logout(): void {
-  authStore.logout();
+async function logout(): Promise<void> {
+  await authStore.logout();
   void router.push({ name: "login" });
 }
 

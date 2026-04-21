@@ -1,4 +1,5 @@
 import type {
+  AuthRuntimeOptionsDto,
   AIChatResponseDto,
   AIContextFileDto,
   AIDiscoveredModelCandidateDto,
@@ -28,6 +29,7 @@ import type {
   UserProfileDto,
 } from "@/types/api";
 import type {
+  AuthRuntimeOptions,
   AIChatResponse,
   AIContextFile,
   AIDiscoveredModelCandidate,
@@ -57,16 +59,29 @@ import type {
 } from "@/types/models";
 
 /**
+ * 将认证运行时选项 DTO 映射为前端模型。
+ */
+export function mapAuthRuntimeOptionsDto(dto: AuthRuntimeOptionsDto): AuthRuntimeOptions {
+  return {
+    registrationEnabled: dto.registration_enabled,
+    passwordResetEnabled: dto.password_reset_enabled,
+    passwordPolicyHint: dto.password_policy_hint,
+  };
+}
+
+/**
  * 将后端用户 DTO 映射为前端展示模型。
  */
 export function mapUserProfileDto(dto: UserProfileDto): UserProfile {
   return {
     id: dto.id,
     username: dto.username,
+    email: dto.email,
     displayName: dto.display_name,
     role: dto.role,
     isActive: dto.is_active,
     lastLoginAt: dto.last_login_at,
+    passwordChangedAt: dto.password_changed_at,
     createdAt: dto.created_at,
     updatedAt: dto.updated_at,
   };
@@ -289,6 +304,14 @@ export function mapPartDto(dto: PartDto): PartModel {
     isActive: dto.is_active,
     recordCount: dto.record_count,
     imageCount: dto.image_count,
+    deviceCount: dto.device_count,
+    latestSourceDevice: dto.latest_source_device
+      ? {
+          id: dto.latest_source_device.id,
+          deviceCode: dto.latest_source_device.device_code,
+          name: dto.latest_source_device.name,
+        }
+      : null,
     latestCapturedAt: dto.latest_captured_at,
     latestUploadedAt: dto.latest_uploaded_at,
     createdAt: dto.created_at,
@@ -528,6 +551,7 @@ export function mapDetectionRecordDto(dto: DetectionRecordDto): DetectionRecordM
       id: dto.part.id,
       partCode: dto.part.part_code,
       name: dto.part.name,
+      category: dto.part.category,
     },
     device: {
       id: dto.device.id,

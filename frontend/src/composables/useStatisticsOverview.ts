@@ -136,8 +136,12 @@ export function useStatisticsOverview() {
     referenceError.value = "";
 
     const [partsResult, devicesResult, runtimeModelsResult] = await Promise.allSettled([
-      fetchParts({ limit: 200 }),
-      fetchDevices({ limit: 200 }),
+      /**
+       * 后端主数据列表接口当前限制单次最大 `limit=100`。
+       * 这里保持和后端契约一致，避免统计页初始化时因为 422 校验错误导致辅助选项加载失败。
+       */
+      fetchParts({ limit: 100 }),
+      fetchDevices({ limit: 100 }),
       fetchRuntimeAIModels(),
     ]);
 

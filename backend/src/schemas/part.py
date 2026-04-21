@@ -7,6 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from src.schemas.common import ORMBaseModel
+from src.schemas.device import DeviceBrief
 
 
 class PartCreateRequest(BaseModel):
@@ -35,6 +36,7 @@ class PartBrief(ORMBaseModel):
     id: int
     part_code: str
     name: str
+    category: str | None = None
 
 
 class PartResponse(ORMBaseModel):
@@ -48,6 +50,8 @@ class PartResponse(ORMBaseModel):
     is_active: bool
     record_count: int = 0
     image_count: int = 0
+    device_count: int = 0
+    latest_source_device: DeviceBrief | None = None
     latest_captured_at: datetime | None = None
     latest_uploaded_at: datetime | None = None
     created_at: datetime

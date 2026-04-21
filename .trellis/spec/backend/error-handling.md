@@ -322,3 +322,125 @@ if payload.export_mode == "lightweight":
 | Using human text as the only error identifier | Frontend cannot branch reliably |
 | Translating every error too early in lower layers | Reduces observability and reuse |
 | Assuming third-party library helper APIs return rich objects without checking the actual return type | Small renderer regressions can escape as production-only `500` errors |
+
+---
+
+## Scenario: Public Auth and Password Reset Error Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `/api/v1/auth/login`, `/register`, `/logout`, `/forgot-password`, `/reset-password`, or `/me`
+- Affected layers: auth route -> JWT/cookie helpers -> auth service -> password-reset mail integration -> frontend auth forms
+
+### 2. Signatures
+
+```http
+POST /api/v1/auth/login
+POST /api/v1/auth/register
+GET /api/v1/auth/me
+POST /api/v1/auth/logout
+POST /api/v1/auth/forgot-password
+POST /api/v1/auth/reset-password
+```
+
+```py
+def create_access_token(
+    subject: str,
+    extra_claims: dict[str, Any] | None = None,
+) -> tuple[str, datetime]: ...
+
+def validate_token_freshness(
+    token_payload: dict[str, Any],
+    *,
+    password_changed_at: datetime | None,
+) -> None: ...
+```
+
+```json
+{
+  "session_expires_at": "2026-04-22T02:05:43.908803Z",
+  "user": {
+    "id": 5,
+    "username": "probe1776737145",
+    "password_changed_at": "2026-04-21T02:05:44"
+  }
+}
+```
+
+### 3. Contracts
+
+| Situation | Expected handling |
+|---|---|
+| Invalid login credentials | `401` with stable code such as `invalid_credentials` |
+| Public registration disabled | `403` with stable code such as `public_registration_disabled` |
+| Password-reset mail channel unavailable | Stable client-facing error such as `password_reset_channel_unavailable` |
+| Forgot-password request for nonexistent email | Return the same generic success message as an existing email when the channel is enabled |
+| Invalid reset token | `401` with `invalid_password_reset_token` |
+| Expired reset token | `401` with `password_reset_token_expired` |
+| Logout without a current cookie | Still return a normal success response after clearing the cookie |
+| Register/login returns a fresh session cookie | The same cookie must be accepted by the immediate next `/auth/me` or protected API request |
+| Token freshness check compares JWT `issued_at_ms` with `password_changed_at` | The comparison may tolerate a tiny precision skew caused by DB timestamp rounding, ORM serialization, or JWT timestamp granularity |
+| `token_revoked` | Only valid when the token was materially issued before the latest password change, not when both timestamps describe the same auth event |
+
+Additional rules:
+
+- forgot-password must not leak whether an email exists in the system once the mail channel is enabled
+- backend mail delivery failures should not leave a live reset token in the database without operator visibility
+- resetting the password must clear the browser auth cookie in the HTTP response so the UI cannot keep using a stale session accidentally
+- do not use a zero-skew freshness rule if `password_changed_at` and JWT issue time come from different precision domains
+- freshly registered users must not be forced to log out and log back in only because `password_changed_at` was rounded slightly after the issued token timestamp
+
+### 4. Validation & Error Matrix
+
+| Condition | Problem | Expected behavior |
+|---|---|---|
+| SMTP config is missing | User cannot actually receive a reset link | Return a stable “channel unavailable” error instead of a generic traceback |
+| Mail send fails after token creation | Database may contain an undispatched valid token | Clear token state and re-raise the integration error |
+| User submits an expired token | Old link still exists in inbox | Clear the stored token state and return `password_reset_token_expired` |
+| Browser calls logout after cookie already expired | Frontend still wants a clean local logout flow | Return success and clear any remaining cookie metadata |
+| Register succeeds, but the next protected request arrives milliseconds later with the same session cookie | DB/JWT precision mismatch can make the token look older than `password_changed_at` | Accept the request when the delta stays within the allowed skew window |
+| Token issue time is clearly older than the latest password change | This is a real stale-session case | Reject with `401 token_revoked` |
+| Request has no cookie and no bearer token | Backend cannot identify a session | Reject with `401 missing_token` |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | `POST /auth/register` returns `Set-Cookie`, then the browser immediately calls `/auth/me` and receives `200` with the same new user |
+| Base | Historical user has `password_changed_at = null`, so `/auth/me` only depends on token validity and user activity state |
+| Bad | Registration creates `password_changed_at` with slightly newer DB precision than JWT `issued_at_ms`, and an exact comparison revokes the brand-new session |
+
+### 6. Tests Required
+
+- auth integration test asserting `register -> Set-Cookie -> /auth/me` succeeds without a forced re-login
+- helper test asserting `validate_token_freshness(...)` accepts a sub-second skew between `issued_at_ms` and `password_changed_at`
+- helper test asserting a materially older token is still rejected with `token_revoked`
+- forgot-password test asserting mail-send failure clears the stored reset-token state
+- logout test asserting the route still returns success when no live cookie remains
+
+Assertion points:
+
+- newly issued register/login sessions survive the first protected request
+- the freshness guard still blocks truly stale sessions
+- token/cookie absence is distinguishable from token revocation by stable error codes
+- password reset failure paths do not leave a valid undispatched reset token behind
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+normalized_password_changed_at = _normalize_datetime(password_changed_at)
+if issued_at < normalized_password_changed_at:
+    raise UnauthorizedError(code="token_revoked", message="登录状态已失效，请重新登录。")
+```
+
+#### Correct
+
+```py
+TOKEN_FRESHNESS_SKEW = timedelta(seconds=1)
+
+normalized_password_changed_at = _normalize_datetime(password_changed_at)
+if issued_at + TOKEN_FRESHNESS_SKEW < normalized_password_changed_at:
+    raise UnauthorizedError(code="token_revoked", message="登录状态已失效，请重新登录。")
+```

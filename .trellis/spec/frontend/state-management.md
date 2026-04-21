@@ -193,6 +193,90 @@ function openRecordDetail(recordId: number): void {
 
 ---
 
+## Scenario: Cookie-Based Auth Session Ownership
+
+### 1. Scope / Trigger
+
+- Trigger: any change touching login, register, logout, password reset, route guards, or auth runtime options
+- Affected layers: backend auth cookie -> frontend auth API -> `useAuthStore` -> router guards -> public auth pages
+
+### 2. Signatures
+
+```ts
+export function useAuthStore(): {
+  currentUser: UserProfile | null;
+  isReady: boolean;
+  isAuthenticated: boolean;
+  login: (account: string, password: string) => Promise<void>;
+  register: (payload: {
+    username: string;
+    displayName: string;
+    email: string;
+    password: string;
+  }) => Promise<void>;
+  restoreSession: () => Promise<void>;
+  logout: () => Promise<void>;
+};
+```
+
+### 3. Contracts
+
+| Concern | Owner | Contract |
+|---|---|---|
+| Access token / session cookie | backend + browser | Stored in `HttpOnly Cookie`; frontend must not persist it in `localStorage` |
+| Current user identity | `useAuthStore` | Frontend global auth state only needs `currentUser` + readiness |
+| Session restore | router guard + `useAuthStore` | First protected navigation calls `restoreSession()` once before auth branching |
+| Logout | `useAuthStore` | Must clear frontend user state even if the backend logout request fails |
+| Public auth capabilities | login page local state | Registration / forgot-password availability comes from runtime options, not hard-coded assumptions |
+
+Additional rules:
+
+- do not add a readable `token` field back into the auth store after migrating to server cookies
+- do not mix auth session flags into records, statistics, or settings feature composables
+- password form values may exist transiently in page-local form state, but they must not be persisted across reloads
+
+### 4. Validation & Error Matrix
+
+| Condition | Problem | Expected behavior |
+|---|---|---|
+| Browser refreshes on a protected page | Auth store has no readable local token anymore | `restoreSession()` fetches `/auth/me` and rebuilds `currentUser` |
+| `/auth/me` returns `401` during restore | Stale or missing cookie | Frontend clears `currentUser` and routes to login |
+| Backend logout request fails | Browser or network glitch | Frontend still clears local user state to avoid a half-logged-out UI |
+| Public login page assumes registration is enabled | Environment may disable public sign-up | Read `/auth/runtime-options` and render a disabled state instead of a fake working form |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | Auth store keeps only `currentUser`, `isReady`, and async auth actions while the browser owns the cookie |
+| Base | Runtime options request fails, so the login page falls back to safe defaults without crashing |
+| Bad | Frontend reintroduces `localStorage` token persistence after the project has moved to `HttpOnly Cookie` auth |
+
+### 6. Tests Required
+
+- store test asserting login fills `currentUser` without exposing a frontend token field
+- store test asserting register sets `isReady`
+- store test asserting restore failure clears auth state safely
+- store test asserting logout clears local state even when the request is async
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+window.localStorage.setItem("auth-token", response.access_token);
+token.value = response.access_token;
+```
+
+#### Correct
+
+```ts
+const response = await loginRequest({ account, password });
+currentUser.value = mapUserProfileDto(response.user);
+```
+
+---
+
 ## Scenario: Streamed AI Conversation Message Ownership
 
 ### 1. Scope / Trigger

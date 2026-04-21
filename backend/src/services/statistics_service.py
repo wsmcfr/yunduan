@@ -94,6 +94,7 @@ class StatisticsService:
         start_date: date | None,
         end_date: date | None,
         part_id: int | None = None,
+        part_category: str | None = None,
         device_id: int | None = None,
     ) -> list[DetectionRecord]:
         """按过滤条件加载统计计算所需的检测记录集合。"""
@@ -101,6 +102,7 @@ class StatisticsService:
         captured_from, captured_to = self._to_datetime_range(start_date=start_date, end_date=end_date)
         return self.record_repository.list_for_statistics(
             part_id=part_id,
+            part_category=part_category,
             device_id=device_id,
             captured_from=captured_from,
             captured_to=captured_to,
@@ -648,6 +650,7 @@ class StatisticsService:
         end_date: date | None,
         days: int,
         part_id: int | None = None,
+        part_category: str | None = None,
         device_id: int | None = None,
     ) -> StatisticsSampleGalleryResponse:
         """只返回统计图库数据，供独立图库页按分类浏览和进入复检。"""
@@ -661,6 +664,7 @@ class StatisticsService:
             start_date=resolved_start_date,
             end_date=resolved_end_date,
             part_id=part_id,
+            part_category=part_category,
             device_id=device_id,
         )
         return self._build_sample_gallery(records=records)

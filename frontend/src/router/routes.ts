@@ -16,6 +16,7 @@ const SettingsPage = () => import("@/pages/SettingsPage.vue");
 
 export const routeNames = {
   login: "login",
+  resetPassword: "reset-password",
   dashboard: "dashboard",
   records: "records",
   recordDetail: "record-detail",
@@ -52,6 +53,16 @@ export const routes: RouteRecordRaw[] = [
     component: LoginPage,
     meta: {
       title: "登录",
+      requiresAuth: false,
+      useShell: false,
+    },
+  },
+  {
+    path: "/reset-password",
+    name: routeNames.resetPassword,
+    component: LoginPage,
+    meta: {
+      title: "重置密码",
       requiresAuth: false,
       useShell: false,
     },

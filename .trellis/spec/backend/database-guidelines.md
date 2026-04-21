@@ -82,3 +82,43 @@ There is no real migration setup in the repository yet. This file therefore reco
 | Storing large binary payloads directly in MySQL | Object storage is already part of the chosen architecture |
 | Mixing file uploads, AI calls, and DB writes in a single transaction block | Makes failure handling and retries unclear |
 | Reusing API DTO shapes as ORM models | Causes cross-layer coupling |
+
+---
+
+## Scenario: User Credential and Password Reset Storage
+
+### 1. Scope / Trigger
+
+- Trigger: any change to user authentication, login session invalidation, registration, or forgot-password flows
+- Affected layers: user ORM -> Alembic migration -> auth service -> auth route schemas
+
+### 2. Contracts
+
+| Field | Contract |
+|---|---|
+| `users.password_hash` | Stores only the adaptive password hash, never plaintext |
+| `users.email` | Unique when present, nullable for historical accounts created before email-backed recovery existed |
+| `users.password_changed_at` | Tracks when password material last changed so older sessions can be invalidated |
+| `users.password_reset_token_hash` | Stores only the reset-token hash, never the raw token sent by email |
+| `users.password_reset_sent_at` / `users.password_reset_expires_at` | Bound cooldown and expiration for password recovery |
+
+Additional rules:
+
+- password reset must overwrite or clear the previous token state rather than accumulating multiple plaintext tokens
+- adaptive password-hash upgrades may happen transparently on login, but they must still write only the new hash format
+- any new auth field must land through Alembic, not through ad-hoc manual SQL in deployment notes
+
+### 3. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | Database stores `password_hash`, `password_changed_at`, and `password_reset_token_hash`, while the raw reset link only exists transiently during email send |
+| Base | Legacy admin user has `email = null` but still logs in successfully |
+| Bad | Raw password-reset token or plaintext password is inserted into `users` for “convenience” debugging |
+
+### 4. Tests Required
+
+- register test asserting password hashes are not equal to the submitted password
+- forgot-password test asserting only a token hash is persisted
+- reset-password test asserting old password no longer authenticates
+- session-validation test asserting tokens issued before `password_changed_at` are rejected

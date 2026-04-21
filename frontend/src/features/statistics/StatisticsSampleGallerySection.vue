@@ -6,7 +6,11 @@ import MetricCard from "@/components/common/MetricCard.vue";
 import StatusTag from "@/components/common/StatusTag.vue";
 import { routeNames } from "@/router/routes";
 import type { FileKind } from "@/types/api";
-import type { StatisticsSampleGallery, StatisticsSampleImageItem } from "@/types/models";
+import type {
+  StatisticsPartImageGroup,
+  StatisticsSampleGallery,
+  StatisticsSampleImageItem,
+} from "@/types/models";
 import { formatDateTime } from "@/utils/format";
 
 import {
@@ -14,6 +18,9 @@ import {
   buildSampleGalleryCategoryEntryKey,
   groupSampleGalleryByCategory,
 } from "./sampleGallery";
+
+type RailKind = "group" | "sample";
+type RailDirection = "prev" | "next";
 
 const props = withDefaults(
   defineProps<{
@@ -29,13 +36,18 @@ const router = useRouter();
 
 /**
  * 当前选中的图库入口。
- * 默认先展示“全部图片”，满足用户进入统计页后先看整体样本分布的诉求。
+ * 默认先展示“全部图片”，满足用户进入图库页后先看整体分类分布的诉求。
  */
 const activeEntryKey = ref(SAMPLE_GALLERY_ALL_ENTRY_KEY);
 
 /**
+ * 每个分类入口下当前选中的零件类型。
+ * 图库现在先选分类，再在分类内部左右切换具体类型。
+ */
+const activeGroupIdByEntryKey = ref<Record<string, number>>({});
+
+/**
  * 把图库按零件分类整理成入口列表。
- * 这样页面既能显示“全部图片”总入口，也能显示各分类单独入口。
  */
 const categoryEntries = computed(() => groupSampleGalleryByCategory(props.gallery));
 
@@ -46,7 +58,6 @@ const hasGallery = computed(() => (props.gallery?.totalRecordCount ?? 0) > 0);
 
 /**
  * 根据当前入口筛选要展示的分类内容。
- * “全部图片”入口会把所有分类都展示出来，其他入口只保留当前分类。
  */
 const displayedCategoryEntries = computed(() => {
   if (activeEntryKey.value === SAMPLE_GALLERY_ALL_ENTRY_KEY) {
@@ -58,7 +69,6 @@ const displayedCategoryEntries = computed(() => {
 
 /**
  * 当前入口下方的说明文字。
- * 这能帮助用户明确自己看到的是全量图片，还是某个分类的局部图片。
  */
 const activeEntryHint = computed(() => {
   if (!hasGallery.value || !props.gallery) {
@@ -74,19 +84,18 @@ const activeEntryHint = computed(() => {
     return "当前入口对应的分类已不存在，已自动回退到全部图片入口。";
   }
 
-  return `当前只展示“${activeEntry.label}”分类下的 ${activeEntry.recordCount} 条检测记录，方便直接进入人工复检。`;
+  return `当前只展示“${activeEntry.label}”分类，并可在分类内部左右滑动切换不同零件类型和样本。`;
 });
 
 /**
  * 当统计窗口变化导致分类入口改变时，自动兜底回到有效入口。
- * 这样切换筛选条件后不会出现“入口仍然选中旧分类，但页面内容为空”的错位状态。
  */
 watch(
-  () => categoryEntries.value.map((item) => item.key),
-  (entryKeys) => {
+  () => categoryEntries.value.map((item) => item.key).join("|"),
+  () => {
     if (
       activeEntryKey.value !== SAMPLE_GALLERY_ALL_ENTRY_KEY
-      && !entryKeys.includes(activeEntryKey.value)
+      && !categoryEntries.value.some((item) => item.key === activeEntryKey.value)
     ) {
       activeEntryKey.value = SAMPLE_GALLERY_ALL_ENTRY_KEY;
     }
@@ -96,7 +105,6 @@ watch(
 
 /**
  * 独立图库页可通过路由查询参数指定默认分类入口。
- * 如果当前分类不存在，则自动回退到“全部图片”。
  */
 watch(
   () => [props.initialCategoryLabel, categoryEntries.value.map((item) => item.label).join("|")],
@@ -115,8 +123,77 @@ watch(
 );
 
 /**
+ * 为每个分类入口补齐默认选中的零件类型。
+ * 如果之前选中的类型已不存在，则自动回退到该分类下的第一项。
+ */
+watch(
+  () => displayedCategoryEntries.value,
+  (entries) => {
+    const nextState: Record<string, number> = {};
+
+    for (const entry of entries) {
+      const currentGroupId = activeGroupIdByEntryKey.value[entry.key];
+      const hasCurrentGroup = entry.groups.some((group) => group.partId === currentGroupId);
+      nextState[entry.key] = hasCurrentGroup ? currentGroupId : (entry.groups[0]?.partId ?? 0);
+    }
+
+    activeGroupIdByEntryKey.value = nextState;
+  },
+  { immediate: true },
+);
+
+/**
+ * 根据分类入口和零件类型生成 DOM 级别的稳定 rail id。
+ * 这样横向滚动控制不需要维护复杂的 ref Map。
+ */
+function buildRailDomId(kind: RailKind, key: string): string {
+  return `${kind}-rail-${encodeURIComponent(key)}`;
+}
+
+/**
+ * 为“样本横向 rail”生成稳定 key。
+ */
+function buildSampleRailKey(entryKey: string, partId: number): string {
+  return `${entryKey}:${partId}`;
+}
+
+/**
+ * 返回指定分类下当前激活的零件类型分组。
+ */
+function resolveActiveGroup(entry: { key: string; groups: StatisticsPartImageGroup[] }): StatisticsPartImageGroup | null {
+  const activeGroupId = activeGroupIdByEntryKey.value[entry.key];
+  return entry.groups.find((group) => group.partId === activeGroupId) ?? entry.groups[0] ?? null;
+}
+
+/**
+ * 切换分类内当前选中的零件类型。
+ */
+function selectGroup(entryKey: string, partId: number): void {
+  activeGroupIdByEntryKey.value = {
+    ...activeGroupIdByEntryKey.value,
+    [entryKey]: partId,
+  };
+}
+
+/**
+ * 横向滚动分类内的零件类型 rail 或样本 rail。
+ */
+function scrollRail(kind: RailKind, key: string, direction: RailDirection): void {
+  const railElement = document.getElementById(buildRailDomId(kind, key));
+  if (!(railElement instanceof HTMLElement)) {
+    return;
+  }
+
+  const offset = Math.max(railElement.clientWidth * 0.82, 240);
+  railElement.scrollBy({
+    left: direction === "next" ? offset : -offset,
+    behavior: "smooth",
+  });
+}
+
+/**
  * 跳转到单条检测记录详情页。
- * 统计页只负责筛选和总览，真正的人工复检仍然在详情工作区里完成。
+ * 图库页只负责分类浏览和样本预览，真正的人工复检仍然在详情工作区里完成。
  */
 function openRecordDetail(recordId: number): void {
   void router.push({
@@ -128,7 +205,7 @@ function openRecordDetail(recordId: number): void {
 }
 
 /**
- * 把图片类型转换成短标签，帮助用户理解当前卡片展示的是哪一类主图。
+ * 把图片类型转换成短标签。
  */
 function getFileKindLabel(fileKind: FileKind | null): string {
   if (fileKind === "annotated") {
@@ -159,7 +236,6 @@ function buildPreviewAlt(item: StatisticsSampleImageItem): string {
 
 /**
  * 组合当前记录最值得用户先读到的缺陷摘要。
- * 优先展示缺陷类型，没有时再退回缺陷说明，再没有就给出明确占位。
  */
 function buildDefectSummary(item: StatisticsSampleImageItem): string {
   if (item.defectType && item.defectDesc) {
@@ -181,7 +257,7 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
       <div>
         <strong>样本图库与复检入口</strong>
         <p class="muted-text">
-          这里集中展示当前窗口内的样本图片，并按零件分类提供入口。你可以先从“全部图片”总入口看全局，再进入某个分类，最后一键跳到对应记录的人工复检界面。
+          这里集中展示当前窗口内的样本图片，并按零件分类提供入口。你可以先从分类入口切换，再在分类内部左右滑动查看不同类型和样本。
         </p>
       </div>
       <ElTag v-if="gallery" effect="dark" round type="info">
@@ -264,81 +340,125 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
             </ElTag>
           </div>
 
-          <div class="stats-gallery__group-list">
-            <article
+          <div class="stats-gallery__selector-header">
+            <div>
+              <strong>分类内零件类型</strong>
+              <p class="muted-text">左右滑动切换同一分类下的不同类型，避免图片纵向堆满页面。</p>
+            </div>
+            <div class="stats-gallery__selector-actions">
+              <ElButton text @click="scrollRail('group', entry.key, 'prev')">向左</ElButton>
+              <ElButton text @click="scrollRail('group', entry.key, 'next')">向右</ElButton>
+            </div>
+          </div>
+
+          <div
+            :id="buildRailDomId('group', entry.key)"
+            class="stats-gallery__group-rail"
+          >
+            <button
               v-for="group in entry.groups"
               :key="group.partId"
-              class="stats-gallery__group-card"
+              type="button"
+              class="stats-gallery__group-chip"
+              :class="{
+                'stats-gallery__group-chip--active': resolveActiveGroup(entry)?.partId === group.partId,
+              }"
+              @click="selectGroup(entry.key, group.partId)"
             >
-              <div class="stats-gallery__group-header">
-                <div>
-                  <strong>{{ group.partName }}</strong>
-                  <p class="muted-text">
-                    {{ group.partCode }} · {{ group.recordCount }} 条记录 · {{ group.imageCount }} 张图片
-                  </p>
-                </div>
-                <ElTag effect="dark" round>
-                  最近上传 {{ formatDateTime(group.latestUploadedAt) }}
-                </ElTag>
-              </div>
-
-              <div class="stats-gallery__item-grid">
-                <article
-                  v-for="item in group.items"
-                  :key="item.recordId"
-                  class="stats-gallery__item-card"
-                >
-                  <div class="stats-gallery__preview">
-                    <img
-                      v-if="item.previewUrl"
-                      :src="item.previewUrl"
-                      :alt="buildPreviewAlt(item)"
-                      class="stats-gallery__preview-image"
-                      loading="lazy"
-                    >
-                    <div v-else class="stats-gallery__preview-fallback">
-                      <strong>{{ getFileKindLabel(item.imageFileKind) }}</strong>
-                      <span>{{ formatImageCountLabel(item.imageCount) }}</span>
-                    </div>
-
-                    <span class="stats-gallery__preview-badge">
-                      {{ getFileKindLabel(item.imageFileKind) }}
-                    </span>
-                  </div>
-
-                  <div class="stats-gallery__item-body">
-                    <div class="stats-gallery__item-title">
-                      <strong>{{ item.recordNo }}</strong>
-                      <ElTag type="info" effect="dark" round>
-                        {{ formatImageCountLabel(item.imageCount) }}
-                      </ElTag>
-                    </div>
-
-                    <div class="stats-gallery__item-tags">
-                      <StatusTag :value="item.effectiveResult" />
-                      <StatusTag :value="item.reviewStatus" />
-                    </div>
-
-                    <div class="stats-gallery__item-meta">
-                      <span>设备：{{ item.deviceName }} / {{ item.deviceCode }}</span>
-                      <span>拍摄：{{ formatDateTime(item.capturedAt) }}</span>
-                      <span>上传：{{ formatDateTime(item.uploadedAt) }}</span>
-                    </div>
-
-                    <p class="stats-gallery__item-defect">
-                      {{ buildDefectSummary(item) }}
-                    </p>
-
-                    <div class="stats-gallery__item-actions">
-                      <ElButton type="primary" @click="openRecordDetail(item.recordId)">
-                        进入复检界面
-                      </ElButton>
-                    </div>
-                  </div>
-                </article>
-              </div>
-            </article>
+              <strong>{{ group.partName }}</strong>
+              <span>{{ group.partCode }}</span>
+              <span>{{ group.recordCount }} 条记录 · {{ group.imageCount }} 张图片</span>
+            </button>
           </div>
+
+          <section
+            v-if="resolveActiveGroup(entry)"
+            class="stats-gallery__group-focus"
+          >
+            <div class="stats-gallery__group-focus-header">
+              <div>
+                <strong>{{ resolveActiveGroup(entry)?.partName }}</strong>
+                <p class="muted-text">
+                  {{ resolveActiveGroup(entry)?.partCode }}
+                  · {{ resolveActiveGroup(entry)?.recordCount }} 条记录
+                  · {{ resolveActiveGroup(entry)?.imageCount }} 张图片
+                </p>
+              </div>
+              <div class="stats-gallery__selector-actions">
+                <ElButton
+                  text
+                  @click="scrollRail('sample', buildSampleRailKey(entry.key, resolveActiveGroup(entry)?.partId ?? 0), 'prev')"
+                >
+                  向左
+                </ElButton>
+                <ElButton
+                  text
+                  @click="scrollRail('sample', buildSampleRailKey(entry.key, resolveActiveGroup(entry)?.partId ?? 0), 'next')"
+                >
+                  向右
+                </ElButton>
+              </div>
+            </div>
+
+            <div
+              :id="buildRailDomId('sample', buildSampleRailKey(entry.key, resolveActiveGroup(entry)?.partId ?? 0))"
+              class="stats-gallery__sample-rail"
+            >
+              <article
+                v-for="item in resolveActiveGroup(entry)?.items ?? []"
+                :key="item.recordId"
+                class="stats-gallery__item-card"
+              >
+                <div class="stats-gallery__preview">
+                  <img
+                    v-if="item.previewUrl"
+                    :src="item.previewUrl"
+                    :alt="buildPreviewAlt(item)"
+                    class="stats-gallery__preview-image"
+                    loading="lazy"
+                  >
+                  <div v-else class="stats-gallery__preview-fallback">
+                    <strong>{{ getFileKindLabel(item.imageFileKind) }}</strong>
+                    <span>{{ formatImageCountLabel(item.imageCount) }}</span>
+                  </div>
+
+                  <span class="stats-gallery__preview-badge">
+                    {{ getFileKindLabel(item.imageFileKind) }}
+                  </span>
+                </div>
+
+                <div class="stats-gallery__item-body">
+                  <div class="stats-gallery__item-title">
+                    <strong>{{ item.recordNo }}</strong>
+                    <ElTag type="info" effect="dark" round>
+                      {{ formatImageCountLabel(item.imageCount) }}
+                    </ElTag>
+                  </div>
+
+                  <div class="stats-gallery__item-tags">
+                    <StatusTag :value="item.effectiveResult" />
+                    <StatusTag :value="item.reviewStatus" />
+                  </div>
+
+                  <div class="stats-gallery__item-meta">
+                    <span>设备：{{ item.deviceName }} / {{ item.deviceCode }}</span>
+                    <span>拍摄：{{ formatDateTime(item.capturedAt) }}</span>
+                    <span>上传：{{ formatDateTime(item.uploadedAt) }}</span>
+                  </div>
+
+                  <p class="stats-gallery__item-defect">
+                    {{ buildDefectSummary(item) }}
+                  </p>
+
+                  <div class="stats-gallery__item-actions">
+                    <ElButton type="primary" @click="openRecordDetail(item.recordId)">
+                      进入复检界面
+                    </ElButton>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
         </section>
       </div>
     </template>
@@ -349,8 +469,7 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
 .stats-gallery,
 .stats-gallery__metrics,
 .stats-gallery__category-list,
-.stats-gallery__group-list,
-.stats-gallery__item-grid,
+.stats-gallery__group-focus,
 .stats-gallery__item-body {
   display: grid;
   gap: 18px;
@@ -362,7 +481,8 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
 
 .stats-gallery__header,
 .stats-gallery__category-header,
-.stats-gallery__group-header,
+.stats-gallery__selector-header,
+.stats-gallery__group-focus-header,
 .stats-gallery__item-title {
   display: flex;
   align-items: flex-start;
@@ -372,7 +492,8 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
 
 .stats-gallery__header p,
 .stats-gallery__category-header p,
-.stats-gallery__group-header p {
+.stats-gallery__selector-header p,
+.stats-gallery__group-focus-header p {
   margin: 8px 0 0;
   line-height: 1.7;
 }
@@ -392,8 +513,7 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
   line-height: 1.7;
 }
 
-.stats-gallery__category-section,
-.stats-gallery__group-card {
+.stats-gallery__category-section {
   display: grid;
   gap: 16px;
   padding: 18px;
@@ -403,20 +523,83 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
     linear-gradient(180deg, rgba(20, 40, 58, 0.82), rgba(11, 25, 39, 0.96));
 }
 
-.stats-gallery__item-grid {
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+.stats-gallery__selector-actions,
+.stats-gallery__item-tags,
+.stats-gallery__item-meta,
+.stats-gallery__item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.stats-gallery__group-rail,
+.stats-gallery__sample-rail {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scroll-snap-type: x proximity;
+}
+
+.stats-gallery__group-rail {
+  grid-auto-columns: minmax(220px, 260px);
+}
+
+.stats-gallery__sample-rail {
+  grid-auto-columns: minmax(280px, 340px);
+}
+
+.stats-gallery__group-chip {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: rgba(8, 20, 33, 0.78);
+  border: 1px solid rgba(106, 167, 255, 0.14);
+  border-radius: 18px;
+  appearance: none;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.stats-gallery__group-chip:hover {
+  transform: translateY(-2px);
+  border-color: rgba(127, 228, 208, 0.3);
+}
+
+.stats-gallery__group-chip--active {
+  border-color: rgba(127, 228, 208, 0.56);
+  box-shadow: 0 18px 32px rgba(4, 12, 22, 0.24);
+}
+
+.stats-gallery__group-chip span {
+  color: var(--app-text-secondary);
+  font-size: 13px;
+}
+
+.stats-gallery__group-focus {
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(8, 20, 33, 0.68);
+  border: 1px solid rgba(127, 228, 208, 0.12);
 }
 
 .stats-gallery__item-card {
   display: grid;
-  /* 宽屏下把图片和说明拆成左右两栏，避免单张图片横向铺满整张卡片。 */
-  grid-template-columns: minmax(260px, clamp(280px, 32vw, 420px)) minmax(0, 1fr);
-  align-items: start;
   gap: 14px;
   padding: 16px;
   border-radius: 20px;
   background: rgba(8, 20, 33, 0.88);
   border: 1px solid rgba(106, 167, 255, 0.14);
+  scroll-snap-align: start;
 }
 
 .stats-gallery__preview {
@@ -426,9 +609,8 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
   justify-content: center;
   overflow: hidden;
   aspect-ratio: 4 / 3;
-  /* 预览区保留稳定舞台，但通过最大高度限制桌面宽屏下的图片体量。 */
-  max-height: clamp(220px, 30vw, 340px);
-  padding: 14px;
+  max-height: clamp(160px, 18vw, 220px);
+  padding: 12px;
   border-radius: 16px;
   background:
     radial-gradient(circle at top left, rgba(127, 228, 208, 0.2), transparent 45%),
@@ -468,14 +650,6 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
   font-weight: 600;
 }
 
-.stats-gallery__item-tags,
-.stats-gallery__item-meta,
-.stats-gallery__item-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
 .stats-gallery__item-meta {
   color: var(--app-text-secondary);
   font-size: 13px;
@@ -501,20 +675,23 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
 @media (max-width: 900px) {
   .stats-gallery__header,
   .stats-gallery__category-header,
-  .stats-gallery__group-header,
+  .stats-gallery__selector-header,
+  .stats-gallery__group-focus-header,
   .stats-gallery__item-title {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .stats-gallery__metrics,
-  .stats-gallery__item-grid {
+  .stats-gallery__metrics {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .stats-gallery__item-card {
-    /* 移动端恢复单列，保证信息区不会被压缩。 */
-    grid-template-columns: minmax(0, 1fr);
+  .stats-gallery__group-rail {
+    grid-auto-columns: minmax(200px, 78vw);
+  }
+
+  .stats-gallery__sample-rail {
+    grid-auto-columns: minmax(260px, 84vw);
   }
 }
 </style>

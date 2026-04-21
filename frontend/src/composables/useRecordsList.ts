@@ -7,6 +7,7 @@ import type { DetectionRecordModel } from "@/types/models";
 
 export interface RecordsFilters {
   partId: number | undefined;
+  partCategory: string | undefined;
   deviceId: number | undefined;
   result: DetectionResult | undefined;
   reviewStatus: ReviewStatus | undefined;
@@ -18,6 +19,7 @@ export interface RecordsFilters {
 function createDefaultFilters(): RecordsFilters {
   return {
     partId: undefined,
+    partCategory: undefined,
     deviceId: undefined,
     result: undefined,
     reviewStatus: undefined,
@@ -48,6 +50,7 @@ export function useRecordsList() {
     try {
       const response = await fetchRecords({
         partId: filters.partId,
+        partCategory: filters.partCategory,
         deviceId: filters.deviceId,
         result: filters.result,
         reviewStatus: filters.reviewStatus,

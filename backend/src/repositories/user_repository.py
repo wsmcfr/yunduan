@@ -33,8 +33,25 @@ class UserRepository:
 
         return self.db.scalar(self._base_stmt().where(User.username == username))
 
+    def get_by_email(self, email: str) -> User | None:
+        """按邮箱查询用户。"""
+
+        return self.db.scalar(self._base_stmt().where(User.email == email))
+
+    def get_by_password_reset_token_hash(self, token_hash: str) -> User | None:
+        """按密码重置令牌哈希查询用户。"""
+
+        return self.db.scalar(self._base_stmt().where(User.password_reset_token_hash == token_hash))
+
     def create(self, user: User) -> User:
         """创建用户并刷新主键。"""
+
+        self.db.add(user)
+        self.db.flush()
+        return user
+
+    def save(self, user: User) -> User:
+        """保存已存在用户的变更。"""
 
         self.db.add(user)
         self.db.flush()
@@ -44,6 +61,4 @@ class UserRepository:
         """更新用户最近一次登录时间。"""
 
         user.last_login_at = datetime.now(timezone.utc)
-        self.db.add(user)
-        self.db.flush()
-        return user
+        return self.save(user)
