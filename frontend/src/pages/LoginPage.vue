@@ -35,6 +35,7 @@ const loginLoading = ref(false);
 const registerLoading = ref(false);
 const forgotLoading = ref(false);
 const resetLoading = ref(false);
+const forgotSuccessNotice = ref("");
 
 /**
  * 登录表单状态。
@@ -211,6 +212,7 @@ async function handleForgotPassword(): Promise<void> {
     const response = await forgotPasswordRequest({
       email: forgotFormState.email.trim(),
     });
+    forgotSuccessNotice.value = `${response.message} 请检查收件箱和垃圾箱；如果链接无法直接打开，可复制邮件中的一次性令牌，在重置页面手动提交。`;
     forgotFormState.email = "";
     ElMessage.success(response.message);
   } catch (caughtError) {
@@ -261,6 +263,17 @@ async function backToLogin(): Promise<void> {
   clearResetSensitiveFields(false);
   await router.replace({
     name: routeNames.login,
+    query: typeof route.query.redirect === "string" ? { redirect: route.query.redirect } : {},
+  });
+}
+
+/**
+ * 从找回密码面板直接进入重置密码页面。
+ * 这样即使邮件客户端无法自动打开链接，用户也能在页面中手动粘贴令牌继续完成重置。
+ */
+async function openResetPasswordPage(): Promise<void> {
+  await router.push({
+    name: routeNames.resetPassword,
     query: typeof route.query.redirect === "string" ? { redirect: route.query.redirect } : {},
   });
 }
@@ -487,34 +500,55 @@ onMounted(() => {
             description="后端邮件通道配置完成后，这里会向你的邮箱发送一次性重置链接。"
           />
 
-          <ElForm
-            v-else
-            class="login-page__form"
-            label-position="top"
-            @submit.prevent="handleForgotPassword"
-          >
-            <ElFormItem label="邮箱">
-              <ElInput
-                v-model="forgotFormState.email"
-                :prefix-icon="Message"
-                placeholder="请输入注册邮箱"
-              />
-            </ElFormItem>
+          <template v-else>
+            <ElAlert
+              v-if="forgotSuccessNotice"
+              class="login-page__alert"
+              title="重置邮件已发出"
+              type="success"
+              :closable="false"
+              :description="forgotSuccessNotice"
+            />
 
-            <p class="login-page__policy">
-              系统不会公开告知该邮箱是否已注册；如果账号存在，会向邮箱发送一次性重置链接。
-            </p>
-
-            <ElButton
-              class="login-page__submit"
-              color="var(--app-primary)"
-              native-type="submit"
-              :loading="forgotLoading"
-              size="large"
+            <ElForm
+              class="login-page__form"
+              label-position="top"
+              @submit.prevent="handleForgotPassword"
             >
-              发送重置邮件
-            </ElButton>
-          </ElForm>
+              <ElFormItem label="邮箱">
+                <ElInput
+                  v-model="forgotFormState.email"
+                  :prefix-icon="Message"
+                  placeholder="请输入注册邮箱"
+                />
+              </ElFormItem>
+
+              <p class="login-page__policy">
+                系统不会公开告知该邮箱是否已注册；如果账号存在，会向邮箱发送一次性重置链接。
+              </p>
+
+              <ElButton
+                class="login-page__submit"
+                color="var(--app-primary)"
+                native-type="submit"
+                :loading="forgotLoading"
+                size="large"
+              >
+                发送重置邮件
+              </ElButton>
+            </ElForm>
+
+            <div v-if="forgotSuccessNotice" class="login-page__actions login-page__actions--single">
+              <ElButton
+                class="login-page__submit"
+                color="var(--app-primary)"
+                size="large"
+                @click="openResetPasswordPage"
+              >
+                前往重置页面
+              </ElButton>
+            </div>
+          </template>
         </ElTabPane>
       </ElTabs>
     </section>
@@ -605,6 +639,11 @@ onMounted(() => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   gap: 12px;
+}
+
+.login-page__actions--single {
+  grid-template-columns: 1fr;
+  margin-top: 18px;
 }
 
 .login-page__secondary,

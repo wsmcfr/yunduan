@@ -138,6 +138,8 @@ class AuthService:
             display_name=normalized_display_name,
             role=UserRole.OPERATOR,
             is_active=True,
+            # 新注册账号默认不开放 AI 能力，必须由管理员在系统设置里显式授权。
+            can_use_ai_analysis=False,
         )
         self.user_repository.create(user)
         self.db.commit()
@@ -149,10 +151,15 @@ class AuthService:
         )
         return token, expires_at, user
 
-    def request_password_reset(self, email: str) -> None:
+    def request_password_reset(
+        self,
+        email: str,
+        *,
+        public_app_url_override: str | None = None,
+    ) -> None:
         """生成一次性密码重置令牌，并通过邮件投递。"""
 
-        if not self.password_reset_mailer.is_enabled():
+        if not self.password_reset_mailer.is_enabled(public_app_url_override):
             raise BadRequestError(
                 code="password_reset_channel_unavailable",
                 message="当前环境尚未开启密码找回邮件服务，请联系管理员。",
@@ -187,7 +194,16 @@ class AuthService:
         self.db.refresh(user)
 
         try:
-            self.password_reset_mailer.send_password_reset_mail(user=user, reset_token=raw_token)
+            self.password_reset_mailer.send_password_reset_mail(
+                user=user,
+                reset_token=raw_token,
+                public_app_url_override=public_app_url_override,
+            )
+            logger.info(
+                "auth.password_reset_requested user_id=%s email=%s",
+                user.id,
+                user.email,
+            )
         except Exception:
             # 邮件没发出去就立即回滚令牌，避免数据库里残留一个无人知晓的有效链接。
             self._clear_password_reset_state(user)
@@ -219,3 +235,4 @@ class AuthService:
         user.password_changed_at = datetime.now(timezone.utc)
         self._clear_password_reset_state(user)
         self.db.commit()
+        logger.info("auth.password_reset_completed user_id=%s", user.id)

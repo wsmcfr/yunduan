@@ -33,6 +33,21 @@ export interface UserProfile {
   displayName: string;
   role: UserRole;
   isActive: boolean;
+  canUseAiAnalysis: boolean;
+  lastLoginAt: string | null;
+  passwordChangedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SystemUserListItem {
+  id: number;
+  username: string;
+  email: string | null;
+  displayName: string;
+  role: UserRole;
+  isActive: boolean;
+  canUseAiAnalysis: boolean;
   lastLoginAt: string | null;
   passwordChangedAt: string | null;
   createdAt: string;

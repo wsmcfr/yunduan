@@ -39,6 +39,8 @@ def seed_default_admin() -> None:
             display_name=settings.default_admin_display_name,
             role=UserRole.ADMIN,
             is_active=True,
+            # 默认管理员需要具备完整系统运维能力，因此首次播种时直接开放 AI 权限。
+            can_use_ai_analysis=True,
         )
         repository.create(admin_user)
         db.commit()

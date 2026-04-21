@@ -23,6 +23,7 @@ const demoUserDto = {
   display_name: "演示用户",
   role: "operator" as const,
   is_active: true,
+  can_use_ai_analysis: false,
   last_login_at: "2026-04-21T09:00:00Z",
   password_changed_at: "2026-04-21T09:00:00Z",
   created_at: "2026-04-21T08:00:00Z",
@@ -46,6 +47,7 @@ describe("auth store", () => {
 
     expect(store.isAuthenticated).toBe(true);
     expect(store.currentUser?.username).toBe("demo-user");
+    expect(store.currentUser?.canUseAiAnalysis).toBe(false);
     expect("token" in store).toBe(false);
   });
 

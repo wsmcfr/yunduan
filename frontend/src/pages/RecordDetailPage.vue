@@ -11,6 +11,7 @@ import { flattenStructuredContext } from "@/features/review/recordContext";
 import { fetchRecordDetail } from "@/services/api/records";
 import { createManualReview } from "@/services/api/reviews";
 import { mapDetectionRecordDetailDto } from "@/services/mappers/commonMappers";
+import { useAuthStore } from "@/stores/auth";
 import type { ManualReviewCreateRequestDto } from "@/types/api";
 import type { DetectionRecordModel } from "@/types/models";
 import { buildAiPreviewUrl, getAiFileKindLabel, sortAiDisplayFiles } from "@/utils/aiReview";
@@ -33,6 +34,7 @@ interface RecordContextPanel {
 }
 
 const route = useRoute();
+const authStore = useAuthStore();
 const loading = ref(false);
 const reviewSubmitting = ref(false);
 const error = ref("");
@@ -50,6 +52,11 @@ const recordId = computed(() => Number(route.params.id));
 const shouldReview = computed(
   () => record.value?.reviewStatus === "pending" || record.value?.result === "uncertain",
 );
+
+/**
+ * 当前登录账号是否允许发起 AI 分析。
+ */
+const canUseAiAnalysis = computed(() => authStore.currentUser?.canUseAiAnalysis ?? false);
 
 /**
  * 当前记录中可直接预览的图片对象。
@@ -151,7 +158,7 @@ async function handleManualReviewSubmit(payload: ManualReviewCreateRequestDto): 
  * 打开 AI 对话弹窗。
  */
 function openAiDialog(): void {
-  if (!record.value) {
+  if (!record.value || !canUseAiAnalysis.value) {
     return;
   }
   aiDialogVisible.value = true;
@@ -372,6 +379,15 @@ watch(
               AI 对话会自动读取当前零件、图片对象、初检结果、最终结果、结构化上下文和复核历史。你可以直接追问“为什么判成这样”“传感器值是否支持这个结论”“人工应该重点看哪张图”。
             </p>
 
+            <ElAlert
+              v-if="!canUseAiAnalysis"
+              type="warning"
+              show-icon
+              :closable="false"
+              title="当前账号未开通 AI 复核分析"
+              description="你仍然可以查看图片与上下文并直接做人审，但无法发起 AI 对话。请联系管理员在系统设置中开启该权限。"
+            />
+
             <div class="detail-review-workspace__assistant-tags">
               <ElTag type="info" effect="dark" round>自动带入当前记录上下文</ElTag>
               <ElTag type="warning" effect="dark" round>支持围绕当前图片和判定依据追问</ElTag>
@@ -379,7 +395,12 @@ watch(
             </div>
 
             <div class="detail-review-workspace__assistant-actions">
-              <ElButton type="primary" plain @click="openAiDialog">
+              <ElButton
+                type="primary"
+                plain
+                :disabled="!canUseAiAnalysis"
+                @click="openAiDialog"
+              >
                 打开 AI 对话分析
               </ElButton>
               <ElButton @click="loadRecordDetail" :loading="loading">刷新详情</ElButton>

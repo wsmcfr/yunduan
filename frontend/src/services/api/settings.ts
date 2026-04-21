@@ -10,6 +10,8 @@ import type {
   AIModelProfileUpdateRequestDto,
   AIRuntimeModelOptionListResponseDto,
   ApiMessageResponseDto,
+  SystemUserAiPermissionUpdateRequestDto,
+  SystemUserListResponseDto,
 } from "@/types/api";
 
 import { apiRequest } from "./client";
@@ -121,4 +123,55 @@ export function fetchRuntimeAIModels(): Promise<AIRuntimeModelOptionListResponse
   return apiRequest<AIRuntimeModelOptionListResponseDto>(
     "/api/v1/settings/ai-models/runtime-options",
   );
+}
+
+/**
+ * 分页拉取系统设置页中的用户列表。
+ */
+export function fetchSystemUsers(query?: {
+  keyword?: string;
+  role?: string;
+  aiEnabled?: boolean;
+  isActive?: boolean;
+  skip?: number;
+  limit?: number;
+}): Promise<SystemUserListResponseDto> {
+  const searchParams = new URLSearchParams();
+
+  if (query?.keyword) {
+    searchParams.set("keyword", query.keyword);
+  }
+  if (query?.role) {
+    searchParams.set("role", query.role);
+  }
+  if (query?.aiEnabled !== undefined) {
+    searchParams.set("ai_enabled", String(query.aiEnabled));
+  }
+  if (query?.isActive !== undefined) {
+    searchParams.set("is_active", String(query.isActive));
+  }
+  if (query?.skip !== undefined) {
+    searchParams.set("skip", String(query.skip));
+  }
+  if (query?.limit !== undefined) {
+    searchParams.set("limit", String(query.limit));
+  }
+
+  const queryString = searchParams.toString();
+  return apiRequest<SystemUserListResponseDto>(
+    `/api/v1/settings/users${queryString ? `?${queryString}` : ""}`,
+  );
+}
+
+/**
+ * 修改指定用户的 AI 分析使用权限。
+ */
+export function updateSystemUserAiPermission(
+  userId: number,
+  payload: SystemUserAiPermissionUpdateRequestDto,
+): Promise<void> {
+  return apiRequest<void>(`/api/v1/settings/users/${userId}/ai-permission`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }

@@ -182,6 +182,7 @@ class UserProfile(ORMBaseModel):
     display_name: str
     role: UserRole
     is_active: bool
+    can_use_ai_analysis: bool
     last_login_at: datetime | None
     password_changed_at: datetime | None
     created_at: datetime

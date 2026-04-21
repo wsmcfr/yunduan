@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_current_ai_enabled_user, get_current_user, get_db
 from src.core.sse import build_sse_headers
 from src.db.models.user import User
 from src.schemas.statistics import (
@@ -120,7 +120,7 @@ def get_defect_distribution(
 def request_statistics_ai_analysis(
     payload: StatisticsAIAnalysisRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(get_current_ai_enabled_user),
 ) -> StatisticsAIAnalysisResponse:
     """触发统计页 AI 批次分析。"""
 
@@ -131,7 +131,7 @@ def request_statistics_ai_analysis(
 def stream_statistics_ai_analysis(
     payload: StatisticsAIAnalysisRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(get_current_ai_enabled_user),
 ) -> StreamingResponse:
     """流式触发统计页 AI 批次分析。"""
 

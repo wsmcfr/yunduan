@@ -10,6 +10,7 @@ import {
   mapAIChatResponseDto,
   mapAIRuntimeModelOptionDto,
 } from "@/services/mappers/commonMappers";
+import { useAuthStore } from "@/stores/auth";
 import type {
   AIChatMessage,
   AIContextFile,
@@ -97,6 +98,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   "update:modelValue": [value: boolean];
 }>();
+const authStore = useAuthStore();
 
 /**
  * 输入框中的当前问题。
@@ -247,6 +249,11 @@ const activeRuntimeModel = computed<AIRuntimeModelOption | null>(() => {
 });
 
 /**
+ * 当前账号是否具备 AI 对话使用权限。
+ */
+const canUseAiAnalysis = computed(() => authStore.currentUser?.canUseAiAnalysis ?? false);
+
+/**
  * 当前浏览器是否支持语音识别。
  * 这里优先兼容标准接口和 Chromium 常见的 `webkitSpeechRecognition`。
  */
@@ -341,6 +348,13 @@ function resetDialogState(): void {
  * 拉取后端当前可用的运行时模型列表。
  */
 async function loadRuntimeModels(): Promise<void> {
+  if (!canUseAiAnalysis.value) {
+    runtimeModels.value = [];
+    selectedModelId.value = null;
+    runtimeModelsError.value = "";
+    return;
+  }
+
   runtimeModelsLoading.value = true;
   runtimeModelsError.value = "";
 
@@ -607,6 +621,11 @@ async function submitQuestion(): Promise<void> {
     return;
   }
 
+  if (!canUseAiAnalysis.value) {
+    ElMessage.warning("当前账号尚未开通 AI 分析权限。");
+    return;
+  }
+
   if (runtimeModels.value.length > 0 && selectedModelId.value === null) {
     ElMessage.warning("请选择一个已启用的 AI 模型配置后再发起对话。");
     return;
@@ -773,6 +792,7 @@ onBeforeUnmount(() => {
                 v-model="selectedModelId"
                 placeholder="选择本轮对话模型"
                 :loading="runtimeModelsLoading"
+                :disabled="!canUseAiAnalysis"
               >
                 <ElOption
                   v-for="item in runtimeModels"
@@ -781,8 +801,24 @@ onBeforeUnmount(() => {
                   :value="item.id"
                 />
               </ElSelect>
-              <span class="muted-text">这里只显示后端已启用且已配置密钥的模型。</span>
+              <span class="muted-text">
+                {{
+                  canUseAiAnalysis
+                    ? "这里只显示后端已启用且已配置密钥的模型。"
+                    : "当前账号未开通 AI 分析权限，因此不会加载模型列表。"
+                }}
+              </span>
             </div>
+
+            <ElAlert
+              v-if="!canUseAiAnalysis"
+              type="warning"
+              show-icon
+              :closable="false"
+              title="当前账号未开通 AI 对话分析"
+              description="你可以继续查看当前记录和图片证据，但无法直接向 AI 提问。请联系管理员在系统设置中开启该权限。"
+              class="ai-chat__inline-alert"
+            />
 
             <ElAlert
               v-if="runtimeModelsError"
@@ -1042,7 +1078,7 @@ onBeforeUnmount(() => {
                 <ElButton
                   plain
                   :type="speechListening ? 'danger' : 'primary'"
-                  :disabled="sending || !speechRecognitionSupported"
+                  :disabled="sending || !speechRecognitionSupported || !canUseAiAnalysis"
                   @click="speechListening ? stopVoiceInput() : startVoiceInput()"
                 >
                   {{ speechListening ? "停止语音" : "语音提问并发送" }}
@@ -1050,7 +1086,7 @@ onBeforeUnmount(() => {
                 <ElButton
                   type="primary"
                   :loading="sending"
-                  :disabled="!question.trim()"
+                  :disabled="!question.trim() || !canUseAiAnalysis"
                   @click="submitQuestion"
                 >
                   发送问题

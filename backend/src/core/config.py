@@ -34,7 +34,8 @@ class Settings(BaseSettings):
         default=60,
         alias="PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS",
     )
-    public_app_url: str = Field(default="http://localhost:5173", alias="PUBLIC_APP_URL")
+    # 公开访问地址默认留空，避免生产环境误发出指向 localhost 的重置邮件。
+    public_app_url: str = Field(default="", alias="PUBLIC_APP_URL")
     smtp_host: str = Field(default="", alias="SMTP_HOST")
     smtp_port: int = Field(default=587, alias="SMTP_PORT")
     smtp_username: str = Field(default="", alias="SMTP_USERNAME")

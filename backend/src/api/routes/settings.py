@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from src.api.deps import get_current_admin_user, get_current_user, get_db
+from src.api.deps import get_current_admin_user, get_current_ai_enabled_user, get_db
+from src.db.models.enums import UserRole
 from src.db.models.user import User
 from src.schemas.ai_gateway import (
     AIDiscoveredModelCandidate,
@@ -22,7 +23,13 @@ from src.schemas.ai_gateway import (
     AIRuntimeModelOptionListResponse,
 )
 from src.schemas.common import ApiMessageResponse
+from src.schemas.system_user import (
+    SystemUserAiPermissionUpdateRequest,
+    SystemUserListItem,
+    SystemUserListResponse,
+)
 from src.services.ai_gateway_service import AIGatewayService
+from src.services.system_user_service import SystemUserService
 
 router = APIRouter()
 
@@ -30,7 +37,7 @@ router = APIRouter()
 @router.get("/ai-models/runtime-options", response_model=AIRuntimeModelOptionListResponse)
 def list_runtime_ai_models(
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(get_current_ai_enabled_user),
 ) -> AIRuntimeModelOptionListResponse:
     """返回业务运行时可选的模型列表。"""
 
@@ -54,6 +61,51 @@ def list_runtime_ai_models(
             for item in items
         ]
     )
+
+
+@router.get("/users", response_model=SystemUserListResponse)
+def list_system_users(
+    keyword: str | None = Query(default=None, min_length=1, max_length=128),
+    role: UserRole | None = Query(default=None),
+    ai_enabled: bool | None = Query(default=None),
+    is_active: bool | None = Query(default=None),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_admin_user),
+) -> SystemUserListResponse:
+    """分页返回管理员系统设置中需要的用户列表。"""
+
+    total, items = SystemUserService(db).list_users(
+        keyword=keyword,
+        role=role,
+        can_use_ai_analysis=ai_enabled,
+        is_active=is_active,
+        skip=skip,
+        limit=limit,
+    )
+    return SystemUserListResponse(
+        items=[SystemUserListItem.model_validate(item) for item in items],
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.patch("/users/{user_id}/ai-permission", response_model=SystemUserListItem)
+def update_system_user_ai_permission(
+    user_id: int,
+    payload: SystemUserAiPermissionUpdateRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_admin_user),
+) -> SystemUserListItem:
+    """修改指定用户是否允许使用 AI 分析。"""
+
+    user = SystemUserService(db).update_ai_permission(
+        user_id=user_id,
+        can_use_ai_analysis=payload.can_use_ai_analysis,
+    )
+    return SystemUserListItem.model_validate(user)
 
 
 @router.get("/ai-gateways", response_model=AIGatewayListResponse)

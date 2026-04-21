@@ -67,6 +67,9 @@ onUnmounted(() => {
           <div class="app-header__user-text">
             <strong>{{ authStore.currentUser?.displayName ?? "未登录" }}</strong>
             <span>{{ authStore.currentUser?.role ?? "guest" }}</span>
+            <small>
+              {{ authStore.currentUser?.canUseAiAnalysis ? "AI 已授权" : "AI 未授权" }}
+            </small>
           </div>
         </button>
 
@@ -152,6 +155,12 @@ onUnmounted(() => {
   color: var(--app-text-secondary);
   font-size: 12px;
   text-transform: uppercase;
+}
+
+.app-header__user-text small {
+  color: var(--app-primary);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 @media (max-width: 900px) {

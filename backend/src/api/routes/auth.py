@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
+from src.api.public_app_url import resolve_public_app_url_from_request
 from src.api.deps import get_current_user, get_db
 from src.core.config import get_settings
 from src.core.security import clear_auth_cookie, set_auth_cookie
@@ -26,13 +27,14 @@ router = APIRouter()
 
 
 @router.get("/runtime-options", response_model=AuthRuntimeOptionsResponse)
-def get_runtime_options() -> AuthRuntimeOptionsResponse:
+def get_runtime_options(request: Request) -> AuthRuntimeOptionsResponse:
     """返回登录注册页所需的运行时认证能力。"""
 
     settings = get_settings()
+    public_app_url_override = resolve_public_app_url_from_request(request)
     return AuthRuntimeOptionsResponse(
         registration_enabled=settings.allow_public_registration,
-        password_reset_enabled=PasswordResetMailer(settings).is_enabled(),
+        password_reset_enabled=PasswordResetMailer(settings).is_enabled(public_app_url_override),
         password_policy_hint="密码需为 8-128 位，并至少包含大写字母、小写字母、数字、符号中的三类。",
     )
 
@@ -84,12 +86,16 @@ def logout(response: Response) -> ApiMessageResponse:
 
 @router.post("/forgot-password", response_model=ApiMessageResponse)
 def forgot_password(
+    request: Request,
     payload: ForgotPasswordRequest,
     db: Session = Depends(get_db),
 ) -> ApiMessageResponse:
     """按邮箱发起密码找回流程。"""
 
-    AuthService(db).request_password_reset(payload.email)
+    AuthService(db).request_password_reset(
+        payload.email,
+        public_app_url_override=resolve_public_app_url_from_request(request),
+    )
     return ApiMessageResponse(message="如果该邮箱对应的账号存在，系统已发送密码重置指引。")
 
 

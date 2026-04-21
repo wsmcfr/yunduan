@@ -8,7 +8,8 @@ import unittest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.core.errors import ConflictError, UnauthorizedError
+from src.api.deps import get_current_ai_enabled_user
+from src.core.errors import ConflictError, ForbiddenError, UnauthorizedError
 from src.core.security import (
     create_access_token,
     decode_access_token,
@@ -29,19 +30,28 @@ class StubPasswordResetMailer:
         """初始化测试期的已发送消息列表。"""
 
         self.sent_messages: list[dict[str, str]] = []
+        self.is_enabled_overrides: list[str | None] = []
 
-    def is_enabled(self) -> bool:
+    def is_enabled(self, public_app_url_override: str | None = None) -> bool:
         """测试场景固定认为邮件能力可用。"""
 
+        self.is_enabled_overrides.append(public_app_url_override)
         return True
 
-    def send_password_reset_mail(self, *, user: User, reset_token: str) -> None:
-        """记录本次发送的目标邮箱与原始令牌。"""
+    def send_password_reset_mail(
+        self,
+        *,
+        user: User,
+        reset_token: str,
+        public_app_url_override: str | None = None,
+    ) -> None:
+        """记录本次发送的目标邮箱、原始令牌和公开地址覆盖值。"""
 
         self.sent_messages.append(
             {
                 "email": user.email or "",
                 "token": reset_token,
+                "public_app_url_override": public_app_url_override or "",
             }
         )
 
@@ -88,6 +98,7 @@ class AuthServiceTestCase(unittest.TestCase):
         assert persisted_user is not None
         self.assertEqual(persisted_user.email, "demo@example.com")
         self.assertNotEqual(persisted_user.password_hash, "StrongPass#2026")
+        self.assertFalse(persisted_user.can_use_ai_analysis)
         verified, _ = verify_password_and_update_hash("StrongPass#2026", persisted_user.password_hash)
         self.assertTrue(verified)
 
@@ -118,6 +129,21 @@ class AuthServiceTestCase(unittest.TestCase):
         self.assertNotEqual(persisted_user.password_reset_token_hash, sent_token)
         self.assertEqual(persisted_user.password_reset_token_hash, hash_password_reset_token(sent_token))
         self.assertIsNotNone(persisted_user.password_reset_expires_at)
+
+    def test_request_password_reset_passes_public_app_url_override_to_mailer(self) -> None:
+        """忘记密码请求应把本次公网地址透传给发信器，避免邮件链接回到 localhost。"""
+
+        self._register_demo_user()
+        self.service.request_password_reset(
+            "demo@example.com",
+            public_app_url_override="https://demo.example.com",
+        )
+
+        self.assertEqual(self.mailer.is_enabled_overrides[-1], "https://demo.example.com")
+        self.assertEqual(
+            self.mailer.sent_messages[0]["public_app_url_override"],
+            "https://demo.example.com",
+        )
 
     def test_reset_password_invalidates_old_password_and_clears_reset_state(self) -> None:
         """重置成功后旧密码必须失效，并清空一次性令牌状态。"""
@@ -188,3 +214,21 @@ class AuthServiceTestCase(unittest.TestCase):
                 token_payload,
                 password_changed_at=issued_at + timedelta(seconds=2),
             )
+
+    def test_ai_permission_dependency_rejects_user_without_ai_access(self) -> None:
+        """未获授权的账号访问 AI 能力时，依赖层必须直接拒绝。"""
+
+        _, user = self._register_demo_user()
+
+        with self.assertRaises(ForbiddenError):
+            get_current_ai_enabled_user(user)
+
+    def test_ai_permission_dependency_allows_authorized_user(self) -> None:
+        """管理员授予权限后，依赖层应允许通过。"""
+
+        _, user = self._register_demo_user()
+        user.can_use_ai_analysis = True
+
+        resolved_user = get_current_ai_enabled_user(user)
+
+        self.assertTrue(resolved_user.can_use_ai_analysis)

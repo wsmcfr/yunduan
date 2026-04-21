@@ -113,6 +113,7 @@ const {
   selectedModelId,
   analysisNote,
   activeRuntimeModel,
+  canUseAiAnalysis,
   selectedPartLabel,
   selectedDeviceLabel,
   refresh,
@@ -1006,15 +1007,33 @@ function handleTrendMouseLeave(): void {
               AI 会直接读取当前统计窗口的摘要、趋势、缺陷分布、零件/设备排行和关键发现，再按更完整的统计审查提示词给出复盘结论。
             </p>
           </div>
-          <ElTag
-            v-if="activeRuntimeModel"
-            effect="dark"
-            round
-            type="success"
-          >
-            {{ activeRuntimeModel.displayName }}
-          </ElTag>
+          <div class="stats-ai-panel__header-tags">
+            <ElTag
+              :type="canUseAiAnalysis ? 'success' : 'warning'"
+              effect="dark"
+              round
+            >
+              {{ canUseAiAnalysis ? "当前账号已开通 AI 分析" : "当前账号未开通 AI 分析" }}
+            </ElTag>
+            <ElTag
+              v-if="activeRuntimeModel"
+              effect="dark"
+              round
+              type="success"
+            >
+              {{ activeRuntimeModel.displayName }}
+            </ElTag>
+          </div>
         </div>
+
+        <ElAlert
+          v-if="!canUseAiAnalysis"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="当前账号未开通统计 AI 分析"
+          description="你仍然可以查看图表、筛选数据和导出纯统计报表，但无法发起 AI 批次分析。请联系管理员在系统设置中开启该权限。"
+        />
 
         <div class="stats-ai-panel__controls">
           <ElSelect
@@ -1022,6 +1041,7 @@ function handleTrendMouseLeave(): void {
             clearable
             filterable
             :loading="referenceLoading"
+            :disabled="!canUseAiAnalysis"
             placeholder="选择统计分析模型"
           >
             <ElOption
@@ -1037,16 +1057,24 @@ function handleTrendMouseLeave(): void {
             type="textarea"
             :rows="4"
             resize="none"
+            :disabled="!canUseAiAnalysis"
             placeholder="可补充本轮特别关注点，例如：重点分析某零件是否存在持续恶化，或判断问题更像设备侧异常还是材料批次异常。"
           />
 
           <div class="stats-ai-panel__actions">
-            <ElButton type="primary" :loading="aiLoading" @click="handleRunAiAnalysis">
+            <ElButton
+              type="primary"
+              :loading="aiLoading"
+              :disabled="!canUseAiAnalysis"
+              @click="handleRunAiAnalysis"
+            >
               生成 AI 分析
             </ElButton>
             <span class="muted-text">
               {{
-                activeRuntimeModel
+                !canUseAiAnalysis
+                  ? "当前账号未开通 AI 分析权限。"
+                  : activeRuntimeModel
                   ? `当前模型：${activeRuntimeModel.displayName} / ${activeRuntimeModel.gatewayName}`
                   : "未选择模型时，后端只会返回预留提示。"
               }}
@@ -1122,6 +1150,7 @@ function handleTrendMouseLeave(): void {
 .stats-filter-card__header,
 .stats-filter-card__quick-range,
 .stats-panel__header,
+.stats-ai-panel__header-tags,
 .stats-ai-panel__actions,
 .stats-page__hero-actions,
 .stats-ranking__meta,
@@ -1139,6 +1168,11 @@ function handleTrendMouseLeave(): void {
 .stats-distribution-card__item {
   align-items: flex-start;
   justify-content: space-between;
+}
+
+.stats-ai-panel__header-tags {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .stats-page__hero,
@@ -1553,6 +1587,7 @@ function handleTrendMouseLeave(): void {
   .stats-page__hero-actions,
   .stats-filter-card__header,
   .stats-panel__header,
+  .stats-ai-panel__header-tags,
   .stats-ai-panel__actions,
   .stats-ranking__meta,
   .stats-distribution-card__item {

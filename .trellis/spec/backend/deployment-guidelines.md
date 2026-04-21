@@ -348,6 +348,122 @@ ssh yunfuwu-prod 'curl -s http://127.0.0.1:8000/health'
 
 ---
 
+## Scenario: GitHub Push Secret Hygiene and Safe Defaults
+
+### 1. Scope / Trigger
+
+- Trigger: any `git add`, `git commit`, `git push`, GitHub sync, or “准备把当前改动发到远端仓库” 的场景
+- Affected layers: local working tree -> staged diff -> tracked docs/spec -> runtime config defaults -> remote GitHub history
+
+### 2. Signatures
+
+```powershell
+git status --short
+git diff --cached --stat
+git log --oneline -1
+git push origin main
+```
+
+```powershell
+rg -n --hidden --glob '!.git/**' --glob '!node_modules/**' --glob '!frontend/dist/**' --glob '!ziliao/**' 'AKID[0-9A-Za-z]+'
+rg -n --hidden --glob '!.git/**' --glob '!node_modules/**' --glob '!frontend/dist/**' --glob '!ziliao/**' '(JWT_SECRET_KEY|SECRET_ENCRYPTION_KEY|PASSWORD_PEPPER|COS_SECRET_ID|COS_SECRET_KEY)'
+rg -n --hidden --glob '!.git/**' --glob '!node_modules/**' --glob '!frontend/dist/**' --glob '!ziliao/**' '(sk-[A-Za-z0-9_-]+|-----BEGIN)'
+```
+
+```env
+backend/.env                 # Must stay gitignored
+backend/.env.example         # May only contain placeholders / non-secret examples
+DEFAULT_ADMIN_PASSWORD=
+SECRET_ENCRYPTION_KEY=replace_me
+PASSWORD_PEPPER=replace_me
+```
+
+### 3. Contracts
+
+| Item | Contract |
+|---|---|
+| `backend/.env` | Must remain ignored and must never be staged or committed |
+| `backend/.env.example` | May document required env keys, but values must be placeholders such as `replace_me` or `change_me_*`, never production secrets |
+| Docs / specs / screenshots | Must not include real passwords, real API keys, real public server IPs, or operator-only account hints |
+| Source-code defaults for secrets | Secret-like config defaults must be empty or explicit placeholders, not predictable working credentials |
+| Default admin bootstrap | If `DEFAULT_ADMIN_PASSWORD` is absent or blank, seed scripts must skip creating a default admin instead of silently using a baked-in password |
+| Secret-handling code | It is allowed to commit password hashing, cookie session, encryption, and decryption logic; the forbidden part is committing real secret material or reversible data derived from production secrets |
+| Test fixtures | Demo tokens and fake API keys may exist in tests only when they are clearly fake values such as `sk-demo-*`, never copied from production |
+| Push gate | Before `git push`, the staged diff must be reviewed specifically for secrets, unsafe defaults, and docs/spec leakage |
+
+Additional rules:
+
+- if a spec example needs to mention credentials or a server address, use placeholders such as `<real-production-password>` or `<server-ip>`
+- do not assume “already encrypted” means safe to commit; if the committed data can still expose the real runtime secret or operator identity, it must be removed
+- do not keep a real admin password as a fallback default in `config.py`, seed scripts, or frontend helper text
+- when a push includes auth, secret storage, COS, SMTP, or AI gateway changes, run an extra manual review of `.env.example`, spec docs, and staged tests before pushing
+
+### 4. Validation & Error Matrix
+
+| Condition | Problem | Expected handling |
+|---|---|---|
+| `git diff --cached` or `rg` finds a real password / API key / cloud secret | Sensitive material is about to enter immutable Git history | Remove it, replace with placeholders, then restage before commit |
+| A spec or guideline file contains the real public server IP or real operator credential pair | Documentation leaks production access information | Replace with SSH alias or placeholder text before pushing |
+| `config.py` contains a usable default admin password | Fresh deployments may expose a predictable privileged account | Replace with empty default and require env-provided password |
+| Admin seed script still creates an account when password env is blank | Public deployment can accidentally boot with an unsafe fallback | Skip bootstrap and print an explicit operator message |
+| Test files contain obvious demo keys such as `sk-demo-*` | These are not real secrets, but they resemble secrets syntactically | Keep only if they are clearly fake and scoped to tests |
+| Code adds hashing/encryption helpers | This is security implementation, not a secret leak by itself | Allow commit as long as actual secret values stay in ignored env/config stores |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | Push includes auth hardening and secret-storage code, but `.env` stays ignored, `.env.example` uses placeholders, docs use `<server-ip>`, and the commit is scanned before `git push` |
+| Base | Tests contain `sk-demo-codex` and similar fake tokens under `backend/tests`, while production secrets stay only in runtime env |
+| Bad | A commit pushes real COS keys, a real public admin password in a spec screenshot/example, or a working default admin password baked into source defaults |
+
+### 6. Tests Required
+
+- staged-diff review via `git diff --cached --stat` and targeted file inspection before `git commit`
+- repository secret scan using `rg` for cloud-key, JWT-secret, PEM, and API-key shaped patterns before `git push`
+- backend test run after changing auth/seed/config defaults, at minimum covering auth smoke paths
+- frontend build/test run if login helper copy, auth UI hints, or public-facing docs embedded in frontend code changed
+- post-commit verification that `git status --short` is clean and the commit message matches the reviewed safe change set
+
+Assertion points:
+
+- no real runtime secret or operator credential is present in tracked files
+- secret defaults in source are blank or placeholders rather than working credentials
+- admin bootstrap behavior is safe when password env is missing
+- committed security code does not include the actual env values that make decryption or authentication possible
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```python
+default_admin_password: str = Field(default="admin123", alias="DEFAULT_ADMIN_PASSWORD")
+```
+
+```markdown
+管理员账号：admin / <real-password>
+服务器：119.91.xx.xx
+```
+
+#### Correct
+
+```python
+default_admin_password: str = Field(default="", alias="DEFAULT_ADMIN_PASSWORD")
+```
+
+```python
+if not settings.default_admin_password.strip():
+    print("未配置 DEFAULT_ADMIN_PASSWORD，跳过默认管理员初始化。")
+    return
+```
+
+```markdown
+管理员账号：admin / <real-production-password>
+服务器：yunfuwu-prod 或 <server-ip>
+```
+
+---
+
 ## Deployment Sequence
 
 ### Backend Hotfix Sequence

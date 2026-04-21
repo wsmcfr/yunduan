@@ -26,6 +26,7 @@ import type {
   StatisticsSampleGalleryResponseDto,
   StatisticsSampleImageItemDto,
   SummaryStatisticsDto,
+  SystemUserListItemDto,
   UserProfileDto,
 } from "@/types/api";
 import type {
@@ -55,6 +56,7 @@ import type {
   StatisticsSampleGallery,
   StatisticsSampleImageItem,
   SummaryStatistics,
+  SystemUserListItem,
   UserProfile,
 } from "@/types/models";
 
@@ -80,6 +82,26 @@ export function mapUserProfileDto(dto: UserProfileDto): UserProfile {
     displayName: dto.display_name,
     role: dto.role,
     isActive: dto.is_active,
+    canUseAiAnalysis: dto.can_use_ai_analysis,
+    lastLoginAt: dto.last_login_at,
+    passwordChangedAt: dto.password_changed_at,
+    createdAt: dto.created_at,
+    updatedAt: dto.updated_at,
+  };
+}
+
+/**
+ * 将管理员用户列表 DTO 映射为前端表格模型。
+ */
+export function mapSystemUserListItemDto(dto: SystemUserListItemDto): SystemUserListItem {
+  return {
+    id: dto.id,
+    username: dto.username,
+    email: dto.email,
+    displayName: dto.display_name,
+    role: dto.role,
+    isActive: dto.is_active,
+    canUseAiAnalysis: dto.can_use_ai_analysis,
     lastLoginAt: dto.last_login_at,
     passwordChangedAt: dto.password_changed_at,
     createdAt: dto.created_at,

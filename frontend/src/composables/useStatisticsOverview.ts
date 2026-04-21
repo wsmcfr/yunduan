@@ -17,6 +17,7 @@ import {
   mapStatisticsAIAnalysisResponseDto,
   mapStatisticsOverviewDto,
 } from "@/services/mappers/commonMappers";
+import { useAuthStore } from "@/stores/auth";
 import type {
   AIRuntimeModelOption,
   DeviceModel,
@@ -39,6 +40,8 @@ const DEFAULT_DAYS = 14;
  * 统一管理筛选、概览加载、AI 分析和导出，避免页面脚本继续膨胀。
  */
 export function useStatisticsOverview() {
+  const authStore = useAuthStore();
+
   /**
    * 当前筛选窗口的快捷天数。
    * 当用户改用自定义日期范围时，仍保留这个值作为后端窗口参数。
@@ -100,6 +103,12 @@ export function useStatisticsOverview() {
   });
 
   /**
+   * 当前账号是否已获管理员授权使用 AI 分析。
+   * 统计页据此决定是否加载模型列表以及是否允许发起分析。
+   */
+  const canUseAiAnalysis = computed(() => authStore.currentUser?.canUseAiAnalysis ?? false);
+
+  /**
    * 当前筛选到的零件和设备名称。
    * 导出报告时会把这些名称写入标题区，而不是只写编号。
    */
@@ -135,6 +144,10 @@ export function useStatisticsOverview() {
     referenceLoading.value = true;
     referenceError.value = "";
 
+    const runtimeModelRequest = canUseAiAnalysis.value
+      ? fetchRuntimeAIModels()
+      : Promise.resolve({ items: [] });
+
     const [partsResult, devicesResult, runtimeModelsResult] = await Promise.allSettled([
       /**
        * 后端主数据列表接口当前限制单次最大 `limit=100`。
@@ -142,7 +155,7 @@ export function useStatisticsOverview() {
        */
       fetchParts({ limit: 100 }),
       fetchDevices({ limit: 100 }),
-      fetchRuntimeAIModels(),
+      runtimeModelRequest,
     ]);
 
     const referenceErrors: string[] = [];
@@ -227,6 +240,11 @@ export function useStatisticsOverview() {
   async function runAiAnalysis(): Promise<void> {
     if (!overview.value) {
       ElMessage.warning("请先加载统计概览，再发起 AI 分析。");
+      return;
+    }
+
+    if (!canUseAiAnalysis.value) {
+      ElMessage.warning("当前账号尚未开通 AI 分析权限。");
       return;
     }
 
@@ -348,7 +366,7 @@ export function useStatisticsOverview() {
        * PDF 导出优先复用页面上已经生成好的 AI 分析结果，
        * 避免导出动作再次发起一轮新的 AI 计算，把服务器 CPU 和等待时间一起拉高。
        */
-      include_ai_analysis: hasStableAiAnalysis,
+      include_ai_analysis: canUseAiAnalysis.value && hasStableAiAnalysis,
       cached_ai_answer: hasStableAiAnalysis ? aiAnalysis.value?.answer ?? null : null,
       cached_ai_provider_hint: hasStableAiAnalysis ? aiAnalysis.value?.providerHint ?? null : null,
       cached_ai_generated_at: hasStableAiAnalysis ? aiAnalysis.value?.generatedAt ?? null : null,
@@ -414,6 +432,7 @@ export function useStatisticsOverview() {
     selectedModelId,
     analysisNote,
     activeRuntimeModel,
+    canUseAiAnalysis,
     selectedPartLabel,
     selectedDeviceLabel,
     refresh,

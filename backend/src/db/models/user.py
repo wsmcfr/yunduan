@@ -41,6 +41,13 @@ class User(Base, IdMixin, TimestampMixin):
         default=True,
         server_default=text("1"),
     )
+    # AI 分析权限由管理员显式授予，默认关闭，避免新账号自动占用模型能力。
+    can_use_ai_analysis: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+    )
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # 重置令牌只保存哈希值，数据库里不落明文 token。
     password_reset_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)

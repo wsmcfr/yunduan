@@ -75,3 +75,15 @@ def get_current_admin_user(current_user: User = Depends(get_current_user)) -> Us
         raise ForbiddenError(code="permission_denied", message="只有管理员可以执行当前操作。")
 
     return current_user
+
+
+def get_current_ai_enabled_user(current_user: User = Depends(get_current_user)) -> User:
+    """要求当前登录用户已被管理员授予 AI 分析权限。"""
+
+    if not current_user.can_use_ai_analysis:
+        raise ForbiddenError(
+            code="ai_analysis_disabled",
+            message="当前账号尚未开通 AI 分析权限，请联系管理员开启后再试。",
+        )
+
+    return current_user

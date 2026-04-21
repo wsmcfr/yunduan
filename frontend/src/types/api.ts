@@ -73,6 +73,7 @@ export interface UserProfileDto {
   display_name: string;
   role: UserRole;
   is_active: boolean;
+  can_use_ai_analysis: boolean;
   last_login_at: string | null;
   password_changed_at: string | null;
   created_at: string;
@@ -82,6 +83,31 @@ export interface UserProfileDto {
 export interface AuthSessionResponseDto {
   session_expires_at: string;
   user: UserProfileDto;
+}
+
+export interface SystemUserListItemDto {
+  id: number;
+  username: string;
+  email: string | null;
+  display_name: string;
+  role: UserRole;
+  is_active: boolean;
+  can_use_ai_analysis: boolean;
+  last_login_at: string | null;
+  password_changed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SystemUserListResponseDto {
+  items: SystemUserListItemDto[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+export interface SystemUserAiPermissionUpdateRequestDto {
+  can_use_ai_analysis: boolean;
 }
 
 export interface LoginRequestDto {
