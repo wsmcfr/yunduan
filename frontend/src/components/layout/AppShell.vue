@@ -58,4 +58,33 @@ import AppSidebar from "./AppSidebar.vue";
     padding: 20px;
   }
 }
+
+@media print {
+  .shell {
+    min-height: auto;
+    padding: 0;
+    background: #ffffff;
+  }
+
+  .shell__grid {
+    min-height: auto;
+    display: block;
+  }
+
+  .shell__content {
+    display: block;
+  }
+
+  .shell__page {
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  :deep(.sidebar),
+  :deep(.app-header) {
+    display: none !important;
+  }
+}
 </style>

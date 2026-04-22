@@ -217,11 +217,11 @@ POST /api/v1/statistics/export-pdf
 | Boundary | Contract |
 |---|---|
 | `export_mode="visual"` | Must stay on the WeasyPrint HTML rendering path |
-| `export_mode="lightweight"` | Must dispatch directly to the ReportLab-based renderer and must not continue into the HTML / sample-image path |
+| `export_mode="lightweight"` | Must dispatch directly to the ReportLab-based renderer instead of the WeasyPrint HTML path |
 | ReportLab dependency | Missing `reportlab` must surface as a stable integration error, not an unhandled traceback |
 | WeasyPrint dependency | Missing `weasyprint` must surface as a stable integration error, not an unhandled traceback |
 | Font registration | `pdfmetrics.getRegisteredFontNames()` must be treated as a sequence of font-name strings |
-| Lightweight performance path | Lightweight export must not load COS sample images when the mode is `lightweight` |
+| Sample-image contract | Both export modes may embed representative sample images when `include_sample_images=true` and `sample_image_limit>0`; lightweight mode should keep the image count smaller, not silently drop the image section |
 
 Additional rules:
 
@@ -235,7 +235,8 @@ Additional rules:
 |---|---|---|
 | `reportlab` is not installed | Lightweight export cannot initialize its renderer | Raise `IntegrationError(code="lightweight_pdf_renderer_unavailable", ...)` |
 | `weasyprint` is not installed | Visual export cannot render HTML to PDF | Raise `IntegrationError(code="pdf_renderer_unavailable", ...)` |
-| Lightweight mode still calls sample-image loading | Export becomes slower and loses its intended lightweight behavior | Dispatch directly to the lightweight renderer before sample-image loading |
+| Lightweight mode silently drops sample images even though the request enabled them | The exported PDF no longer matches the visible statistics page content | Load a limited sample-image set and pass it into the lightweight renderer |
+| Lightweight mode keeps loading an excessive number of sample images | Export loses its intended speed advantage | Cap the request through `sample_image_limit` and prefer a smaller lightweight limit |
 | Font registration code treats registered font names as objects with `.fontName` | The route returns a raw `500` during lightweight export | Treat `getRegisteredFontNames()` as plain strings and keep the path test-covered |
 | Visual benchmark keeps AI analysis enabled | Timing includes model latency instead of renderer cost | Disable AI analysis during renderer benchmark runs |
 
@@ -243,22 +244,25 @@ Additional rules:
 
 | Case | Example |
 |---|---|
-| Good | `export_mode="lightweight"` skips sample images, initializes ReportLab, accepts string font names, and returns a PDF response |
-| Base | `export_mode="visual"` still uses WeasyPrint and embeds only the explicitly requested sample images |
+| Good | `export_mode="lightweight"` initializes ReportLab, accepts string font names, and returns a PDF that still contains AI analysis, AI追问, and a limited set of representative sample images |
+| Base | `export_mode="visual"` still uses WeasyPrint and both modes only embed the explicitly requested sample images |
 | Bad | A lightweight-renderer refactor accesses `font.fontName`, triggers `AttributeError`, and the API returns a plain `500 Internal Server Error` |
 
 ### 6. Tests Required
 
 - service test asserting `export_mode="lightweight"` dispatches to the lightweight renderer
-- service test asserting lightweight mode does not call sample-image loading
+- service test asserting lightweight mode passes representative `sample_images` into the renderer when the request enables them
+- service test asserting `include_sample_images=false` still skips sample-image loading
 - renderer test asserting missing `reportlab` maps to `lightweight_pdf_renderer_unavailable`
 - renderer test asserting `_ensure_font_registered(...)` accepts string names returned by `getRegisteredFontNames()`
+- renderer pagination test asserting lightweight mode can generate later sample-image pages
 - existing visual-path test coverage must still protect cached AI reuse and visual sample-image selection rules
 
 Assertion points:
 
 - the lightweight renderer receives `overview` and `ai_analysis` directly from `StatisticsExportService`
-- `_load_sample_images(...)` is not called for lightweight mode
+- the lightweight renderer receives a limited `sample_images` list when the request explicitly enables sample-image export
+- `_load_sample_images(...)` is skipped only when `include_sample_images=false` or `sample_image_limit=0`
 - missing dependencies map to stable error codes instead of plain tracebacks
 - registered font names such as `"STSong-Light"` do not require `.fontName` access
 
@@ -285,6 +289,7 @@ if payload.export_mode == "lightweight":
     return StatisticsLightweightPdfRenderer().build_pdf(
         overview=overview,
         ai_analysis=ai_analysis,
+        sample_images=sample_images,
     )
 ```
 

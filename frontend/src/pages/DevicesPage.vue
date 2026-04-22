@@ -181,7 +181,7 @@ onMounted(() => {
             {{ formatDateTime(row.lastSeenAt) }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="操作" width="110" fixed="right">
+        <ElTableColumn label="操作" width="110">
           <template #default="{ row }">
             <ElButton text type="primary" @click="openEditDialog(row)">编辑</ElButton>
           </template>

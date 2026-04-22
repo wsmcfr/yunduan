@@ -30,14 +30,14 @@ const PDF_EXPORT_MODE_OPTIONS: Array<{
     title: "视觉版 PDF",
     description: "保留当前页面式卡片、深色面板和更完整的视觉层次，适合演示和汇报。",
     performanceHint: "导出较慢，服务端渲染压力更高。",
-    featureHint: "可附带代表图片和更完整的页面风格内容。",
+    featureHint: "会附带 AI 主分析、追问记录和更多代表图片。",
   },
   {
     mode: "lightweight",
     title: "轻量报表版 PDF",
     description: "改用直接绘制的正式报表布局，导出更快，更适合服务器环境和批量下载。",
     performanceHint: "导出更快，CPU 占用更可控。",
-    featureHint: "以统计结论和矢量图表为主，不嵌入 COS 样本大图。",
+    featureHint: "同样保留 AI 主分析、追问记录和少量代表图片。",
   },
 ];
 
@@ -87,7 +87,7 @@ function handleSubmit(): void {
   >
     <div class="stats-pdf-export">
       <p class="muted-text stats-pdf-export__intro">
-        视觉版适合汇报展示，轻量报表版更适合服务器环境和快速下载。两个版本都会保留。
+        两个版本都会尽量保留统计页里的 AI 分析、追问记录和部分代表图片，主要差异在版式风格与导出性能。
       </p>
 
       <ElRadioGroup v-model="selectedMode" class="stats-pdf-export__group">

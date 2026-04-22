@@ -244,6 +244,115 @@ Why:
 - context-specific density prevents admin screens from looking like dashboards and prevents dashboards from feeling lifeless
 - natural-height side panels avoid the common “large empty column” defect that users read as broken design instead of deliberate whitespace
 
+### Convention: Paged Workspace Stage
+
+When a dashboard, statistics workspace, or gallery page contains too many dense sections for one comfortable viewport, use a paged workspace stage instead of a single endlessly growing screen.
+
+Implementation contract:
+
+- define explicit page options such as `STATISTICS_WORKSPACE_PAGE_OPTIONS`, `DASHBOARD_WORKSPACE_PAGE_OPTIONS`, or `GALLERY_WORKSPACE_PAGE_OPTIONS`
+- keep the active page in a dedicated local ref such as `activeWorkspacePage`
+- render a pager summary plus direct page buttons and previous / next actions; page switching is part of the workspace contract, not an afterthought
+- wrap the page bodies in a dedicated stage container such as `stats-page__workspace-stage` or `dashboard-workspace-stage`
+- on desktop, each workspace page must share one fixed stage height token and scroll internally:
+  - stage uses a `min-height` driven by a CSS variable such as `--stats-workspace-stage-height`
+  - page bodies use the same `min-height` and `max-height`
+  - inactive pages stay hidden
+  - active pages use `overflow-y: auto`
+- on narrow screens, remove the fixed-height restriction and let the content flow naturally
+- in print styles, hide pager controls and force every workspace page to render in order with page breaks:
+  - `display: grid !important`
+  - `break-before: page`
+  - `page-break-before: always`
+  - override the first page to avoid an empty leading print page
+
+Example:
+
+```vue
+<script setup lang="ts">
+const WORKSPACE_PAGE_OPTIONS = [
+  { name: "summary", title: "Summary" },
+  { name: "detail", title: "Detail" },
+] as const;
+
+const activeWorkspacePage = ref<(typeof WORKSPACE_PAGE_OPTIONS)[number]["name"]>("summary");
+</script>
+
+<template>
+  <section class="workspace-pager">
+    <button
+      v-for="item in WORKSPACE_PAGE_OPTIONS"
+      :key="item.name"
+      type="button"
+      @click="activeWorkspacePage = item.name"
+    >
+      {{ item.title }}
+    </button>
+  </section>
+
+  <div class="workspace-stage">
+    <section
+      v-for="item in WORKSPACE_PAGE_OPTIONS"
+      :key="item.name"
+      class="workspace-page"
+      :class="{ 'workspace-page--active': activeWorkspacePage === item.name }"
+    >
+      ...
+    </section>
+  </div>
+</template>
+
+<style scoped>
+.workspace-stage {
+  min-height: var(--workspace-stage-height);
+}
+
+.workspace-page {
+  display: none;
+  min-height: var(--workspace-stage-height);
+  max-height: var(--workspace-stage-height);
+  overflow-y: auto;
+}
+
+.workspace-page--active {
+  display: grid;
+}
+
+@media (max-width: 900px) {
+  .workspace-stage,
+  .workspace-page {
+    min-height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media print {
+  .workspace-pager {
+    display: none !important;
+  }
+
+  .workspace-page {
+    display: grid !important;
+    break-before: page;
+    page-break-before: always;
+  }
+
+  .workspace-page:first-child {
+    break-before: auto;
+    page-break-before: auto;
+  }
+}
+</style>
+```
+
+Why:
+
+- page buttons alone do not solve the “one screen becomes absurdly long” problem
+- fixed-height stages preserve a stable working area and make scrolling predictable
+- mobile and print need opposite behavior from desktop, so the layout must explicitly downgrade instead of relying on accidental CSS inheritance
+- this pattern is now shared by `DashboardPage.vue`, `StatisticsPage.vue`, and `StatisticsSampleGallerySection.vue`, so it should remain a reusable house convention
+
 ---
 
 ## Accessibility
@@ -279,3 +388,4 @@ The current app already pairs colors with text in `StatusTag` and alert content.
 | Making the header clock depend on a manual refresh click | Produces stale shell state |
 | Using `label` as the selected radio value | Produces deprecation warnings and weak form contracts |
 | Letting one inspection image fill the full card width with `object-fit: cover` | Makes evidence previews look oversized and can crop the exact defect contour users need to inspect |
+| Adding page-switch buttons without a fixed stage height and per-page overflow contract | The screen still grows into one very long page, so the UI only looks paged without actually behaving like pages |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
@@ -41,7 +42,7 @@ class StatisticsLightweightPdfRenderer:
     这版 PDF 不再依赖 HTML/CSS 渲染，而是直接用矢量指令绘制：
     - 速度更稳定
     - 版式更像正式工业报告
-    - 不再嵌入 COS 样本大图，避免导出时把 CPU 和内存一起拉高
+    - 在保持性能可控的前提下，仍可附带少量代表样本图，保证信息完整性
     """
 
     def __init__(self) -> None:
@@ -60,6 +61,7 @@ class StatisticsLightweightPdfRenderer:
             from reportlab.lib import colors
             from reportlab.lib.pagesizes import A4
             from reportlab.lib.units import mm
+            from reportlab.lib.utils import ImageReader
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.cidfonts import UnicodeCIDFont
             from reportlab.pdfgen import canvas
@@ -76,6 +78,7 @@ class StatisticsLightweightPdfRenderer:
             "colors": colors,
             "A4": A4,
             "mm": mm,
+            "ImageReader": ImageReader,
             "pdfmetrics": pdfmetrics,
             "UnicodeCIDFont": UnicodeCIDFont,
             "canvas": canvas,
@@ -594,6 +597,199 @@ class StatisticsLightweightPdfRenderer:
             )
         ]
 
+    def _create_embedded_image_reader(
+        self,
+        *,
+        image_reader_cls: Any,
+        image_src: str,
+    ) -> Any | None:
+        """把 data URI 图片转换成 reportlab 可消费的图片对象。
+
+        轻量版 PDF 从导出服务拿到的是内嵌的 data URI。
+        这里单独做一次解析，避免在绘制代码里重复处理 base64 和异常分支。
+        """
+
+        normalized_image_src = image_src.strip()
+        if not normalized_image_src or ";base64," not in normalized_image_src:
+            return None
+
+        try:
+            _, encoded_payload = normalized_image_src.split(";base64,", 1)
+            image_bytes = base64.b64decode(encoded_payload)
+            return image_reader_cls(BytesIO(image_bytes))
+        except Exception:
+            return None
+
+    def _draw_sample_image_card(
+        self,
+        *,
+        canvas_obj: Any,
+        colors: Any,
+        image_reader_cls: Any,
+        font_name: str,
+        sample_image: dict[str, str],
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+    ) -> None:
+        """绘制单张代表样本图卡片。
+
+        卡片同时保留：
+        - 记录编号与最终结果；
+        - 零件/设备摘要；
+        - 缺陷说明与采集时间；
+        - 图片本体或失败占位说明。
+        """
+
+        canvas_obj.setFillColor(self.theme.panel_bg)
+        canvas_obj.setStrokeColor(self.theme.border)
+        canvas_obj.roundRect(x, y - height, width, height, 14, fill=1, stroke=1)
+
+        result_color = sample_image.get("result_color") or self.theme.blue
+        canvas_obj.setFillColor(colors.HexColor(result_color))
+        canvas_obj.roundRect(x, y - 6, width, 6, 6, fill=1, stroke=0)
+
+        canvas_obj.setFillColor(self.theme.navy)
+        canvas_obj.setFont(font_name, 11)
+        canvas_obj.drawString(x + 14, y - 22, sample_image.get("record_no", "未命名记录"))
+
+        canvas_obj.setFillColor(colors.HexColor(result_color))
+        canvas_obj.setFont(font_name, 10)
+        canvas_obj.drawRightString(
+            x + width - 14,
+            y - 22,
+            sample_image.get("result_label", "未记录"),
+        )
+
+        meta_lines = [
+            sample_image.get("title", "未记录零件与设备信息"),
+            f"缺陷信息：{sample_image.get('defect_text', '未记录')}",
+            f"采集时间：{sample_image.get('captured_at', '未记录')}",
+        ]
+        canvas_obj.setFillColor(self.theme.slate)
+        canvas_obj.setFont(font_name, 8)
+        current_meta_y = y - 38
+        for meta_line in meta_lines:
+            canvas_obj.drawString(x + 14, current_meta_y, meta_line)
+            current_meta_y -= 12
+
+        image_area_x = x + 14
+        image_area_y = y - height + 18
+        image_area_width = width - 28
+        image_area_height = height - 94
+        canvas_obj.setFillColor(colors.HexColor("#FDFEFF"))
+        canvas_obj.setStrokeColor(colors.HexColor(self.theme.border))
+        canvas_obj.roundRect(
+            image_area_x,
+            image_area_y,
+            image_area_width,
+            image_area_height,
+            10,
+            fill=1,
+            stroke=1,
+        )
+
+        image_reader = self._create_embedded_image_reader(
+            image_reader_cls=image_reader_cls,
+            image_src=sample_image.get("image_src", ""),
+        )
+        if image_reader is not None:
+            try:
+                canvas_obj.drawImage(
+                    image_reader,
+                    image_area_x + 10,
+                    image_area_y + 10,
+                    image_area_width - 20,
+                    image_area_height - 20,
+                    preserveAspectRatio=True,
+                    anchor="c",
+                )
+                return
+            except Exception:
+                image_reader = None
+
+        canvas_obj.setFillColor(self.theme.slate)
+        canvas_obj.setFont(font_name, 9)
+        canvas_obj.drawCentredString(
+            x + width / 2,
+            image_area_y + image_area_height / 2,
+            sample_image.get("image_message", "当前样本图片暂时无法嵌入轻量版 PDF。"),
+        )
+
+    def _draw_sample_image_pages(
+        self,
+        *,
+        canvas_obj: Any,
+        colors: Any,
+        image_reader_cls: Any,
+        font_name: str,
+        page_width: float,
+        page_height: float,
+        sample_images: list[dict[str, str]],
+        start_page_number: int,
+    ) -> int:
+        """在后续页面绘制代表样本图片。
+
+        轻量版不再追求把整页图库完全重建，而是保留少量代表样本：
+        - 满足“导出后仍能看到实际零件图片”的要求；
+        - 通过固定每页两张卡片来保证版面稳定；
+        - 图片过多时自动续页，不截断。
+        """
+
+        if not sample_images:
+            return start_page_number
+
+        current_page_number = start_page_number
+        cards_per_page = 2
+        card_width = page_width - 48
+        card_height = 308
+        card_gap = 16
+        page_top = page_height - 94
+
+        for page_index in range(ceil(len(sample_images) / cards_per_page)):
+            canvas_obj.showPage()
+            self._draw_page_background(
+                canvas_obj=canvas_obj,
+                page_width=page_width,
+                page_height=page_height,
+            )
+            self._draw_page_title_block(
+                canvas_obj=canvas_obj,
+                font_name=font_name,
+                title="代表样本图片",
+                description="轻量版同样保留少量代表图片，便于结合真实零件图继续阅读统计结论。",
+                page_width=page_width,
+                page_height=page_height,
+            )
+
+            page_items = sample_images[
+                page_index * cards_per_page:(page_index + 1) * cards_per_page
+            ]
+            for card_index, sample_image in enumerate(page_items):
+                card_top_y = page_top - card_index * (card_height + card_gap)
+                self._draw_sample_image_card(
+                    canvas_obj=canvas_obj,
+                    colors=colors,
+                    image_reader_cls=image_reader_cls,
+                    font_name=font_name,
+                    sample_image=sample_image,
+                    x=24,
+                    y=card_top_y,
+                    width=card_width,
+                    height=card_height,
+                )
+
+            self._draw_footer(
+                canvas_obj=canvas_obj,
+                page_width=page_width,
+                font_name=font_name,
+                page_number=current_page_number,
+            )
+            current_page_number += 1
+
+        return current_page_number
+
     def _draw_supporting_summary_page(
         self,
         *,
@@ -632,7 +828,7 @@ class StatisticsLightweightPdfRenderer:
             pdfmetrics=pdfmetrics,
             font_name=font_name,
             title="样本图库摘要",
-            description="轻量版仅保留图库摘要，不再嵌入 COS 原图，优先保证导出速度与可读性。",
+            description="本页先看图库摘要，后续页面仍会补充少量代表图片，兼顾速度和信息完整性。",
             items=self._build_sample_gallery_summary_items(overview=overview),
             x=20,
             y=supporting_top - 208,
@@ -894,6 +1090,7 @@ class StatisticsLightweightPdfRenderer:
         overview: StatisticsOverviewResponse,
         ai_analysis: StatisticsAIAnalysisResponse | None,
         ai_conversation: list[StatisticsExportConversationMessage] | None = None,
+        sample_images: list[dict[str, str]] | None = None,
     ) -> tuple[bytes, str]:
         """构建轻量报表版 PDF 字节流和文件名。"""
 
@@ -1039,7 +1236,7 @@ class StatisticsLightweightPdfRenderer:
             ai_analysis=ai_analysis,
             start_page_number=3,
         )
-        self._draw_ai_conversation_pages(
+        next_page_number = self._draw_ai_conversation_pages(
             canvas_obj=canvas_obj,
             colors=colors,
             pdfmetrics=reportlab_modules["pdfmetrics"],
@@ -1047,6 +1244,16 @@ class StatisticsLightweightPdfRenderer:
             page_width=page_width,
             page_height=page_height,
             ai_conversation=ai_conversation or [],
+            start_page_number=next_page_number,
+        )
+        self._draw_sample_image_pages(
+            canvas_obj=canvas_obj,
+            colors=colors,
+            image_reader_cls=reportlab_modules["ImageReader"],
+            font_name=font_name,
+            page_width=page_width,
+            page_height=page_height,
+            sample_images=sample_images or [],
             start_page_number=next_page_number,
         )
 

@@ -242,6 +242,53 @@ const enabledGatewayCount = computed(
 const activeGatewayModelCount = computed(() => activeGateway.value?.models.length ?? 0);
 
 /**
+ * 当前详情区真正参与渲染的模型列表。
+ * 后续分页、统计和表格展示都只消费这一份派生结果，避免模板层到处写空值兜底。
+ */
+const activeGatewayModels = computed(() => activeGateway.value?.models ?? []);
+
+/**
+ * 模型列表分页状态。
+ * 当前网关模型变多后，详情区不再一次性把所有模型全部摊开，避免页面被拉成长表。
+ */
+const gatewayModelCurrentPage = ref(1);
+const gatewayModelPageSize = ref(6);
+
+/**
+ * 详情区模型概览指标。
+ * 这些数字会放在模型表上方，帮助用户先看规模和能力分布，再决定是否继续翻页查看明细。
+ */
+const activeGatewayEnabledModelCount = computed(
+  () => activeGatewayModels.value.filter((model) => model.isEnabled).length,
+);
+const activeGatewayVisionModelCount = computed(
+  () => activeGatewayModels.value.filter((model) => model.supportsVision).length,
+);
+const activeGatewayStreamingModelCount = computed(
+  () => activeGatewayModels.value.filter((model) => model.supportsStream).length,
+);
+
+/**
+ * 当前模型表的总页数与实际生效页码。
+ * 切换网关或缩小模型数量后，页码会自动回落到有效范围内，避免出现空页。
+ */
+const gatewayModelPageCount = computed(() =>
+  Math.max(Math.ceil(activeGatewayModels.value.length / gatewayModelPageSize.value), 1),
+);
+const normalizedGatewayModelCurrentPage = computed(() =>
+  Math.min(gatewayModelCurrentPage.value, gatewayModelPageCount.value),
+);
+
+/**
+ * 当前页真正显示的模型数据。
+ * 详情表格只渲染这一小段切片，控制页面纵向长度。
+ */
+const pagedActiveGatewayModels = computed(() => {
+  const startIndex = (normalizedGatewayModelCurrentPage.value - 1) * gatewayModelPageSize.value;
+  return activeGatewayModels.value.slice(startIndex, startIndex + gatewayModelPageSize.value);
+});
+
+/**
  * 用户管理列表总页数。
  */
 const usersPageCount = computed(() =>
@@ -261,6 +308,22 @@ const applicationsPageCount = computed(() =>
 const companiesPageCount = computed(() =>
   Math.max(Math.ceil(companiesTotal.value / companiesPageSize.value), 1),
 );
+
+/**
+ * 切换模型列表页码。
+ */
+function handleGatewayModelPageChange(nextPage: number): void {
+  gatewayModelCurrentPage.value = nextPage;
+}
+
+/**
+ * 切换模型列表每页数量。
+ * 一旦页尺寸变化，直接回到第一页，避免用户停留在一个已经越界的旧页码上。
+ */
+function handleGatewayModelPageSizeChange(nextPageSize: number): void {
+  gatewayModelPageSize.value = nextPageSize;
+  gatewayModelCurrentPage.value = 1;
+}
 
 /**
  * 返回角色中文标签。
@@ -2013,7 +2076,7 @@ watch(gatewayDialogVisible, (visible) => {
                 {{ formatDateTime(row.createdAt) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="操作" min-width="260" fixed="right">
+            <ElTableColumn label="操作" min-width="260">
               <template #default="{ row }">
                 <div class="table-actions">
                   <ElButton
@@ -2162,7 +2225,7 @@ watch(gatewayDialogVisible, (visible) => {
                 {{ formatDateTime(row.createdAt) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="操作" min-width="180" fixed="right">
+            <ElTableColumn label="操作" min-width="180">
               <template #default="{ row }">
                 <div class="table-actions">
                   <template v-if="row.adminApplicationStatus === 'pending'">
@@ -2290,7 +2353,7 @@ watch(gatewayDialogVisible, (visible) => {
                 {{ formatDateTime(row.updatedAt) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="操作" min-width="220" fixed="right">
+            <ElTableColumn label="操作" min-width="220">
               <template #default="{ row }">
                 <div class="table-actions">
                   <ElButton
@@ -2522,7 +2585,7 @@ watch(gatewayDialogVisible, (visible) => {
                     <div>
                       <strong>模型配置</strong>
                       <p class="muted-text">
-                        同一网关下可以挂多个模型配置，但详情区只显示当前网关的模型，避免所有网关模型一股脑全部摊开。
+                        同一网关下可以挂多个模型配置，但详情区只显示当前网关，并对模型列表做分页，避免长表把整个页面拖得过长。
                       </p>
                     </div>
                     <div class="settings-panel__actions">
@@ -2540,35 +2603,50 @@ watch(gatewayDialogVisible, (visible) => {
                     </div>
                   </div>
 
+                  <div v-if="activeGatewayModels.length > 0" class="gateway-detail__model-metrics">
+                    <article class="gateway-detail__model-metric">
+                      <span class="gateway-detail__model-metric-label">模型总数</span>
+                      <strong>{{ activeGatewayModels.length }}</strong>
+                    </article>
+                    <article class="gateway-detail__model-metric">
+                      <span class="gateway-detail__model-metric-label">已启用</span>
+                      <strong>{{ activeGatewayEnabledModelCount }}</strong>
+                    </article>
+                    <article class="gateway-detail__model-metric">
+                      <span class="gateway-detail__model-metric-label">支持视觉</span>
+                      <strong>{{ activeGatewayVisionModelCount }}</strong>
+                    </article>
+                    <article class="gateway-detail__model-metric">
+                      <span class="gateway-detail__model-metric-label">支持流式</span>
+                      <strong>{{ activeGatewayStreamingModelCount }}</strong>
+                    </article>
+                  </div>
+
                   <ElTable
-                    :data="activeGateway.models"
+                    :data="pagedActiveGatewayModels"
                     empty-text="当前网关还没有配置模型"
                     class="settings-table"
                   >
                     <ElTableColumn prop="displayName" label="显示名" min-width="170" />
-                    <ElTableColumn label="模型品牌" min-width="110">
+                    <ElTableColumn label="模型品牌" min-width="120">
                       <template #default="{ row }">
                         {{ getModelVendorLabel(row.upstreamVendor) }}
                       </template>
                     </ElTableColumn>
-                    <ElTableColumn label="协议" min-width="150">
+                    <ElTableColumn label="接入方式" min-width="200">
                       <template #default="{ row }">
-                        {{ getProtocolLabel(row.protocolType) }}
+                        <div class="table-stack">
+                          <strong>{{ getProtocolLabel(row.protocolType) }}</strong>
+                          <span>鉴权：{{ getAuthModeLabel(row.authMode) }}</span>
+                        </div>
                       </template>
                     </ElTableColumn>
-                    <ElTableColumn label="鉴权" min-width="140">
+                    <ElTableColumn label="接入配置" min-width="280" show-overflow-tooltip>
                       <template #default="{ row }">
-                        {{ getAuthModeLabel(row.authMode) }}
-                      </template>
-                    </ElTableColumn>
-                    <ElTableColumn label="最终 Base URL" min-width="220" show-overflow-tooltip>
-                      <template #default="{ row }">
-                        {{ resolveModelBaseUrl(activeGateway, row) }}
-                      </template>
-                    </ElTableColumn>
-                    <ElTableColumn label="模型标识" min-width="180" show-overflow-tooltip>
-                      <template #default="{ row }">
-                        {{ row.modelIdentifier }}
+                        <div class="table-stack">
+                          <strong class="mono-text">{{ row.modelIdentifier }}</strong>
+                          <span>{{ resolveModelBaseUrl(activeGateway, row) }}</span>
+                        </div>
                       </template>
                     </ElTableColumn>
                     <ElTableColumn label="能力" min-width="140">
@@ -2616,6 +2694,27 @@ watch(gatewayDialogVisible, (visible) => {
                       </template>
                     </ElTableColumn>
                   </ElTable>
+
+                  <div
+                    v-if="activeGatewayModels.length > 0"
+                    class="settings-pagination gateway-detail__model-pagination"
+                  >
+                    <span class="muted-text">
+                      共 {{ activeGatewayModels.length }} 个模型，当前第
+                      {{ normalizedGatewayModelCurrentPage }} / {{ gatewayModelPageCount }} 页
+                    </span>
+
+                    <ElPagination
+                      background
+                      layout="prev, pager, next, sizes, total"
+                      :current-page="normalizedGatewayModelCurrentPage"
+                      :page-size="gatewayModelPageSize"
+                      :page-sizes="[6, 10, 20]"
+                      :total="activeGatewayModels.length"
+                      @current-change="handleGatewayModelPageChange"
+                      @size-change="handleGatewayModelPageSizeChange"
+                    />
+                  </div>
                 </div>
               </template>
 
@@ -2665,6 +2764,7 @@ watch(gatewayDialogVisible, (visible) => {
 
 .settings-panel {
   padding: 22px;
+  align-content: start;
 }
 
 .settings-panel__header,
@@ -2698,8 +2798,51 @@ watch(gatewayDialogVisible, (visible) => {
   flex-wrap: wrap;
 }
 
-.settings-tabs :deep(.el-tabs__content) {
+.settings-tabs {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-tabs :deep(.el-tabs__header) {
+  margin: 0;
+}
+
+.settings-tabs :deep(.el-tabs__nav-wrap::after) {
+  background: rgba(149, 184, 223, 0.1);
+}
+
+.settings-tabs :deep(.el-tabs__nav) {
+  padding: 6px;
+  border-radius: 18px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  background: rgba(8, 20, 33, 0.78);
+}
+
+.settings-tabs :deep(.el-tabs__item) {
+  height: auto;
+  line-height: 1.4;
+  padding: 12px 18px;
+  border-radius: 12px;
+  color: var(--app-text-secondary);
+}
+
+.settings-tabs :deep(.el-tabs__item.is-active) {
+  color: #eef5fc;
+  background:
+    radial-gradient(circle at top right, rgba(127, 228, 208, 0.14), transparent 44%),
+    rgba(255, 255, 255, 0.05);
+}
+
+.settings-tabs :deep(.el-tabs__active-bar) {
+  display: none;
+}
+
+.settings-tabs :deep(.el-tabs__content),
+.settings-tabs :deep(.el-tab-pane) {
+  display: grid;
+  gap: 18px;
   padding-top: 6px;
+  align-content: start;
 }
 
 .account-overview,
@@ -3039,6 +3182,39 @@ watch(gatewayDialogVisible, (visible) => {
   gap: 16px;
 }
 
+.gateway-detail__model-metrics {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.gateway-detail__model-metric {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(149, 184, 223, 0.08);
+  background:
+    radial-gradient(circle at top right, rgba(127, 228, 208, 0.08), transparent 40%),
+    rgba(255, 255, 255, 0.028);
+}
+
+.gateway-detail__model-metric-label {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+.gateway-detail__model-metric strong {
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.gateway-detail__model-pagination {
+  padding-top: 4px;
+  border-top: 1px solid rgba(149, 184, 223, 0.12);
+}
+
 .settings-pagination {
   flex-wrap: wrap;
 }
@@ -3060,7 +3236,8 @@ watch(gatewayDialogVisible, (visible) => {
   .filter-grid--users,
   .account-overview,
   .company-overview,
-  .password-request-grid {
+  .password-request-grid,
+  .gateway-detail__model-metrics {
     grid-template-columns: 1fr;
   }
 }

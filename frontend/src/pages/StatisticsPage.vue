@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 
 import MetricCard from "@/components/common/MetricCard.vue";
@@ -84,6 +84,43 @@ interface TrendChartState {
   chartBottom: number;
 }
 
+/**
+ * 统计页分页工作区。
+ * 这里把内容明确拆成“总览 / 风险 / 图库 / AI”四页，避免继续往下拉很久才能看到目标区域。
+ */
+type StatisticsWorkspacePage = "overview" | "ranking" | "gallery" | "ai";
+
+/**
+ * 统计页分页导航配置。
+ * 页面导航本身就承担“第几页、这一页看什么”的提示，不再让 AI 区藏在长页面底部。
+ */
+const STATISTICS_WORKSPACE_PAGE_OPTIONS: Array<{
+  name: StatisticsWorkspacePage;
+  title: string;
+  description: string;
+}> = [
+  {
+    name: "overview",
+    title: "趋势总览",
+    description: "看趋势曲线、分布结构和关键发现。",
+  },
+  {
+    name: "ranking",
+    title: "风险排行",
+    description: "看零件和设备风险是否集中。",
+  },
+  {
+    name: "gallery",
+    title: "样本图库",
+    description: "看图片总入口，再进入独立图库复检。",
+  },
+  {
+    name: "ai",
+    title: "AI 工作台",
+    description: "围绕当前统计窗口继续提问和追问。",
+  },
+];
+
 const QUICK_DAY_PRESETS = [7, 14, 30, 60];
 const TREND_CHART_WIDTH = 660;
 const TREND_CHART_HEIGHT = 320;
@@ -106,7 +143,7 @@ const {
   overview,
   aiAnalysis,
   aiQuestion,
-  aiMessages,
+  visibleAiMessages,
   aiSuggestedQuestions,
   error,
   aiError,
@@ -144,6 +181,7 @@ const hoveredTrendIndex = ref<number | null>(null);
  * 导出前先让用户明确选“视觉版”还是“轻量报表版”。
  */
 const pdfExportDialogVisible = ref(false);
+const activeWorkspacePage = ref<StatisticsWorkspacePage>("overview");
 
 /**
  * 统计页 AI 多轮消息区的自动跟随滚动控制。
@@ -153,7 +191,43 @@ const {
   scrollbarRef: aiMessagesScrollbarRef,
   handleScroll: handleAiMessagesScroll,
 } = useAiAutoScroll({
-  messages: aiMessages,
+  messages: visibleAiMessages,
+});
+
+/**
+ * 首轮批次分析正文区的滚动容器。
+ * 因为正文区现在是独立可滚动区域，所以需要单独维护“是否跟随到底部”。
+ */
+const aiAnalysisBodyRef = ref<HTMLElement | null>(null);
+
+/**
+ * 当用户仍停留在正文区底部时，流式内容继续自动跟随；
+ * 如果用户手动上滑查看旧内容，则暂停自动跟随，避免抢滚动位置。
+ */
+const shouldAutoScrollAiAnalysis = ref(true);
+
+/**
+ * 统计 AI 分析正文区是否应该占位显示。
+ * 一旦点击“生成 AI 分析”，就先把正文卡片渲染出来，避免首个流式字符到达时
+ * 才突然插入整块 DOM，把下方“多轮追问”整体往下顶出一次跳变。
+ */
+const shouldShowAiAnalysisBlock = computed(() => aiLoading.value || Boolean(aiAnalysis.value));
+
+/**
+ * 统计 AI 正文区在不同阶段展示的文本。
+ * 有稳定回答时展示真实正文；仍在生成时展示占位提示，让布局先稳定下来。
+ */
+const aiAnalysisDisplayText = computed(() => {
+  const normalizedAnswer = aiAnalysis.value?.answer.trim() ?? "";
+  if (normalizedAnswer) {
+    return aiAnalysis.value?.answer ?? "";
+  }
+
+  if (aiLoading.value) {
+    return "AI 正在根据当前统计窗口生成批次分析，正文会在这里持续流式输出。";
+  }
+
+  return "";
 });
 
 /**
@@ -276,10 +350,48 @@ const maxDeviceRiskCount = computed(() =>
 const hasOverview = computed(() => overview.value !== null);
 
 /**
+ * 当前工作区的页码信息。
+ * 顶部导航和底部翻页按钮都会复用这组结果。
+ */
+const activeWorkspacePageIndex = computed(() =>
+  Math.max(
+    STATISTICS_WORKSPACE_PAGE_OPTIONS.findIndex((item) => item.name === activeWorkspacePage.value),
+    0,
+  ),
+);
+
+/**
+ * 当前工作区配置。
+ */
+const activeWorkspacePageConfig = computed(() =>
+  STATISTICS_WORKSPACE_PAGE_OPTIONS[activeWorkspacePageIndex.value]
+    ?? STATISTICS_WORKSPACE_PAGE_OPTIONS[0],
+);
+
+/**
  * 百分比统一转成 1 位小数，保证统计卡片和排行口径一致。
  */
 function formatPercentValue(value: number): string {
   return `${Math.round(value * 1000) / 10}%`;
+}
+
+/**
+ * 切换统计页工作区。
+ * 统一收口页内翻页，避免按钮和导航各自维护不同状态。
+ */
+function goToWorkspacePage(nextPage: StatisticsWorkspacePage): void {
+  activeWorkspacePage.value = nextPage;
+}
+
+/**
+ * 按当前页码顺序翻到上一页或下一页。
+ */
+function stepWorkspacePage(direction: -1 | 1): void {
+  const nextIndex = Math.min(
+    Math.max(activeWorkspacePageIndex.value + direction, 0),
+    STATISTICS_WORKSPACE_PAGE_OPTIONS.length - 1,
+  );
+  activeWorkspacePage.value = STATISTICS_WORKSPACE_PAGE_OPTIONS[nextIndex]?.name ?? "overview";
 }
 
 /**
@@ -524,6 +636,72 @@ function handleOpenPdfExportDialog(): void {
 }
 
 /**
+ * 统计页首屏直接跳到 AI 工作台。
+ * 用户不需要再先滚到下半段才能找到 AI 入口。
+ */
+function handleOpenAiWorkspace(): void {
+  goToWorkspacePage("ai");
+}
+
+/**
+ * 判断首轮分析正文区是否仍贴近底部。
+ * 这里保留少量容差，避免浏览器像素取整导致误判。
+ */
+function isAiAnalysisNearBottom(): boolean {
+  const containerElement = aiAnalysisBodyRef.value;
+  if (!containerElement) {
+    return true;
+  }
+
+  const distanceToBottom =
+    containerElement.scrollHeight - containerElement.scrollTop - containerElement.clientHeight;
+  return distanceToBottom <= 24;
+}
+
+/**
+ * 响应用户手动滚动首轮分析正文区。
+ * 只要用户离开底部，就暂停自动跟随；重新回到底部后再恢复。
+ */
+function handleAiAnalysisScroll(): void {
+  shouldAutoScrollAiAnalysis.value = isAiAnalysisNearBottom();
+}
+
+/**
+ * 把首轮分析正文区滚动到最新输出位置。
+ * 流式分析时只要用户没有主动上翻，就持续自动跟随。
+ */
+function scrollAiAnalysisToBottom(force = false): void {
+  void nextTick(() => {
+    if (!force && !shouldAutoScrollAiAnalysis.value) {
+      return;
+    }
+
+    const containerElement = aiAnalysisBodyRef.value;
+    if (!containerElement) {
+      return;
+    }
+
+    containerElement.scrollTop = containerElement.scrollHeight;
+    shouldAutoScrollAiAnalysis.value = true;
+  });
+}
+
+watch(
+  () => aiAnalysis.value?.answer ?? "",
+  (nextAnswer) => {
+    if (!nextAnswer) {
+      shouldAutoScrollAiAnalysis.value = true;
+      return;
+    }
+
+    scrollAiAnalysisToBottom();
+  },
+  {
+    flush: "post",
+  },
+);
+
+/**
  * 根据用户选择的导出版本触发实际 PDF 导出。
  */
 function handleConfirmPdfExport(exportMode: StatisticsPdfExportMode): void {
@@ -550,6 +728,7 @@ function handleTrendMouseLeave(): void {
 
       <div class="stats-page__hero-actions">
         <ElButton @click="refresh" :loading="loading">刷新概览</ElButton>
+        <ElButton plain :disabled="!hasOverview" @click="handleOpenAiWorkspace">AI 工作台</ElButton>
         <ElButton plain :disabled="!hasOverview" @click="handleExportPng">导出海报图</ElButton>
         <ElButton
           type="primary"
@@ -684,591 +863,693 @@ function handleTrendMouseLeave(): void {
     </div>
 
     <div v-if="overview" class="stats-page__content">
-      <StatisticsSampleGallerySummarySection
-        :gallery="sampleGallery"
-        :filters="overview?.filters ?? null"
-      />
-
-      <div class="stats-page__chart-grid">
-        <section class="app-panel stats-panel">
-          <div class="stats-panel__header">
-            <div>
-              <strong>趋势曲线</strong>
-              <p class="muted-text">观察检测总量、不良与待确认的波动，不再只看静态表格。</p>
-            </div>
-          </div>
-
-          <div v-if="trendChart.axisTicks.length > 0" class="stats-trend">
-            <div class="stats-trend__summary">
-              <div>
-                <strong>
-                  {{ activeTrendSnapshot ? `${formatTrendDate(activeTrendSnapshot.date)} 的趋势快照` : "趋势快照" }}
-                </strong>
-                <p class="muted-text">
-                  当前高亮日期下，可以直接看到总量、不良与待确认的实际数量，而不是只盯着一条线。
-                </p>
-              </div>
-
-              <div v-if="activeTrendSnapshot" class="stats-trend__summary-pills">
-                <span
-                  v-for="item in activeTrendSnapshot.items"
-                  :key="item.label"
-                  class="stats-trend__summary-pill"
-                >
-                  <i :style="{ backgroundColor: item.color }" />
-                  {{ item.label }} {{ item.value }}
-                </span>
-              </div>
-            </div>
-
-            <svg
-              class="stats-trend__svg"
-              :viewBox="`0 0 ${TREND_CHART_WIDTH} ${TREND_CHART_HEIGHT}`"
-              role="img"
-              aria-label="统计趋势曲线"
-              @mouseleave="handleTrendMouseLeave"
-            >
-              <defs>
-                <linearGradient id="stats-trend-area" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stop-color="#7fe4d0" stop-opacity="0.26" />
-                  <stop offset="100%" stop-color="#7fe4d0" stop-opacity="0.02" />
-                </linearGradient>
-              </defs>
-
-              <line
-                :x1="trendChart.chartLeft"
-                :x2="trendChart.chartLeft"
-                :y1="TREND_CHART_PADDING.top"
-                :y2="trendChart.chartBottom"
-                class="stats-trend__axis"
-              />
-              <line
-                :x1="trendChart.chartLeft"
-                :x2="trendChart.chartRight"
-                :y1="trendChart.chartBottom"
-                :y2="trendChart.chartBottom"
-                class="stats-trend__axis"
-              />
-
-              <g v-for="tick in trendChart.valueTicks" :key="`value-${tick.label}`">
-                <line
-                  :x1="trendChart.chartLeft"
-                  :x2="trendChart.chartRight"
-                  :y1="tick.y"
-                  :y2="tick.y"
-                  class="stats-trend__grid"
-                />
-                <text
-                  :x="trendChart.chartLeft - 12"
-                  :y="tick.y + 4"
-                  text-anchor="end"
-                  class="stats-trend__value-label"
-                >
-                  {{ tick.label }}
-                </text>
-              </g>
-
-              <path
-                v-if="trendChart.series[0]?.areaPath"
-                :d="trendChart.series[0].areaPath"
-                fill="url(#stats-trend-area)"
-                stroke="none"
-              />
-
-              <line
-                v-if="activeTrendSnapshot?.items[0]?.point"
-                :x1="activeTrendSnapshot.items[0].point.x"
-                :x2="activeTrendSnapshot.items[0].point.x"
-                :y1="TREND_CHART_PADDING.top"
-                :y2="trendChart.chartBottom"
-                class="stats-trend__cursor-line"
-              />
-
-              <path
-                v-for="series in trendChart.series"
-                :key="series.label"
-                :d="series.linePath"
-                fill="none"
-                :stroke="series.color"
-                stroke-width="4"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-
-              <g v-for="series in trendChart.series" :key="`points-${series.label}`">
-                <circle
-                  v-for="point in series.points"
-                  :key="`${series.label}-${point.index}`"
-                  :cx="point.x"
-                  :cy="point.y"
-                  :r="activeTrendIndex === point.index ? 5.8 : 3.2"
-                  :fill="series.color"
-                  :stroke="activeTrendIndex === point.index ? '#0f2136' : 'rgba(15, 33, 54, 0.58)'"
-                  :stroke-width="activeTrendIndex === point.index ? 2.4 : 1.2"
-                  :opacity="activeTrendIndex === point.index ? 1 : 0.78"
-                />
-              </g>
-
-              <rect
-                v-for="zone in trendChart.interactionZones"
-                :key="`zone-${zone.index}`"
-                :x="zone.x"
-                :y="TREND_CHART_PADDING.top"
-                :width="zone.width"
-                :height="trendChart.chartBottom - TREND_CHART_PADDING.top"
-                fill="transparent"
-                @mouseenter="hoveredTrendIndex = zone.index"
-              />
-
-              <text
-                v-for="tick in trendChart.axisTicks"
-                :key="`${tick.label}-${tick.index}`"
-                :x="tick.x"
-                :y="TREND_CHART_HEIGHT - 14"
-                text-anchor="middle"
-                class="stats-trend__label"
-              >
-                {{ tick.label }}
-              </text>
-            </svg>
-
-            <div class="stats-trend__legend">
-              <span
-                v-for="series in trendChart.series"
-                :key="series.label"
-                class="stats-trend__legend-item"
-              >
-                <i :style="{ backgroundColor: series.color }" />
-                {{ series.label }}
-              </span>
-            </div>
-          </div>
-
-          <ElEmpty v-else description="当前窗口没有趋势数据" />
-        </section>
-
-        <section class="app-panel stats-panel">
-          <div class="stats-panel__header">
-            <div>
-              <strong>结果与审核分布</strong>
-              <p class="muted-text">用结构化分布快速判断当前批次是质量问题，还是审核积压在影响判断。</p>
-            </div>
-          </div>
-
-          <div class="stats-distribution-grid">
-            <article class="stats-distribution-card">
-              <div class="stats-distribution-card__donut" :style="{ background: resultDistributionStyle }">
-                <div class="stats-distribution-card__donut-center">
-                  <strong>{{ summary?.totalCount ?? 0 }}</strong>
-                  <span>样本总量</span>
-                </div>
-              </div>
-
-              <div class="stats-distribution-card__list">
-                <div
-                  v-for="item in resultDistribution"
-                  :key="item.result"
-                  class="stats-distribution-card__item"
-                >
-                  <span class="stats-distribution-card__label">
-                    <i :style="{ backgroundColor: getResultColor(item.result) }" />
-                    {{ getResultLabel(item.result) }}
-                  </span>
-                  <strong>{{ item.count }}</strong>
-                </div>
-              </div>
-            </article>
-
-            <article class="stats-distribution-card">
-              <div class="stats-distribution-card__donut" :style="{ background: reviewDistributionStyle }">
-                <div class="stats-distribution-card__donut-center">
-                  <strong>{{ summary?.reviewedCount ?? 0 }}</strong>
-                  <span>已审核</span>
-                </div>
-              </div>
-
-              <div class="stats-distribution-card__list">
-                <div
-                  v-for="item in reviewStatusDistribution"
-                  :key="item.reviewStatus"
-                  class="stats-distribution-card__item"
-                >
-                  <span class="stats-distribution-card__label">
-                    <i :style="{ backgroundColor: getReviewStatusColor(item.reviewStatus) }" />
-                    {{ getReviewStatusLabel(item.reviewStatus) }}
-                  </span>
-                  <strong>{{ item.count }}</strong>
-                </div>
-              </div>
-            </article>
-          </div>
-        </section>
-      </div>
-
-      <div class="stats-page__insight-grid">
-        <section class="app-panel stats-panel">
-          <div class="stats-panel__header">
-            <div>
-              <strong>缺陷分布</strong>
-              <p class="muted-text">优先识别当前批次最集中的缺陷类型，而不是逐条翻表。</p>
-            </div>
-          </div>
-
-          <div v-if="defectItems.length > 0" class="stats-bars">
-            <article
-              v-for="item in defectItems.slice(0, 6)"
-              :key="item.defectType"
-              class="stats-bars__row"
-            >
-              <div class="stats-bars__meta">
-                <strong>{{ item.defectType }}</strong>
-                <span>{{ item.count }}</span>
-              </div>
-              <div class="stats-bars__track">
-                <div
-                  class="stats-bars__fill stats-bars__fill--defect"
-                  :style="{ width: buildRiskWidth(item.count, maxDefectCount) }"
-                />
-              </div>
-            </article>
-          </div>
-
-          <ElEmpty v-else description="当前窗口没有缺陷分布数据" />
-        </section>
-
-        <section class="app-panel stats-panel">
-          <div class="stats-panel__header">
-            <div>
-              <strong>关键发现</strong>
-              <p class="muted-text">这些结论会直接作为统计 AI 分析的结构化上下文之一。</p>
-            </div>
-          </div>
-
-          <div v-if="keyFindings.length > 0" class="stats-findings">
-            <article
-              v-for="(item, index) in keyFindings"
-              :key="`${index}-${item}`"
-              class="stats-findings__item"
-            >
-              <span class="stats-findings__badge">{{ index + 1 }}</span>
-              <p>{{ item }}</p>
-            </article>
-          </div>
-
-          <ElEmpty v-else description="当前窗口还没有可提炼的关键发现" />
-        </section>
-      </div>
-
-      <div class="stats-page__ranking-grid">
-        <section class="app-panel stats-panel">
-          <div class="stats-panel__header">
-            <div>
-              <strong>零件风险排行</strong>
-              <p class="muted-text">按不良与待确认规模排序，帮助定位是否由特定零件批次导致。</p>
-            </div>
-          </div>
-
-          <div v-if="partRanking.length > 0" class="stats-ranking">
-            <article
-              v-for="item in partRanking"
-              :key="item.partId"
-              class="stats-ranking__row"
-            >
-              <div class="stats-ranking__meta">
-                <div>
-                  <strong>{{ item.partName }}</strong>
-                  <p class="muted-text">{{ item.partCode }}</p>
-                </div>
-                <div class="stats-ranking__summary">
-                  <span>总量 {{ item.totalCount }}</span>
-                  <span>不良 {{ item.badCount }}</span>
-                  <span>待确认 {{ item.uncertainCount }}</span>
-                  <span>良率 {{ formatPercentValue(item.passRate) }}</span>
-                </div>
-              </div>
-              <div class="stats-bars__track">
-                <div
-                  class="stats-bars__fill stats-bars__fill--risk"
-                  :style="{ width: buildRiskWidth(item.badCount + item.uncertainCount, maxPartRiskCount) }"
-                />
-              </div>
-            </article>
-          </div>
-
-          <ElEmpty v-else description="当前窗口没有零件排行数据" />
-        </section>
-
-        <section class="app-panel stats-panel">
-          <div class="stats-panel__header">
-            <div>
-              <strong>设备风险排行</strong>
-              <p class="muted-text">用于判断异常更偏向产品端，还是集中在特定设备链路。</p>
-            </div>
-          </div>
-
-          <div v-if="deviceRanking.length > 0" class="stats-ranking">
-            <article
-              v-for="item in deviceRanking"
-              :key="item.deviceId"
-              class="stats-ranking__row"
-            >
-              <div class="stats-ranking__meta">
-                <div>
-                  <strong>{{ item.deviceName }}</strong>
-                  <p class="muted-text">{{ item.deviceCode }}</p>
-                </div>
-                <div class="stats-ranking__summary">
-                  <span>总量 {{ item.totalCount }}</span>
-                  <span>不良 {{ item.badCount }}</span>
-                  <span>待确认 {{ item.uncertainCount }}</span>
-                  <span>良率 {{ formatPercentValue(item.passRate) }}</span>
-                </div>
-              </div>
-              <div class="stats-bars__track">
-                <div
-                  class="stats-bars__fill stats-bars__fill--device"
-                  :style="{ width: buildRiskWidth(item.badCount + item.uncertainCount, maxDeviceRiskCount) }"
-                />
-              </div>
-            </article>
-          </div>
-
-          <ElEmpty v-else description="当前窗口没有设备排行数据" />
-        </section>
-      </div>
-
-      <section class="app-panel stats-ai-panel">
-        <div class="stats-panel__header">
+      <section class="app-panel stats-workspace-pager">
+        <div class="stats-workspace-pager__header">
           <div>
-            <strong>AI 统计工作台</strong>
+            <strong>分页工作区</strong>
             <p class="muted-text">
-              AI 会直接读取当前统计窗口的摘要、趋势、缺陷分布、零件/设备排行和关键发现。你可以先生成一轮批次分析，再继续追问，也可以直接围绕当前窗口提问题。
+              当前统计页按“总览 / 风险 / 图库 / AI”拆成独立页面。屏幕上只展示当前页，避免一整页越拖越长；打印时会自动把全部页展开。
             </p>
           </div>
-          <div class="stats-ai-panel__header-tags">
-            <ElTag
-              :type="canUseAiAnalysis ? 'success' : 'warning'"
-              effect="dark"
-              round
-            >
-              {{ canUseAiAnalysis ? "当前账号已开通 AI 分析" : "当前账号未开通 AI 分析" }}
-            </ElTag>
-            <ElTag
-              v-if="activeRuntimeModel"
-              effect="dark"
-              round
-              type="success"
-            >
-              {{ activeRuntimeModel.displayName }}
-            </ElTag>
-          </div>
+          <ElTag effect="dark" round type="info">
+            第 {{ activeWorkspacePageIndex + 1 }} / {{ STATISTICS_WORKSPACE_PAGE_OPTIONS.length }} 页
+          </ElTag>
         </div>
 
-        <ElAlert
-          v-if="!canUseAiAnalysis"
-          type="warning"
-          show-icon
-          :closable="false"
-          title="当前账号未开通统计 AI 分析"
-          description="你仍然可以查看图表、筛选数据和导出纯统计报表，但无法发起 AI 分析或继续追问。请联系管理员在系统设置中开启该权限。"
-        />
-
-        <div class="stats-ai-panel__controls">
-          <ElSelect
-            v-model="selectedModelId"
-            clearable
-            filterable
-            :loading="referenceLoading"
-            :disabled="!canUseAiAnalysis"
-            placeholder="选择统计分析模型"
+        <div class="stats-workspace-pager__grid">
+          <button
+            v-for="(item, index) in STATISTICS_WORKSPACE_PAGE_OPTIONS"
+            :key="item.name"
+            type="button"
+            class="stats-workspace-pager__item"
+            :class="{ 'stats-workspace-pager__item--active': activeWorkspacePage === item.name }"
+            @click="goToWorkspacePage(item.name)"
           >
-            <ElOption
-              v-for="item in runtimeModels"
-              :key="item.id"
-              :label="`${item.displayName} / ${item.gatewayName}`"
-              :value="item.id"
-            />
-          </ElSelect>
+            <span class="stats-workspace-pager__item-index">0{{ index + 1 }}</span>
+            <strong>{{ item.title }}</strong>
+            <span>{{ item.description }}</span>
+          </button>
+        </div>
 
-          <ElInput
-            v-model="analysisNote"
-            type="textarea"
-            :rows="4"
-            resize="none"
-            :disabled="!canUseAiAnalysis"
-            placeholder="可补充本轮特别关注点，例如：重点分析某零件是否存在持续恶化，或判断问题更像设备侧异常还是材料批次异常。"
-          />
-
-          <div class="stats-ai-panel__actions">
+        <div class="stats-workspace-pager__footer">
+          <div>
+            <strong>{{ activeWorkspacePageConfig.title }}</strong>
+            <p class="muted-text">{{ activeWorkspacePageConfig.description }}</p>
+          </div>
+          <div class="stats-workspace-pager__actions">
             <ElButton
-              type="primary"
-              :loading="aiLoading"
-              :disabled="!canUseAiAnalysis || !hasOverview || isAiStreaming"
-              @click="handleRunAiAnalysis"
-            >
-              生成 AI 分析
-            </ElButton>
-            <span class="muted-text">
-              {{
-                !canUseAiAnalysis
-                  ? "当前账号未开通 AI 分析权限。"
-                  : activeRuntimeModel
-                  ? `当前模型：${activeRuntimeModel.displayName} / ${activeRuntimeModel.gatewayName}`
-                  : "未选择模型时，后端只会返回预留提示。"
-              }}
-            </span>
-          </div>
-        </div>
-
-        <ElAlert
-          v-if="aiError"
-          type="error"
-          show-icon
-          :closable="false"
-          title="统计 AI 工作台请求失败"
-          :description="aiError"
-        />
-
-        <div class="stats-ai-panel__result">
-          <div class="stats-ai-panel__result-meta">
-            <span>状态：{{ aiAnalysis?.status ?? (isAiStreaming ? "streaming" : "未生成") }}</span>
-            <span>模型：{{ aiAnalysis?.providerHint ?? activeRuntimeModel?.displayName ?? "未生成" }}</span>
-            <span>时间：{{ aiAnalysis ? formatDateTime(aiAnalysis.generatedAt) : "未生成" }}</span>
-          </div>
-
-          <div class="stats-ai-panel__result-body">
-            {{
-              aiAnalysis
-                ? "最近一轮批次分析已经写入下方对话区，可继续追问更具体的问题。导出 PDF 时也会优先复用这轮分析结果。"
-                : isAiStreaming
-                ? "AI 已开始流式输出，本轮回答会直接写入下方对话区。"
-                : "当前还没有生成统计 AI 分析。你可以先生成一轮批次分析，或直接在下方输入问题。"
-            }}
-          </div>
-        </div>
-
-        <div class="stats-ai-panel__conversation">
-          <div class="stats-ai-panel__conversation-header">
-            <div>
-              <strong>多轮追问</strong>
-              <p class="muted-text">所有追问都会继续绑定当前统计窗口和上方对话历史，不会脱离当前批次单独回答。</p>
-            </div>
-          </div>
-
-          <ElScrollbar
-            ref="aiMessagesScrollbarRef"
-            class="stats-ai-panel__messages"
-            @scroll="handleAiMessagesScroll"
-          >
-            <div v-if="aiMessages.length > 0" class="stats-ai-panel__message-list">
-              <article
-                v-for="message in aiMessages"
-                :key="message.localId"
-                class="stats-ai-panel__message-row"
-              >
-                <div
-                  :class="[
-                    'stats-ai-panel__message',
-                    message.role === 'assistant'
-                      ? 'stats-ai-panel__message--assistant'
-                      : 'stats-ai-panel__message--user',
-                  ]"
-                >
-                  <div class="stats-ai-panel__message-meta">
-                    <strong>{{ message.role === "assistant" ? "AI 助理" : "你" }}</strong>
-                    <span>
-                      {{
-                        message.role === "assistant" &&
-                        isAiStreaming &&
-                        message.localId === streamingAssistantMessageId
-                          ? message.content
-                            ? "流式输出中"
-                            : "思考中"
-                          : formatDateTime(message.createdAt)
-                      }}
-                    </span>
-                  </div>
-
-                  <div
-                    v-if="
-                      message.role === 'assistant' &&
-                      isAiStreaming &&
-                      message.localId === streamingAssistantMessageId
-                    "
-                    class="stats-ai-panel__thinking-indicator"
-                    aria-label="AI 正在思考"
-                  >
-                    <span class="stats-ai-panel__thinking-dot" />
-                    <span class="stats-ai-panel__thinking-dot" />
-                    <span class="stats-ai-panel__thinking-dot" />
-                  </div>
-
-                  <div class="stats-ai-panel__message-content">
-                    {{ message.content || " " }}
-                  </div>
-                </div>
-              </article>
-            </div>
-
-            <ElEmpty
-              v-else
-              description="先生成一轮批次分析，或直接在下方输入问题开始追问。"
-            />
-          </ElScrollbar>
-        </div>
-
-        <div class="stats-ai-panel__question-bank">
-          <span class="muted-text">推荐追问</span>
-          <div class="stats-ai-panel__question-bank-actions">
-            <ElButton
-              v-for="question in aiSuggestedQuestions"
-              :key="question"
-              size="small"
               plain
-              round
-              @click="handleUseSuggestedQuestion(question)"
+              :disabled="activeWorkspacePageIndex <= 0"
+              @click="stepWorkspacePage(-1)"
             >
-              {{ question }}
+              上一页
             </ElButton>
-          </div>
-        </div>
-
-        <ElInput
-          v-model="aiQuestion"
-          type="textarea"
-          :rows="4"
-          resize="none"
-          :disabled="!canUseAiAnalysis"
-          placeholder="继续问当前统计窗口的问题，例如：这批次更像设备异常还是材料批次异常？为什么这样判断？"
-          @keydown.ctrl.enter.prevent="handleSubmitAiQuestion"
-        />
-
-        <div class="stats-ai-panel__submit-bar">
-          <div class="stats-ai-panel__submit-meta">
-            <span class="muted-text">按 Ctrl + Enter 发送。追问会自动带上当前统计窗口和上方对话历史。</span>
-            <span class="muted-text">
-              {{
-                !canUseAiAnalysis
-                  ? "当前账号未开通 AI 分析权限。"
-                  : activeRuntimeModel
-                  ? `当前追问模型：${activeRuntimeModel.displayName} / ${activeRuntimeModel.gatewayName}`
-                  : "未选择模型时，后端只会返回预留提示。"
-              }}
-            </span>
-          </div>
-
-          <div class="stats-ai-panel__submit-actions">
             <ElButton
               type="primary"
-              :loading="chatSending"
-              :disabled="!canUseAiAnalysis || !aiQuestion.trim() || isAiStreaming"
-              @click="handleSubmitAiQuestion"
+              plain
+              :disabled="activeWorkspacePageIndex >= STATISTICS_WORKSPACE_PAGE_OPTIONS.length - 1"
+              @click="stepWorkspacePage(1)"
             >
-              发送追问
+              下一页
             </ElButton>
           </div>
         </div>
       </section>
+
+      <div class="stats-page__workspace-stage">
+        <div
+          class="stats-workspace-page"
+          :class="{ 'stats-workspace-page--active': activeWorkspacePage === 'overview' }"
+          data-workspace-page="overview"
+        >
+          <div class="stats-page__chart-grid">
+            <section class="app-panel stats-panel">
+              <div class="stats-panel__header">
+                <div>
+                  <strong>趋势曲线</strong>
+                  <p class="muted-text">观察检测总量、不良与待确认的波动，不再只看静态表格。</p>
+                </div>
+              </div>
+
+              <div v-if="trendChart.axisTicks.length > 0" class="stats-trend">
+                <div class="stats-trend__summary">
+                  <div>
+                    <strong>
+                      {{ activeTrendSnapshot ? `${formatTrendDate(activeTrendSnapshot.date)} 的趋势快照` : "趋势快照" }}
+                    </strong>
+                    <p class="muted-text">
+                      当前高亮日期下，可以直接看到总量、不良与待确认的实际数量，而不是只盯着一条线。
+                    </p>
+                  </div>
+
+                  <div v-if="activeTrendSnapshot" class="stats-trend__summary-pills">
+                    <span
+                      v-for="item in activeTrendSnapshot.items"
+                      :key="item.label"
+                      class="stats-trend__summary-pill"
+                    >
+                      <i :style="{ backgroundColor: item.color }" />
+                      {{ item.label }} {{ item.value }}
+                    </span>
+                  </div>
+                </div>
+
+                <svg
+                  class="stats-trend__svg"
+                  :viewBox="`0 0 ${TREND_CHART_WIDTH} ${TREND_CHART_HEIGHT}`"
+                  role="img"
+                  aria-label="统计趋势曲线"
+                  @mouseleave="handleTrendMouseLeave"
+                >
+                  <defs>
+                    <linearGradient id="stats-trend-area" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stop-color="#7fe4d0" stop-opacity="0.26" />
+                      <stop offset="100%" stop-color="#7fe4d0" stop-opacity="0.02" />
+                    </linearGradient>
+                  </defs>
+
+                  <line
+                    :x1="trendChart.chartLeft"
+                    :x2="trendChart.chartLeft"
+                    :y1="TREND_CHART_PADDING.top"
+                    :y2="trendChart.chartBottom"
+                    class="stats-trend__axis"
+                  />
+                  <line
+                    :x1="trendChart.chartLeft"
+                    :x2="trendChart.chartRight"
+                    :y1="trendChart.chartBottom"
+                    :y2="trendChart.chartBottom"
+                    class="stats-trend__axis"
+                  />
+
+                  <g v-for="tick in trendChart.valueTicks" :key="`value-${tick.label}`">
+                    <line
+                      :x1="trendChart.chartLeft"
+                      :x2="trendChart.chartRight"
+                      :y1="tick.y"
+                      :y2="tick.y"
+                      class="stats-trend__grid"
+                    />
+                    <text
+                      :x="trendChart.chartLeft - 12"
+                      :y="tick.y + 4"
+                      text-anchor="end"
+                      class="stats-trend__value-label"
+                    >
+                      {{ tick.label }}
+                    </text>
+                  </g>
+
+                  <path
+                    v-if="trendChart.series[0]?.areaPath"
+                    :d="trendChart.series[0].areaPath"
+                    fill="url(#stats-trend-area)"
+                    stroke="none"
+                  />
+
+                  <line
+                    v-if="activeTrendSnapshot?.items[0]?.point"
+                    :x1="activeTrendSnapshot.items[0].point.x"
+                    :x2="activeTrendSnapshot.items[0].point.x"
+                    :y1="TREND_CHART_PADDING.top"
+                    :y2="trendChart.chartBottom"
+                    class="stats-trend__cursor-line"
+                  />
+
+                  <path
+                    v-for="series in trendChart.series"
+                    :key="series.label"
+                    :d="series.linePath"
+                    fill="none"
+                    :stroke="series.color"
+                    stroke-width="4"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+
+                  <g v-for="series in trendChart.series" :key="`points-${series.label}`">
+                    <circle
+                      v-for="point in series.points"
+                      :key="`${series.label}-${point.index}`"
+                      :cx="point.x"
+                      :cy="point.y"
+                      :r="activeTrendIndex === point.index ? 5.8 : 3.2"
+                      :fill="series.color"
+                      :stroke="activeTrendIndex === point.index ? '#0f2136' : 'rgba(15, 33, 54, 0.58)'"
+                      :stroke-width="activeTrendIndex === point.index ? 2.4 : 1.2"
+                      :opacity="activeTrendIndex === point.index ? 1 : 0.78"
+                    />
+                  </g>
+
+                  <rect
+                    v-for="zone in trendChart.interactionZones"
+                    :key="`zone-${zone.index}`"
+                    :x="zone.x"
+                    :y="TREND_CHART_PADDING.top"
+                    :width="zone.width"
+                    :height="trendChart.chartBottom - TREND_CHART_PADDING.top"
+                    fill="transparent"
+                    @mouseenter="hoveredTrendIndex = zone.index"
+                  />
+
+                  <text
+                    v-for="tick in trendChart.axisTicks"
+                    :key="`${tick.label}-${tick.index}`"
+                    :x="tick.x"
+                    :y="TREND_CHART_HEIGHT - 14"
+                    text-anchor="middle"
+                    class="stats-trend__label"
+                  >
+                    {{ tick.label }}
+                  </text>
+                </svg>
+
+                <div class="stats-trend__legend">
+                  <span
+                    v-for="series in trendChart.series"
+                    :key="series.label"
+                    class="stats-trend__legend-item"
+                  >
+                    <i :style="{ backgroundColor: series.color }" />
+                    {{ series.label }}
+                  </span>
+                </div>
+              </div>
+
+              <ElEmpty v-else description="当前窗口没有趋势数据" />
+            </section>
+
+            <section class="app-panel stats-panel">
+              <div class="stats-panel__header">
+                <div>
+                  <strong>结果与审核分布</strong>
+                  <p class="muted-text">用结构化分布快速判断当前批次是质量问题，还是审核积压在影响判断。</p>
+                </div>
+              </div>
+
+              <div class="stats-distribution-grid">
+                <article class="stats-distribution-card">
+                  <div class="stats-distribution-card__donut" :style="{ background: resultDistributionStyle }">
+                    <div class="stats-distribution-card__donut-center">
+                      <strong>{{ summary?.totalCount ?? 0 }}</strong>
+                      <span>样本总量</span>
+                    </div>
+                  </div>
+
+                  <div class="stats-distribution-card__list">
+                    <div
+                      v-for="item in resultDistribution"
+                      :key="item.result"
+                      class="stats-distribution-card__item"
+                    >
+                      <span class="stats-distribution-card__label">
+                        <i :style="{ backgroundColor: getResultColor(item.result) }" />
+                        {{ getResultLabel(item.result) }}
+                      </span>
+                      <strong>{{ item.count }}</strong>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="stats-distribution-card">
+                  <div class="stats-distribution-card__donut" :style="{ background: reviewDistributionStyle }">
+                    <div class="stats-distribution-card__donut-center">
+                      <strong>{{ summary?.reviewedCount ?? 0 }}</strong>
+                      <span>已审核</span>
+                    </div>
+                  </div>
+
+                  <div class="stats-distribution-card__list">
+                    <div
+                      v-for="item in reviewStatusDistribution"
+                      :key="item.reviewStatus"
+                      class="stats-distribution-card__item"
+                    >
+                      <span class="stats-distribution-card__label">
+                        <i :style="{ backgroundColor: getReviewStatusColor(item.reviewStatus) }" />
+                        {{ getReviewStatusLabel(item.reviewStatus) }}
+                      </span>
+                      <strong>{{ item.count }}</strong>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
+          </div>
+
+          <div class="stats-page__insight-grid">
+            <section class="app-panel stats-panel">
+              <div class="stats-panel__header">
+                <div>
+                  <strong>缺陷分布</strong>
+                  <p class="muted-text">优先识别当前批次最集中的缺陷类型，而不是逐条翻表。</p>
+                </div>
+              </div>
+
+              <div v-if="defectItems.length > 0" class="stats-bars">
+                <article
+                  v-for="item in defectItems.slice(0, 6)"
+                  :key="item.defectType"
+                  class="stats-bars__row"
+                >
+                  <div class="stats-bars__meta">
+                    <strong>{{ item.defectType }}</strong>
+                    <span>{{ item.count }}</span>
+                  </div>
+                  <div class="stats-bars__track">
+                    <div
+                      class="stats-bars__fill stats-bars__fill--defect"
+                      :style="{ width: buildRiskWidth(item.count, maxDefectCount) }"
+                    />
+                  </div>
+                </article>
+              </div>
+
+              <ElEmpty v-else description="当前窗口没有缺陷分布数据" />
+            </section>
+
+            <section class="app-panel stats-panel">
+              <div class="stats-panel__header">
+                <div>
+                  <strong>关键发现</strong>
+                  <p class="muted-text">这些结论会直接作为统计 AI 分析的结构化上下文之一。</p>
+                </div>
+              </div>
+
+              <div v-if="keyFindings.length > 0" class="stats-findings">
+                <article
+                  v-for="(item, index) in keyFindings"
+                  :key="`${index}-${item}`"
+                  class="stats-findings__item"
+                >
+                  <span class="stats-findings__badge">{{ index + 1 }}</span>
+                  <p>{{ item }}</p>
+                </article>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div
+          class="stats-workspace-page"
+          :class="{ 'stats-workspace-page--active': activeWorkspacePage === 'ranking' }"
+          data-workspace-page="ranking"
+        >
+          <div class="stats-page__ranking-grid">
+            <section class="app-panel stats-panel">
+              <div class="stats-panel__header">
+                <div>
+                  <strong>零件风险排行</strong>
+                  <p class="muted-text">按不良与待确认规模排序，帮助定位是否由特定零件批次导致。</p>
+                </div>
+              </div>
+
+              <div v-if="partRanking.length > 0" class="stats-ranking">
+                <article
+                  v-for="item in partRanking"
+                  :key="item.partId"
+                  class="stats-ranking__row"
+                >
+                  <div class="stats-ranking__meta">
+                    <div>
+                      <strong>{{ item.partName }}</strong>
+                      <p class="muted-text">{{ item.partCode }}</p>
+                    </div>
+                    <div class="stats-ranking__summary">
+                      <span>总量 {{ item.totalCount }}</span>
+                      <span>不良 {{ item.badCount }}</span>
+                      <span>待确认 {{ item.uncertainCount }}</span>
+                      <span>良率 {{ formatPercentValue(item.passRate) }}</span>
+                    </div>
+                  </div>
+                  <div class="stats-bars__track">
+                    <div
+                      class="stats-bars__fill stats-bars__fill--risk"
+                      :style="{ width: buildRiskWidth(item.badCount + item.uncertainCount, maxPartRiskCount) }"
+                    />
+                  </div>
+                </article>
+              </div>
+
+              <ElEmpty v-else description="当前窗口没有零件排行数据" />
+            </section>
+
+            <section class="app-panel stats-panel">
+              <div class="stats-panel__header">
+                <div>
+                  <strong>设备风险排行</strong>
+                  <p class="muted-text">用于判断异常更偏向产品端，还是集中在特定设备链路。</p>
+                </div>
+              </div>
+
+              <div v-if="deviceRanking.length > 0" class="stats-ranking">
+                <article
+                  v-for="item in deviceRanking"
+                  :key="item.deviceId"
+                  class="stats-ranking__row"
+                >
+                  <div class="stats-ranking__meta">
+                    <div>
+                      <strong>{{ item.deviceName }}</strong>
+                      <p class="muted-text">{{ item.deviceCode }}</p>
+                    </div>
+                    <div class="stats-ranking__summary">
+                      <span>总量 {{ item.totalCount }}</span>
+                      <span>不良 {{ item.badCount }}</span>
+                      <span>待确认 {{ item.uncertainCount }}</span>
+                      <span>良率 {{ formatPercentValue(item.passRate) }}</span>
+                    </div>
+                  </div>
+                  <div class="stats-bars__track">
+                    <div
+                      class="stats-bars__fill stats-bars__fill--device"
+                      :style="{ width: buildRiskWidth(item.badCount + item.uncertainCount, maxDeviceRiskCount) }"
+                    />
+                  </div>
+                </article>
+              </div>
+
+              <ElEmpty v-else description="当前窗口没有设备排行数据" />
+            </section>
+          </div>
+        </div>
+
+        <div
+          class="stats-workspace-page"
+          :class="{ 'stats-workspace-page--active': activeWorkspacePage === 'gallery' }"
+          data-workspace-page="gallery"
+        >
+          <StatisticsSampleGallerySummarySection
+            :gallery="sampleGallery"
+            :filters="overview?.filters ?? null"
+          />
+        </div>
+
+        <div
+          class="stats-workspace-page"
+          :class="{ 'stats-workspace-page--active': activeWorkspacePage === 'ai' }"
+          data-workspace-page="ai"
+        >
+          <section class="app-panel stats-ai-panel">
+            <div class="stats-panel__header">
+              <div>
+                <strong>AI 统计工作台</strong>
+                <p class="muted-text">
+                  AI 会直接读取当前统计窗口的摘要、趋势、缺陷分布、零件/设备排行和关键发现。你可以先生成一轮批次分析，再继续追问，也可以直接围绕当前窗口提问题。
+                </p>
+              </div>
+              <div class="stats-ai-panel__header-tags">
+                <ElTag
+                  :type="canUseAiAnalysis ? 'success' : 'warning'"
+                  effect="dark"
+                  round
+                >
+                  {{ canUseAiAnalysis ? "当前账号已开通 AI 分析" : "当前账号未开通 AI 分析" }}
+                </ElTag>
+                <ElTag
+                  v-if="activeRuntimeModel"
+                  effect="dark"
+                  round
+                  type="success"
+                >
+                  {{ activeRuntimeModel.displayName }}
+                </ElTag>
+              </div>
+            </div>
+
+            <ElAlert
+              v-if="!canUseAiAnalysis"
+              type="warning"
+              show-icon
+              :closable="false"
+              title="当前账号未开通统计 AI 分析"
+              description="你仍然可以查看图表、筛选数据和导出纯统计报表，但无法发起 AI 分析或继续追问。请联系管理员在系统设置中开启该权限。"
+            />
+
+            <div class="stats-ai-panel__controls">
+              <ElSelect
+                v-model="selectedModelId"
+                clearable
+                filterable
+                :loading="referenceLoading"
+                :disabled="!canUseAiAnalysis"
+                placeholder="选择统计分析模型"
+              >
+                <ElOption
+                  v-for="item in runtimeModels"
+                  :key="item.id"
+                  :label="`${item.displayName} / ${item.gatewayName}`"
+                  :value="item.id"
+                />
+              </ElSelect>
+
+              <ElInput
+                v-model="analysisNote"
+                type="textarea"
+                :rows="4"
+                resize="none"
+                :disabled="!canUseAiAnalysis"
+                placeholder="可补充本轮特别关注点，例如：重点分析某零件是否存在持续恶化，或判断问题更像设备侧异常还是材料批次异常。"
+              />
+
+              <div class="stats-ai-panel__actions">
+                <ElButton
+                  type="primary"
+                  :loading="aiLoading"
+                  :disabled="!canUseAiAnalysis || !hasOverview || isAiStreaming"
+                  @click="handleRunAiAnalysis"
+                >
+                  生成 AI 分析
+                </ElButton>
+                <span class="muted-text">
+                  {{
+                    !canUseAiAnalysis
+                      ? "当前账号未开通 AI 分析权限。"
+                      : activeRuntimeModel
+                      ? `当前模型：${activeRuntimeModel.displayName} / ${activeRuntimeModel.gatewayName}`
+                      : "未选择模型时，后端只会返回预留提示。"
+                  }}
+                </span>
+              </div>
+            </div>
+
+            <ElAlert
+              v-if="aiError"
+              type="error"
+              show-icon
+              :closable="false"
+              title="统计 AI 工作台请求失败"
+              :description="aiError"
+            />
+
+            <div class="stats-ai-panel__result">
+              <div class="stats-ai-panel__result-meta">
+                <span>状态：{{ aiAnalysis?.status ?? (isAiStreaming ? "streaming" : "未生成") }}</span>
+                <span>模型：{{ aiAnalysis?.providerHint ?? activeRuntimeModel?.displayName ?? "未生成" }}</span>
+                <span>时间：{{ aiAnalysis ? formatDateTime(aiAnalysis.generatedAt) : "未生成" }}</span>
+              </div>
+
+              <div class="stats-ai-panel__result-body">
+                {{
+                  aiAnalysis
+                    ? "最近一轮批次分析已经在上方正文区生成。下方多轮追问区只显示你后续真正发起的追问记录，导出 PDF 时也会优先复用这轮分析结果。"
+                    : isAiStreaming
+                    ? "AI 已开始流式输出，本轮回答会先写入上方分析正文区。"
+                    : "当前还没有生成统计 AI 分析。你可以先生成一轮批次分析，或直接在下方输入问题。"
+                }}
+              </div>
+            </div>
+
+            <div
+              v-if="shouldShowAiAnalysisBlock"
+              class="stats-ai-panel__analysis-block"
+            >
+              <div class="stats-ai-panel__analysis-header">
+                <strong>本轮 AI 批次分析</strong>
+                <span class="muted-text">这里直接显示当前批次分析正文，导出和浏览器打印时也会保留。</span>
+              </div>
+              <div
+                ref="aiAnalysisBodyRef"
+                :class="[
+                  'stats-ai-panel__analysis-body',
+                  { 'stats-ai-panel__analysis-body--pending': !aiAnalysis?.answer?.trim() },
+                ]"
+                @scroll="handleAiAnalysisScroll"
+              >
+                {{ aiAnalysisDisplayText }}
+              </div>
+            </div>
+
+            <div
+              class="stats-ai-panel__conversation"
+              :class="{ 'stats-ai-panel__conversation--empty': visibleAiMessages.length === 0 }"
+            >
+              <div class="stats-ai-panel__conversation-header">
+                <div>
+                  <strong>多轮追问</strong>
+                  <p class="muted-text">所有追问都会继续绑定当前统计窗口和上方对话历史，不会脱离当前批次单独回答。</p>
+                </div>
+              </div>
+
+              <ElScrollbar
+                v-if="visibleAiMessages.length > 0"
+                ref="aiMessagesScrollbarRef"
+                class="stats-ai-panel__messages"
+                @scroll="handleAiMessagesScroll"
+              >
+                <div class="stats-ai-panel__message-list">
+                  <article
+                    v-for="message in visibleAiMessages"
+                    :key="message.localId"
+                    class="stats-ai-panel__message-row"
+                  >
+                    <div
+                      :class="[
+                        'stats-ai-panel__message',
+                        message.role === 'assistant'
+                          ? 'stats-ai-panel__message--assistant'
+                          : 'stats-ai-panel__message--user',
+                      ]"
+                    >
+                      <div class="stats-ai-panel__message-meta">
+                        <strong>{{ message.role === "assistant" ? "AI 助理" : "你" }}</strong>
+                        <span>
+                          {{
+                            message.role === "assistant" &&
+                            isAiStreaming &&
+                            message.localId === streamingAssistantMessageId
+                              ? message.content
+                                ? "流式输出中"
+                                : "思考中"
+                              : formatDateTime(message.createdAt)
+                          }}
+                        </span>
+                      </div>
+
+                      <div
+                        v-if="
+                          message.role === 'assistant' &&
+                          isAiStreaming &&
+                          message.localId === streamingAssistantMessageId
+                        "
+                        class="stats-ai-panel__thinking-indicator"
+                        aria-label="AI 正在思考"
+                      >
+                        <span class="stats-ai-panel__thinking-dot" />
+                        <span class="stats-ai-panel__thinking-dot" />
+                        <span class="stats-ai-panel__thinking-dot" />
+                      </div>
+
+                      <div class="stats-ai-panel__message-content">
+                        {{ message.content || " " }}
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </ElScrollbar>
+
+              <div v-else class="stats-ai-panel__empty-state">
+                <ElEmpty
+                  :description="aiAnalysis ? '当前还没有追问记录。首轮分析已经显示在上方，继续输入问题即可开始追问。' : '先生成一轮批次分析，或直接在下方输入问题开始追问。'"
+                />
+              </div>
+            </div>
+
+            <div class="stats-ai-panel__question-bank">
+              <span class="muted-text">推荐追问</span>
+              <div class="stats-ai-panel__question-bank-actions">
+                <ElButton
+                  v-for="question in aiSuggestedQuestions"
+                  :key="question"
+                  size="small"
+                  plain
+                  round
+                  @click="handleUseSuggestedQuestion(question)"
+                >
+                  {{ question }}
+                </ElButton>
+              </div>
+            </div>
+
+            <ElInput
+              v-model="aiQuestion"
+              type="textarea"
+              :rows="4"
+              resize="none"
+              :disabled="!canUseAiAnalysis"
+              placeholder="继续问当前统计窗口的问题，例如：这批次更像设备异常还是材料批次异常？为什么这样判断？"
+              @keydown.ctrl.enter.prevent="handleSubmitAiQuestion"
+            />
+
+            <div class="stats-ai-panel__submit-bar">
+              <div class="stats-ai-panel__submit-meta">
+                <span class="muted-text">按 Ctrl + Enter 发送。追问会自动带上当前统计窗口和上方对话历史。</span>
+                <span class="muted-text">
+                  {{
+                    !canUseAiAnalysis
+                      ? "当前账号未开通 AI 分析权限。"
+                      : activeRuntimeModel
+                      ? `当前追问模型：${activeRuntimeModel.displayName} / ${activeRuntimeModel.gatewayName}`
+                      : "未选择模型时，后端只会返回预留提示。"
+                  }}
+                </span>
+              </div>
+
+              <div class="stats-ai-panel__submit-actions">
+                <ElButton
+                  type="primary"
+                  :loading="chatSending"
+                  :disabled="!canUseAiAnalysis || !aiQuestion.trim() || isAiStreaming"
+                  @click="handleSubmitAiQuestion"
+                >
+                  发送追问
+                </ElButton>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
     </div>
 
     <section v-else-if="loading" class="app-panel stats-panel">
@@ -1285,6 +1566,7 @@ function handleTrendMouseLeave(): void {
 
 <style scoped>
 .stats-page {
+  --stats-workspace-stage-height: clamp(620px, calc(100vh - 320px), 920px);
   gap: 22px;
 }
 
@@ -1300,7 +1582,10 @@ function handleTrendMouseLeave(): void {
 .stats-page__hero-actions,
 .stats-ranking__meta,
 .stats-ranking__summary,
-.stats-distribution-card__item {
+.stats-distribution-card__item,
+.stats-workspace-pager__header,
+.stats-workspace-pager__footer,
+.stats-ai-panel__analysis-header {
   display: flex;
   gap: 14px;
 }
@@ -1312,7 +1597,10 @@ function handleTrendMouseLeave(): void {
 .stats-ai-panel__conversation-header,
 .stats-ai-panel__submit-bar,
 .stats-ranking__meta,
-.stats-distribution-card__item {
+.stats-distribution-card__item,
+.stats-workspace-pager__header,
+.stats-workspace-pager__footer,
+.stats-ai-panel__analysis-header {
   align-items: flex-start;
   justify-content: space-between;
 }
@@ -1329,7 +1617,8 @@ function handleTrendMouseLeave(): void {
 .stats-distribution-grid,
 .stats-page__chart-grid,
 .stats-page__insight-grid,
-.stats-page__ranking-grid {
+.stats-page__ranking-grid,
+.stats-workspace-pager__grid {
   display: grid;
   gap: 18px;
 }
@@ -1347,6 +1636,10 @@ function handleTrendMouseLeave(): void {
 .stats-panel,
 .stats-ai-panel {
   padding: 24px;
+}
+
+.stats-ai-panel {
+  min-height: 100%;
 }
 
 .stats-filter-card,
@@ -1389,6 +1682,97 @@ function handleTrendMouseLeave(): void {
 .stats-page__content {
   display: grid;
   gap: 20px;
+  align-content: start;
+}
+
+.stats-workspace-pager {
+  padding: 22px;
+  display: grid;
+  gap: 16px;
+}
+
+.stats-workspace-pager__header p,
+.stats-workspace-pager__footer p {
+  margin: 8px 0 0;
+  line-height: 1.7;
+}
+
+.stats-workspace-pager__grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.stats-workspace-pager__item {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--app-text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    transform 0.2s ease,
+    background 0.2s ease;
+}
+
+.stats-workspace-pager__item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(127, 228, 208, 0.28);
+}
+
+.stats-workspace-pager__item--active {
+  border-color: rgba(127, 228, 208, 0.46);
+  background:
+    radial-gradient(circle at top right, rgba(127, 228, 208, 0.12), transparent 38%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.stats-workspace-pager__item-index {
+  color: rgba(127, 228, 208, 0.86);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.stats-workspace-pager__item strong {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.stats-workspace-pager__item span {
+  color: var(--app-text-secondary);
+  line-height: 1.7;
+  font-size: 13px;
+}
+
+.stats-workspace-pager__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.stats-page__workspace-stage {
+  display: grid;
+  gap: 20px;
+  min-height: var(--stats-workspace-stage-height);
+}
+
+.stats-workspace-page {
+  display: none;
+  gap: 20px;
+  align-content: start;
+  min-height: var(--stats-workspace-stage-height);
+  max-height: var(--stats-workspace-stage-height);
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.stats-workspace-page--active {
+  display: grid;
 }
 
 .stats-page__chart-grid {
@@ -1684,12 +2068,48 @@ function handleTrendMouseLeave(): void {
   color: var(--app-text);
 }
 
+.stats-ai-panel__analysis-block {
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  margin-bottom: 4px;
+  border-radius: 18px;
+  border: 1px solid rgba(127, 228, 208, 0.16);
+  background:
+    radial-gradient(circle at top right, rgba(127, 228, 208, 0.12), transparent 34%),
+    rgba(255, 255, 255, 0.025);
+}
+
+.stats-ai-panel__analysis-body {
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--app-text);
+  max-height: min(28vh, 280px);
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.stats-ai-panel__analysis-body--pending {
+  display: grid;
+  align-content: center;
+  min-height: 88px;
+  max-height: 88px;
+  overflow: hidden;
+  padding-right: 0;
+  color: var(--app-text-secondary);
+}
+
 .stats-ai-panel__conversation {
   padding: 22px;
   border-radius: 18px;
   border: 1px solid rgba(149, 184, 223, 0.1);
   background: rgba(255, 255, 255, 0.02);
   grid-template-rows: auto minmax(0, 1fr);
+}
+
+.stats-ai-panel__conversation--empty {
+  grid-template-rows: auto auto;
 }
 
 .stats-ai-panel__conversation-header p {
@@ -1699,9 +2119,16 @@ function handleTrendMouseLeave(): void {
 
 .stats-ai-panel__messages {
   min-height: 240px;
-  max-height: min(58vh, 720px);
+  max-height: min(34vh, 360px);
   height: auto;
   padding-right: 6px;
+}
+
+.stats-ai-panel__empty-state {
+  min-height: 160px;
+  display: grid;
+  place-items: center;
+  padding: 8px 0 4px;
 }
 
 .stats-ai-panel__message-list {
@@ -1801,7 +2228,8 @@ function handleTrendMouseLeave(): void {
   .stats-page__insight-grid,
   .stats-page__ranking-grid,
   .stats-ai-panel__controls,
-  .stats-filter-card__controls {
+  .stats-filter-card__controls,
+  .stats-workspace-pager__grid {
     grid-template-columns: 1fr;
   }
 }
@@ -1814,6 +2242,10 @@ function handleTrendMouseLeave(): void {
 }
 
 @media (max-width: 900px) {
+  .stats-page {
+    --stats-workspace-stage-height: auto;
+  }
+
   .stats-page__hero {
     grid-template-columns: 1fr;
   }
@@ -1827,7 +2259,10 @@ function handleTrendMouseLeave(): void {
   .stats-ai-panel__conversation-header,
   .stats-ai-panel__submit-bar,
   .stats-ranking__meta,
-  .stats-distribution-card__item {
+  .stats-distribution-card__item,
+  .stats-workspace-pager__header,
+  .stats-workspace-pager__footer,
+  .stats-ai-panel__analysis-header {
     flex-direction: column;
     align-items: stretch;
   }
@@ -1848,6 +2283,78 @@ function handleTrendMouseLeave(): void {
 
   .stats-ai-panel__message {
     max-width: 100%;
+  }
+
+  .stats-page__workspace-stage,
+  .stats-workspace-page {
+    min-height: auto;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .stats-ai-panel__analysis-body,
+  .stats-ai-panel__messages {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+}
+
+@media print {
+  .stats-page {
+    gap: 12px;
+  }
+
+  .stats-page__hero-actions,
+  .stats-filter-card__quick-range,
+  .stats-filter-card__controls,
+  .stats-workspace-pager,
+  .stats-ai-panel__controls,
+  .stats-ai-panel__question-bank,
+  .stats-ai-panel__submit-bar {
+    display: none !important;
+  }
+
+  .stats-page__metrics,
+  .stats-page__chart-grid,
+  .stats-page__insight-grid,
+  .stats-page__ranking-grid,
+  .stats-distribution-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .stats-workspace-page {
+    display: grid !important;
+    gap: 16px;
+    min-height: auto;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+    break-before: page;
+    page-break-before: always;
+  }
+
+  .stats-workspace-page:first-child {
+    break-before: auto;
+    page-break-before: auto;
+  }
+
+  .stats-ai-panel__messages {
+    min-height: auto;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .stats-ai-panel__message {
+    max-width: 100%;
+  }
+
+  .stats-ai-panel__analysis-body {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
 }
 </style>

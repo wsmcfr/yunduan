@@ -372,6 +372,106 @@ messages.value = messages.value.map((item) =>
 
 ---
 
+## Scenario: Statistics AI Workspace Message Ownership
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `useStatisticsOverview`, the statistics AI analysis panel in `StatisticsPage.vue`, follow-up question rendering, or statistics PDF export snapshot building
+- Affected layers: statistics composable state -> statistics page analysis body / follow-up conversation panels -> export payload mapping
+
+### 2. Signatures
+
+```ts
+const aiAnalysis = ref<StatisticsAIAnalysisResponse | null>(null);
+const aiMessages = ref<AIChatMessage[]>([]);
+const visibleAiMessages = computed<AIChatMessage[]>(() => {
+  const firstUserMessageIndex = aiMessages.value.findIndex((item) => item.role === "user");
+  if (firstUserMessageIndex < 0) {
+    return [];
+  }
+
+  return aiMessages.value.slice(firstUserMessageIndex);
+});
+```
+
+```ts
+async function runAiAnalysis(): Promise<void>;
+async function submitAiQuestion(): Promise<void>;
+function resolveExportConversationMessages(): AIChatMessage[];
+function buildExportConversationSnapshot(): StatisticsExportConversationMessageDto[];
+```
+
+### 3. Contracts
+
+| Concern | Owner | Contract |
+|---|---|---|
+| First-round batch analysis snapshot | `aiAnalysis` | Owns the standalone statistics analysis answer, provider hint, status, and generated time shown in the "本轮 AI 批次分析" block |
+| Full statistics AI timeline | `aiMessages` | Keeps the full message history for the current statistics window, including the assistant placeholder created by `runAiAnalysis()` before any follow-up question exists |
+| Rendered follow-up conversation | `visibleAiMessages` | Starts from the first user message only, so the standalone batch analysis text is not rendered again inside the follow-up area |
+| Follow-up streaming placeholder | `visibleAiMessages` + `aiMessages` | After the first follow-up question exists, empty assistant placeholder rows must stay visible so the UI can show "思考中" / streaming states |
+| Export conversation payload | `resolveExportConversationMessages()` / `buildExportConversationSnapshot()` | Exported follow-up history must start from the first user message; the standalone batch analysis answer is exported separately via cached AI analysis fields |
+
+Additional rules:
+
+- `runAiAnalysis()` may seed `aiMessages` with a single assistant placeholder before any user follow-up exists
+- statistics follow-up UI must bind to `visibleAiMessages`, not directly to `aiMessages`
+- `aiAnalysis.answer` must not be copied into `visibleAiMessages`, otherwise the first analysis body will appear twice on the page
+- statistics PDF export may include both `cached_ai_answer` and `cached_ai_conversation`, but they serve different purposes and must not be merged into one display list
+
+### 4. Validation & Error Matrix
+
+| Condition | Problem | Expected behavior |
+|---|---|---|
+| `runAiAnalysis()` creates an assistant placeholder before any user message | The follow-up panel shows the first analysis answer even though the user has not asked a follow-up yet | `visibleAiMessages` returns `[]`, and the page shows the standalone analysis block plus an empty-state follow-up panel |
+| Follow-up panel renders `aiMessages` directly | First analysis text duplicates into the conversation area and the layout looks broken | Follow-up panel renders `visibleAiMessages` only |
+| Export uses the full `aiMessages` array | PDF duplicates the first analysis body inside the follow-up transcript | Export conversation starts from the first user message, while cached analysis answer is passed separately |
+| First follow-up is sent and the assistant placeholder is still empty | User cannot see that the follow-up request is running | Keep the assistant placeholder in `visibleAiMessages` so the UI can show the streaming state |
+| Only follow-up messages exist as stable AI content during export | PDF loses all AI content because there is no final `aiAnalysis.answer` snapshot | Fallback export logic may promote the first assistant follow-up reply into the cached AI snapshot, while conversation payload still follows the first-user-message rule |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | `StatisticsPage.vue` shows `aiAnalysis.answer` in the analysis body and renders only `visibleAiMessages` inside the follow-up transcript |
+| Base | The user generates a batch analysis but never asks a follow-up question, so the follow-up panel stays in a compact empty state |
+| Bad | The first assistant analysis reply is inserted directly into the follow-up transcript, causing the page to show AI analysis text before any user follow-up exists |
+
+### 6. Tests Required
+
+- composable test asserting `visibleAiMessages` is empty after `runAiAnalysis()` seeds only the assistant placeholder
+- composable test asserting `visibleAiMessages` keeps the empty assistant placeholder after the first follow-up user message is added
+- composable/export test asserting `buildExportConversationSnapshot()` excludes assistant-only prelude messages and starts at the first user question
+- page test asserting the statistics analysis body and the follow-up transcript render independently
+
+Assertion points:
+
+- first-round analysis and follow-up conversation have separate ownership
+- the UI keeps follow-up streaming affordances without leaking the main analysis body into the transcript
+- PDF/export payload uses separate fields for summary analysis and follow-up history
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+const conversationMessages = computed(() => aiMessages.value);
+```
+
+#### Correct
+
+```ts
+const visibleAiMessages = computed<AIChatMessage[]>(() => {
+  const firstUserMessageIndex = aiMessages.value.findIndex((item) => item.role === "user");
+  if (firstUserMessageIndex < 0) {
+    return [];
+  }
+
+  return aiMessages.value.slice(firstUserMessageIndex);
+});
+```
+
+---
+
 ## Scenario: Settings Password Request Ownership
 
 ### 1. Scope / Trigger

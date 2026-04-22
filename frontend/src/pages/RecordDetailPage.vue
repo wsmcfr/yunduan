@@ -325,6 +325,33 @@ watch(
               <code>{{ file.objectKey }}</code>
             </article>
           </div>
+
+          <div class="detail-preview__print-list">
+            <article
+              v-for="file in previewFiles"
+              :key="`print-${file.id}`"
+              class="detail-preview__print-card"
+            >
+              <div class="detail-preview__meta-head">
+                <strong>{{ file.label }}</strong>
+                <ElTag effect="dark" round>{{ formatDateTime(file.uploadedAt) }}</ElTag>
+              </div>
+
+              <img
+                v-if="file.previewUrl"
+                :src="file.previewUrl"
+                :alt="file.label"
+                class="detail-preview__print-image"
+              >
+
+              <div v-else class="detail-preview__fallback">
+                <strong>{{ file.label }}</strong>
+                <p>当前对象没有可直接访问的预览地址。</p>
+              </div>
+
+              <code>{{ file.objectKey }}</code>
+            </article>
+          </div>
         </div>
       </section>
 
@@ -515,6 +542,7 @@ watch(
 
 .detail-preview,
 .detail-preview__meta-list,
+.detail-preview__print-list,
 .detail-context,
 .detail-review-workspace,
 .detail-review-workspace__assistant,
@@ -564,6 +592,7 @@ watch(
 }
 
 .detail-preview__meta-card,
+.detail-preview__print-card,
 .detail-context__item {
   display: grid;
   gap: 10px;
@@ -607,6 +636,19 @@ watch(
   line-height: 1.8;
 }
 
+.detail-preview__print-list {
+  display: none;
+}
+
+.detail-preview__print-image {
+  width: 100%;
+  max-height: none;
+  object-fit: contain;
+  border-radius: 14px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  background: rgba(255, 255, 255, 0.02);
+}
+
 @media (max-width: 1280px) {
   .detail-page,
   .detail-review-workspace {
@@ -625,6 +667,32 @@ watch(
   .detail-context,
   .detail-preview__meta-list {
     grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  .detail-page,
+  .detail-review-workspace,
+  .detail-context,
+  .detail-preview__meta-list,
+  .detail-preview__print-list {
+    grid-template-columns: 1fr !important;
+  }
+
+  .detail-review-workspace__assistant-actions,
+  .detail-section :deep(.el-carousel),
+  .detail-preview__meta-list {
+    display: none !important;
+  }
+
+  .detail-preview__print-list {
+    display: grid !important;
+  }
+
+  .detail-section__header,
+  .detail-preview__meta-head {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 </style>

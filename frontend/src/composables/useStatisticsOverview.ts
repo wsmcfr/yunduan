@@ -45,6 +45,8 @@ import {
 import { exportStatisticsReportPng } from "@/utils/statisticsReport";
 
 const DEFAULT_DAYS = 14;
+const VISUAL_EXPORT_SAMPLE_IMAGE_LIMIT = 4;
+const LIGHTWEIGHT_EXPORT_SAMPLE_IMAGE_LIMIT = 2;
 
 /**
  * 统计页组合式逻辑。
@@ -249,6 +251,23 @@ export function useStatisticsOverview() {
   }
 
   /**
+   * 生成页面上真正要展示的“多轮追问”消息。
+   * 首轮批次分析会单独显示在分析正文区，因此这里从第一条用户提问开始展示，
+   * 避免还没追问时，追问区就先出现一大段首轮分析正文。
+   *
+   * 与导出快照不同，这里保留空内容的助手占位消息，
+   * 这样流式追问刚开始时仍然可以显示“思考中”的状态。
+   */
+  const visibleAiMessages = computed<AIChatMessage[]>(() => {
+    const firstUserMessageIndex = aiMessages.value.findIndex((item) => item.role === "user");
+    if (firstUserMessageIndex < 0) {
+      return [];
+    }
+
+    return aiMessages.value.slice(firstUserMessageIndex);
+  });
+
+  /**
    * 把前端会话消息转换成后端 PDF 导出接口需要的 DTO 结构。
    * 导出链路只保留角色、正文和时间戳，避免把前端局部状态字段一并带到后端。
    */
@@ -258,6 +277,32 @@ export function useStatisticsOverview() {
       content: item.content,
       created_at: item.createdAt,
     }));
+  }
+
+  /**
+   * 兜底提取一条可复用的 AI 分析正文。
+   * 如果用户没有先点“生成 AI 分析”，而是直接通过追问得到了一轮助手回答，
+   * 导出 PDF 时也不应该出现“完全没有 AI 内容”的空白状态。
+   */
+  function resolveFallbackExportAiAnswer(): {
+    answer: string | null;
+    generatedAt: string | null;
+  } {
+    const firstAssistantMessage = resolveExportConversationMessages().find((item) =>
+      item.role === "assistant" && item.content.trim().length > 0,
+    );
+
+    if (!firstAssistantMessage) {
+      return {
+        answer: null,
+        generatedAt: null,
+      };
+    }
+
+    return {
+      answer: firstAssistantMessage.content,
+      generatedAt: firstAssistantMessage.createdAt,
+    };
   }
 
   /**
@@ -622,10 +667,29 @@ export function useStatisticsOverview() {
     const [startDate, endDate] = dateRange.value.length === 2 ? dateRange.value : [null, null];
     const hasStableAiAnalysis = !aiLoading.value && Boolean(aiAnalysis.value?.answer.trim());
     const cachedAiConversation = buildExportConversationSnapshot();
-    const includeSampleImages = (
-      exportMode === "visual"
-      && overview.value.sampleGallery.totalImageCount > 0
-    );
+    const fallbackAiSnapshot = resolveFallbackExportAiAnswer();
+    /**
+     * 导出 PDF 时，优先复用页面中已经存在的稳定分析结果；
+     * 如果当前只有追问消息，也至少把第一条助手回复提升为导出摘要，避免 PDF 里完全看不到 AI 内容。
+     */
+    const cachedAiAnswer = hasStableAiAnalysis
+      ? aiAnalysis.value?.answer ?? null
+      : fallbackAiSnapshot.answer;
+    const cachedAiGeneratedAt = hasStableAiAnalysis
+      ? aiAnalysis.value?.generatedAt ?? null
+      : fallbackAiSnapshot.generatedAt;
+    const shouldIncludeAiSnapshot = canUseAiAnalysis.value
+      && Boolean(cachedAiAnswer || cachedAiConversation.length > 0);
+    /**
+     * 两种 PDF 都要尽量带出统计页里的代表样本图。
+     * 视觉版保留更多图片，轻量版则压缩数量，以换取更稳定的服务端导出耗时。
+     */
+    const includeSampleImages = overview.value.sampleGallery.totalImageCount > 0;
+    const sampleImageLimit = includeSampleImages
+      ? (exportMode === "visual"
+          ? VISUAL_EXPORT_SAMPLE_IMAGE_LIMIT
+          : LIGHTWEIGHT_EXPORT_SAMPLE_IMAGE_LIMIT)
+      : 0;
 
     void downloadStatisticsPdf({
       export_mode: exportMode,
@@ -641,17 +705,15 @@ export function useStatisticsOverview() {
        * PDF 导出优先复用页面上已经生成好的 AI 分析结果，
        * 避免导出动作再次发起一轮新的 AI 计算，把服务器 CPU 和等待时间一起拉高。
        */
-      include_ai_analysis: canUseAiAnalysis.value && hasStableAiAnalysis,
-      cached_ai_answer: hasStableAiAnalysis ? aiAnalysis.value?.answer ?? null : null,
-      cached_ai_provider_hint: hasStableAiAnalysis ? aiAnalysis.value?.providerHint ?? null : null,
-      cached_ai_generated_at: hasStableAiAnalysis ? aiAnalysis.value?.generatedAt ?? null : null,
+      include_ai_analysis: shouldIncludeAiSnapshot,
+      cached_ai_answer: cachedAiAnswer,
+      cached_ai_provider_hint: hasStableAiAnalysis
+        ? aiAnalysis.value?.providerHint ?? null
+        : activeRuntimeModel.value?.displayName ?? null,
+      cached_ai_generated_at: cachedAiGeneratedAt,
       cached_ai_conversation: cachedAiConversation,
-      /**
-       * 轻量报表版不嵌入 COS 样本图片，避免再次触发图片抓取与版面渲染开销。
-       * 视觉版仍保留少量代表图片，满足汇报展示场景。
-       */
       include_sample_images: includeSampleImages,
-      sample_image_limit: includeSampleImages ? 2 : 0,
+      sample_image_limit: sampleImageLimit,
     })
       .catch((caughtError) => {
         const message = caughtError instanceof Error ? caughtError.message : "服务端 PDF 导出失败";
@@ -701,6 +763,7 @@ export function useStatisticsOverview() {
     aiAnalysis,
     aiQuestion,
     aiMessages,
+    visibleAiMessages,
     aiSuggestedQuestions,
     error,
     aiError,

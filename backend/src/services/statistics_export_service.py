@@ -362,6 +362,51 @@ class StatisticsExportService:
             "</div>"
         )
 
+    def _build_sample_gallery_summary_html(self, *, overview: StatisticsOverviewResponse) -> str:
+        """生成样本图库概况区块 HTML。
+
+        统计页除了“代表样本图片”之外，还有一层更高阶的图库摘要与分类入口。
+        视觉版 PDF 也需要把这层信息带上，避免导出后只看到零散图片，却看不到
+        当前窗口里到底覆盖了多少记录、多少图片、哪些零件分类最集中。
+        """
+
+        gallery = overview.sample_gallery
+        summary_badges = "".join(
+            [
+                f"<span class='badge badge--gallery'>记录 {gallery.total_record_count}</span>",
+                f"<span class='badge badge--gallery'>图片 {gallery.total_image_count}</span>",
+                f"<span class='badge badge--gallery'>零件分组 {gallery.total_part_count}</span>",
+                (
+                    f"<span class='badge badge--gallery'>最近上传 {escape(self._format_datetime(gallery.latest_uploaded_at))}</span>"
+                    if gallery.latest_uploaded_at is not None
+                    else "<span class='badge badge--gallery'>最近上传 未记录</span>"
+                ),
+            ]
+        )
+        group_cards = "".join(
+            [
+                f"""
+                <article class="gallery-group-card">
+                  <strong>{escape(group.part_name)} / {escape(group.part_code)}</strong>
+                  <p>{escape(group.part_category or '未分类')}</p>
+                  <div class="gallery-group-card__meta">
+                    <span>记录 {group.record_count}</span>
+                    <span>图片 {group.image_count}</span>
+                    <span>最近上传 {escape(self._format_datetime(group.latest_uploaded_at))}</span>
+                  </div>
+                </article>
+                """
+                for group in gallery.groups[:6]
+            ]
+        ) or "<div class='empty-card'>当前窗口没有可展示的图库分类摘要。</div>"
+
+        return (
+            "<div class='gallery-summary'>"
+            f"<div class='badge-row'>{summary_badges}</div>"
+            f"<div class='gallery-group-grid'>{group_cards}</div>"
+            "</div>"
+        )
+
     def _build_ranking_rows(
         self,
         *,
@@ -524,6 +569,9 @@ class StatisticsExportService:
         ai_conversation_html = self._build_ai_conversation_html(
             ai_conversation=ai_conversation,
         )
+        sample_gallery_summary_html = self._build_sample_gallery_summary_html(
+            overview=overview,
+        )
 
         return f"""<!doctype html>
 <html lang="zh-CN">
@@ -630,6 +678,9 @@ class StatisticsExportService:
       .badge--review {{
         --badge-color: #6aa7ff;
       }}
+      .badge--gallery {{
+        background: #f4f8fb;
+      }}
       .report-trend-svg,
       .report-bar-svg {{
         width: 100%;
@@ -729,6 +780,31 @@ class StatisticsExportService:
         border: 1px solid #dbe5f0;
         border-radius: 14px;
         padding: 12px;
+      }}
+      .gallery-summary,
+      .gallery-group-grid {{
+        display: grid;
+        gap: 12px;
+      }}
+      .gallery-group-grid {{
+        grid-template-columns: repeat(2, 1fr);
+      }}
+      .gallery-group-card {{
+        border: 1px solid #dbe5f0;
+        border-radius: 14px;
+        padding: 12px;
+        background: #fbfdff;
+      }}
+      .gallery-group-card p {{
+        margin: 6px 0 10px;
+        color: #6f8298;
+      }}
+      .gallery-group-card__meta {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        color: #6f8298;
+        font-size: 12px;
       }}
       .sample-card__header {{
         display: flex;
@@ -839,6 +915,12 @@ class StatisticsExportService:
       </section>
 
       <section class="panel">
+        <h3>样本图库概况</h3>
+        <p class="muted">这里保留统计页图库摘要和分类分组信息，便于导出后继续理解这批次样本覆盖范围。</p>
+        {sample_gallery_summary_html}
+      </section>
+
+      <section class="panel">
         <h3>COS 样本图像</h3>
         <p class="muted">本节由服务端直接通过 COS 连接抽样读取代表图片并嵌入 PDF，优先使用缩略图以控制导出耗时和 CPU 占用。</p>
         <div class="sample-grid">{sample_images_html}</div>
@@ -901,15 +983,6 @@ class StatisticsExportService:
         )
         ai_analysis = self._build_ai_analysis(company_id=company_id, payload=payload)
         ai_conversation = self._build_cached_ai_conversation(payload=payload)
-
-        if payload.export_mode == "lightweight":
-            # 轻量版走直接绘制链路，不再继续抓 COS 样本图，也不依赖 WeasyPrint。
-            return StatisticsLightweightPdfRenderer().build_pdf(
-                overview=overview,
-                ai_analysis=ai_analysis,
-                ai_conversation=ai_conversation,
-            )
-
         sample_images = (
             self._load_sample_images(
                 company_id=company_id,
@@ -919,6 +992,15 @@ class StatisticsExportService:
             if payload.include_sample_images and payload.sample_image_limit > 0
             else []
         )
+
+        if payload.export_mode == "lightweight":
+            # 轻量版走直接绘制链路，但同样要保留代表样本图，只是数量通常更少。
+            return StatisticsLightweightPdfRenderer().build_pdf(
+                overview=overview,
+                ai_analysis=ai_analysis,
+                ai_conversation=ai_conversation,
+                sample_images=sample_images,
+            )
         html_text = self._build_html(
             overview=overview,
             ai_analysis=ai_analysis,

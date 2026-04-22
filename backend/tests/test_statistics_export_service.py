@@ -67,6 +67,7 @@ class FakePdfCanvas:
         self.page_compression = pageCompression
         self.show_page_calls = 0
         self.drawn_strings: list[str] = []
+        self.drawn_images: list[dict[str, object]] = []
 
     def setTitle(self, title: str) -> None:  # noqa: N802
         """兼容 reportlab 的标题接口。"""
@@ -134,6 +135,28 @@ class FakePdfCanvas:
         """把文本对象中的文本也记到画布日志里。"""
 
         self.drawn_strings.extend(text_object.lines)
+
+    def drawImage(  # noqa: N802
+        self,
+        image,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        preserveAspectRatio: bool = False,  # noqa: N803
+        anchor: str | None = None,
+    ) -> None:
+        """记录图片绘制调用。"""
+
+        self.drawn_images.append({
+            "image": image,
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "preserveAspectRatio": preserveAspectRatio,
+            "anchor": anchor,
+        })
 
     def showPage(self) -> None:  # noqa: N802
         """记录翻页次数。"""
@@ -275,11 +298,33 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
             "colors": SimpleNamespace(HexColor=lambda value: value),
             "A4": (595.27, 841.89),
             "mm": 1,
+            "ImageReader": lambda payload: payload,
             "pdfmetrics": fake_pdfmetrics,
             "UnicodeCIDFont": Mock(),
             "canvas": SimpleNamespace(Canvas=create_canvas),
         }
         return modules, holder
+
+    def build_sample_image_entries(self, count: int = 2) -> list[dict[str, str]]:
+        """构造轻量 PDF 样本图片区测试数据。"""
+
+        transparent_png_base64 = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgQmJsteAAAAASUVORK5CYII="
+        )
+        return [
+            {
+                "record_no": f"REC-20260420-000{index + 1}",
+                "title": f"冲压垫片 / MP157 主检设备 {index + 1}",
+                "result_label": "不良" if index % 2 == 0 else "待确认",
+                "result_color": "#E76161" if index % 2 == 0 else "#F1B54B",
+                "defect_text": "用于验证轻量版 PDF 的代表样本图分页。",
+                "captured_at": "2026-04-20 12:00:00 UTC",
+                "image_src": f"data:image/png;base64,{transparent_png_base64}",
+                "image_status": "loaded",
+                "image_message": "",
+            }
+            for index in range(count)
+        ]
 
     def build_record_with_files(self) -> DetectionRecord:
         """构造带多种图片类型的检测记录，验证导出时的选图优先级。"""
@@ -426,14 +471,14 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
         self,
         lightweight_renderer_cls: Mock,
     ) -> None:
-        """验证轻量版导出会切换到直接绘制链路，而不是继续走视觉版渲染。"""
+        """验证轻量版导出会切换到直接绘制链路。"""
 
         service = self.build_service()
         fake_overview = Mock(name="overview")
         fake_ai_analysis = Mock(name="ai_analysis")
         service.statistics_service.get_overview = Mock(return_value=fake_overview)  # type: ignore[method-assign]
         service._build_ai_analysis = Mock(return_value=fake_ai_analysis)  # type: ignore[method-assign]
-        service._load_sample_images = Mock(side_effect=AssertionError("轻量版不应继续抓取样本图"))  # type: ignore[method-assign]
+        service._load_sample_images = Mock(side_effect=AssertionError("当前请求未开启样本图，不应继续抓取"))  # type: ignore[method-assign]
         renderer_instance = lightweight_renderer_cls.return_value
         renderer_instance.build_pdf.return_value = (b"%PDF-lightweight", "statistics-lightweight-report.pdf")
 
@@ -460,8 +505,51 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
             overview=fake_overview,
             ai_analysis=fake_ai_analysis,
             ai_conversation=[],
+            sample_images=[],
         )
         service._load_sample_images.assert_not_called()  # type: ignore[attr-defined]
+
+    @patch("src.services.statistics_export_service.StatisticsLightweightPdfRenderer")
+    def test_build_pdf_passes_sample_images_to_lightweight_renderer_when_requested(
+        self,
+        lightweight_renderer_cls: Mock,
+    ) -> None:
+        """验证轻量版在请求开启样本图时，会把代表图片继续传给渲染器。"""
+
+        service = self.build_service()
+        fake_overview = self.build_statistics_overview()
+        fake_ai_analysis = Mock(name="ai_analysis")
+        fake_sample_images = self.build_sample_image_entries(count=2)
+        service.statistics_service.get_overview = Mock(return_value=fake_overview)  # type: ignore[method-assign]
+        service._build_ai_analysis = Mock(return_value=fake_ai_analysis)  # type: ignore[method-assign]
+        service._load_sample_images = Mock(return_value=fake_sample_images)  # type: ignore[method-assign]
+        renderer_instance = lightweight_renderer_cls.return_value
+        renderer_instance.build_pdf.return_value = (b"%PDF-lightweight", "statistics-lightweight-report.pdf")
+
+        payload = StatisticsExportPdfRequest(
+            export_mode="lightweight",
+            model_profile_id=None,
+            provider_hint="DeepSeek 官方",
+            note=None,
+            start_date=None,
+            end_date=None,
+            days=14,
+            part_id=None,
+            device_id=None,
+            include_ai_analysis=False,
+            include_sample_images=True,
+            sample_image_limit=2,
+        )
+
+        service.build_pdf(company_id=1, payload=payload)
+
+        service._load_sample_images.assert_called_once()  # type: ignore[attr-defined]
+        renderer_instance.build_pdf.assert_called_once_with(
+            overview=fake_overview,
+            ai_analysis=fake_ai_analysis,
+            ai_conversation=[],
+            sample_images=fake_sample_images,
+        )
 
     @patch("src.services.statistics_export_service.StatisticsLightweightPdfRenderer")
     def test_build_pdf_passes_cached_ai_conversation_to_lightweight_renderer(
@@ -518,6 +606,7 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
             renderer_call_kwargs["ai_conversation"][1].content,
             "因为不良与待确认集中在同一类冲压件上。",
         )
+        self.assertEqual(renderer_call_kwargs["sample_images"], [])
 
     def test_lightweight_renderer_reports_missing_reportlab_dependency(self) -> None:
         """验证轻量版渲染器在缺少 reportlab 时能抛出稳定的集成错误。"""
@@ -639,6 +728,28 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
         self.assertEqual(holder["canvas"].show_page_calls, 3)
         self.assertIn("AI 追问记录", holder["canvas"].drawn_strings)
         self.assertIn("这批次最该先查哪里？", holder["canvas"].drawn_strings)
+
+    def test_lightweight_renderer_adds_sample_image_pages(self) -> None:
+        """验证轻量版也会生成代表样本图片页，并真正触发图片绘制。"""
+
+        renderer = StatisticsLightweightPdfRenderer()
+        fake_modules, holder = self.build_fake_reportlab_modules()
+
+        with (
+            patch.object(renderer, "_load_reportlab", return_value=fake_modules),
+            patch.object(renderer, "_ensure_font_registered", return_value="FakeFont"),
+        ):
+            renderer.build_pdf(
+                overview=self.build_statistics_overview(),
+                ai_analysis=None,
+                ai_conversation=[],
+                sample_images=self.build_sample_image_entries(count=3),
+            )
+
+        self.assertEqual(holder["canvas"].show_page_calls, 3)
+        self.assertIn("代表样本图片", holder["canvas"].drawn_strings)
+        self.assertIn("REC-20260420-0001", holder["canvas"].drawn_strings)
+        self.assertEqual(len(holder["canvas"].drawn_images), 3)
 
     def test_lightweight_renderer_splits_long_ai_message_across_pages(self) -> None:
         """验证超长 AI 回复会自动续页，而不是在轻量 PDF 里被截断。"""
