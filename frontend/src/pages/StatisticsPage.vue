@@ -1291,7 +1291,7 @@ function handleTrendMouseLeave(): void {
           :class="{ 'stats-workspace-page--active': activeWorkspacePage === 'ai' }"
           data-workspace-page="ai"
         >
-          <section class="app-panel stats-ai-panel">
+          <section class="stats-ai-panel">
             <div class="stats-panel__header">
               <div>
                 <strong>AI 统计工作台</strong>

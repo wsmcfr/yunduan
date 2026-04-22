@@ -244,6 +244,50 @@ Why:
 - context-specific density prevents admin screens from looking like dashboards and prevents dashboards from feeling lifeless
 - natural-height side panels avoid the common “large empty column” defect that users read as broken design instead of deliberate whitespace
 
+### Convention: Avoid Double-Shell Wrappers In Dense Workspaces
+
+Dense workspaces such as the statistics AI stage must not stack a shared global shell on top of a page-specific root wrapper when the root already manages its own spacing and sub-block composition.
+
+Why:
+
+- `.app-panel` in `src/styles/base.css` injects a background, border, radius, shadow, and blur shell intended for standalone cards
+- if a dense workspace root also wraps multiple inner blocks such as summary, analysis, and conversation, the extra shell makes the whole area look like one oversized frame
+- users then perceive unrelated regions as being “boxed together”, especially when streaming text causes the inner blocks to grow
+
+Implementation contract:
+
+- use `.app-panel` for atomic cards such as filters, rankings, or standalone summary panels
+- if the workspace root already has a dedicated class such as `stats-ai-panel`, let that root own `padding`, `gap`, and height behavior itself
+- do not combine `.app-panel` with dense workspace roots that already contain multiple visually independent regions
+- keep the visual grouping at the inner block level, not by adding one more global shell around everything
+- when removing the shared shell, verify the root still keeps deliberate spacing through its own local layout rules
+
+Wrong:
+
+```vue
+<section class="app-panel stats-ai-panel">
+  <div class="stats-ai-panel__result">...</div>
+  <div class="stats-ai-panel__analysis-block">...</div>
+  <div class="stats-ai-panel__conversation">...</div>
+</section>
+```
+
+Correct:
+
+```vue
+<section class="stats-ai-panel">
+  <div class="stats-ai-panel__result">...</div>
+  <div class="stats-ai-panel__analysis-block">...</div>
+  <div class="stats-ai-panel__conversation">...</div>
+</section>
+```
+
+Review points:
+
+- at `100%`, `125%`, and `150%` zoom, confirm there is no extra border/shadow wrapping both the analysis area and the follow-up conversation area together
+- confirm the workspace still has enough `padding` and `gap` after removing the shared shell
+- confirm standalone sections that truly need a single card shell still keep `.app-panel`; this rule is for dense multi-region roots, not for every panel
+
 ### Convention: Paged Workspace Stage
 
 When a dashboard, statistics workspace, or gallery page contains too many dense sections for one comfortable viewport, use a paged workspace stage instead of a single endlessly growing screen.
