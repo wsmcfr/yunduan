@@ -1,8 +1,0 @@
-{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
-{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
-{"file": ".trellis/spec/guides/index.md", "reason": "Use thinking guides while documenting bootstrap conventions"}
-{"file": "AGENTS.md", "reason": "Project-scoped instructions and language/comment requirements"}
-{"file": "MainPagePrototype.qml", "reason": "Only real frontend prototype in repo; use it to extract naming and documentation patterns"}
-{"file": "STM32MP157DAA1工业缺陷检测系统综合方案.md", "reason": "Current architecture and confirmed cloud stack recommendations"}
-{"file": "工业缺陷检测系统完整方案.md", "reason": "Original system plan includes backend and frontend stack proposals"}

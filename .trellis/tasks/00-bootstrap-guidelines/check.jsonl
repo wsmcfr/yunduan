@@ -1,6 +1,0 @@
-{"file": ".agents/skills/finish-work/SKILL.md", "reason": "Finish work checklist"}
-{"file": ".agents/skills/check/SKILL.md", "reason": "Code quality check spec"}
-{"file": ".trellis/spec/guides/index.md", "reason": "Check generated guidelines against thinking guides and cross-layer concerns"}
-{"file": "MainPagePrototype.qml", "reason": "Verify frontend guidelines match actual prototype patterns"}
-{"file": "STM32MP157DAA1工业缺陷检测系统综合方案.md", "reason": "Verify backend/frontend guidelines match current project plan"}
-{"file": "AGENTS.md", "reason": "Check generated docs against project-specific instructions"}
