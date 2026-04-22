@@ -74,6 +74,15 @@ const activeTemplate = computed(
 );
 
 /**
+ * 某些模板虽然复用同一协议，但只应该匹配特定探测来源。
+ * 例如 OpenClaudeCode 下的 Grok 与 Claude 都走 Messages，
+ * 这里需要额外记住“优先匹配哪一个 sourceLabel”。
+ */
+const activeTemplatePreferredSourceLabel = computed(
+  () => activeTemplate.value?.preferredSourceLabel ?? null,
+);
+
+/**
  * 自动探测的模型候选列表。
  */
 const discoveredModels = ref<AIDiscoveredModelCandidate[]>([]);
@@ -182,6 +191,12 @@ function isCandidateCompatibleWithTemplate(candidate: AIDiscoveredModelCandidate
   ) {
     return false;
   }
+  if (
+    activeTemplatePreferredSourceLabel.value &&
+    candidate.sourceLabel !== activeTemplatePreferredSourceLabel.value
+  ) {
+    return false;
+  }
 
   return true;
 }
@@ -250,7 +265,8 @@ function findBestMatchingCandidate(
     return null;
   }
 
-  const preferredSourceLabel = extractAutoDiscoverySourceLabel(formState.note);
+  const preferredSourceLabel =
+    extractAutoDiscoverySourceLabel(formState.note) ?? activeTemplatePreferredSourceLabel.value;
   const normalizedUserAgent = formState.userAgent.trim();
 
   const exactMatch = candidates.find((candidate) => {

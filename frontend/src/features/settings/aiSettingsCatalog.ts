@@ -19,6 +19,7 @@ export interface AIModelTemplate {
   readonly title: string;
   readonly summary: string;
   readonly supportedGatewayVendors: readonly AIGatewayVendor[];
+  readonly preferredSourceLabel?: string;
   readonly payload: AIModelProfileCreateRequestDto;
 }
 
@@ -185,7 +186,7 @@ export const aiGatewayPresets: AIGatewayPreset[] = [
       vendor: "openclaudecode",
       official_url: "https://docs.openclaudecode.cn/#/",
       base_url: "https://www.openclaudecode.cn",
-      note: "建议在网关下继续添加 Claude / Codex / 国产模型模板。",
+      note: "建议在网关下继续添加 Claude / Grok / Codex / 国产模型模板；当前实测 Grok 优先走 Anthropic Messages + Claude CLI UA，Codex 模板仍只给真正兼容 Responses 的模型使用。",
       is_enabled: true,
       is_custom: false,
     },
@@ -345,6 +346,7 @@ export const aiModelTemplates: AIModelTemplate[] = [
     title: "OpenClaudeCode Claude",
     summary: "Anthropic Messages 协议，不带 /v1，必须带 Claude CLI UA。",
     supportedGatewayVendors: ["openclaudecode"],
+    preferredSourceLabel: "OpenClaudeCode Claude 外接",
     payload: {
       display_name: "OpenClaudeCode Claude",
       upstream_vendor: "claude",
@@ -360,10 +362,31 @@ export const aiModelTemplates: AIModelTemplate[] = [
     },
   },
   {
+    id: "openclaudecode-grok",
+    title: "OpenClaudeCode Grok",
+    summary: "Anthropic Messages 协议，必须带 Claude CLI UA；适合 OpenClaudeCode 下的 Grok 模型。",
+    supportedGatewayVendors: ["openclaudecode"],
+    preferredSourceLabel: "OpenClaudeCode Grok 外接",
+    payload: {
+      display_name: "OpenClaudeCode Grok",
+      upstream_vendor: "custom",
+      protocol_type: "anthropic_messages",
+      auth_mode: "authorization_bearer",
+      base_url_override: null,
+      user_agent: OPENCLAUDECODE_CLAUDE_UA,
+      model_identifier: "grok-4.20-fast",
+      supports_vision: true,
+      supports_stream: true,
+      is_enabled: true,
+      note: "OpenClaudeCode 下的 Grok 模板；当前实测应优先走 Anthropic Messages，并沿用 Claude CLI User-Agent。",
+    },
+  },
+  {
     id: "openclaudecode-codex",
     title: "OpenClaudeCode Codex",
     summary: "OpenAI Responses 协议，必须走 /v1，并带 Codex CLI UA。",
     supportedGatewayVendors: ["openclaudecode"],
+    preferredSourceLabel: "OpenClaudeCode Codex 外接",
     payload: {
       display_name: "OpenClaudeCode Codex",
       upstream_vendor: "codex",
@@ -375,7 +398,7 @@ export const aiModelTemplates: AIModelTemplate[] = [
       supports_vision: true,
       supports_stream: true,
       is_enabled: true,
-      note: "OpenClaudeCode 文档中的 Codex 外接模板。",
+      note: "OpenClaudeCode 文档中的 Codex 外接模板；如果某个模型在这里返回非 JSON 或统计 AI 无法解析，通常说明它并不真正兼容 Responses。",
     },
   },
   {
@@ -383,6 +406,7 @@ export const aiModelTemplates: AIModelTemplate[] = [
     title: "OpenClaudeCode 国产模型",
     summary: "国产模型外接场景，建议带浏览器型 UA，协议和模型标识按实际渠道填写。",
     supportedGatewayVendors: ["openclaudecode"],
+    preferredSourceLabel: "OpenClaudeCode 国产模型外接",
     payload: {
       display_name: "OpenClaudeCode 国产模型",
       upstream_vendor: "custom",
@@ -394,7 +418,7 @@ export const aiModelTemplates: AIModelTemplate[] = [
       supports_vision: true,
       supports_stream: true,
       is_enabled: true,
-      note: "OpenClaudeCode 文档中的国产模型外接模板。",
+      note: "OpenClaudeCode 文档中的通用兼容模板；当第三方模型没有独立品牌模板时，通常先从这一类协议兼容入口尝试。",
     },
   },
   {

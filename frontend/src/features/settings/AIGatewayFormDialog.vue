@@ -40,17 +40,22 @@ const OPENCLAUDECODE_SOURCE_TEMPLATE_OPTIONS: readonly GatewaySourceTemplateOpti
   {
     sourceLabel: "OpenClaudeCode Claude 外接",
     title: "Claude 模板",
-    summary: "自动套用 Anthropic Messages 协议与 Claude CLI User-Agent。",
+    summary: "自动套用 Anthropic Messages 协议与 Claude CLI User-Agent；部分第三方模型也可能落到这一组。",
+  },
+  {
+    sourceLabel: "OpenClaudeCode Grok 外接",
+    title: "Grok 模板",
+    summary: "自动套用 Anthropic Messages 协议与 Claude CLI User-Agent；适合 OpenClaudeCode 下返回 Grok 模型列表的场景。",
   },
   {
     sourceLabel: "OpenClaudeCode Codex 外接",
     title: "Codex 模板",
-    summary: "自动套用 OpenAI Responses 协议与 Codex CLI User-Agent。",
+    summary: "自动套用 OpenAI Responses 协议与 Codex CLI User-Agent；只适合真正兼容 Responses 的模型。",
   },
   {
     sourceLabel: "OpenClaudeCode 国产模型外接",
     title: "国产模型模板",
-    summary: "自动套用国产模型外接规则，并带浏览器型 User-Agent。",
+    summary: "自动套用通用兼容协议与浏览器型 User-Agent；适合没有独立 Grok / Claude / Codex 模板的兼容模型。",
   },
 ];
 
@@ -255,7 +260,7 @@ const selectedCandidates = computed(() => {
 
 /**
  * 当前探测结果里的来源分组。
- * 对 OpenClaudeCode 这类多外接类型网关，会拆成 Claude / Codex / 国产模型三组，便于在建网关阶段直接批量勾选。
+ * 对 OpenClaudeCode 这类多外接类型网关，会拆成 Claude / Grok / Codex / 国产模型四组，便于在建网关阶段直接批量勾选。
  */
 const discoveredSourceLabels = computed(() => {
   return Array.from(new Set(discoveredModels.value.map((candidate) => candidate.sourceLabel)));
@@ -274,7 +279,7 @@ const discoveredModelGroups = computed(() => {
 
 /**
  * 只有 OpenClaudeCode 这种同站多协议中转，才展示按来源分组的快捷选择按钮。
- * 官方直连厂商在创建网关时不需要出现 Claude / Codex / 国产模型这类框架分组入口。
+ * 官方直连厂商在创建网关时不需要出现 Claude / Grok / Codex / 国产模型这类框架分组入口。
  */
 const shortcutSourceLabels = computed(() => {
   if (!isOpenClaudeCodeVendor.value) {
@@ -285,7 +290,7 @@ const shortcutSourceLabels = computed(() => {
 
 /**
  * 当前供应商可使用的外接模板来源。
- * 只有 OpenClaudeCode 会在建网关阶段出现 Claude / Codex / 国产模型三类模板。
+ * 只有 OpenClaudeCode 会在建网关阶段出现 Claude / Grok / Codex / 国产模型四类模板。
  */
 const availableSourceTemplateOptions = computed(() => {
   if (!isOpenClaudeCodeVendor.value) {
@@ -322,7 +327,7 @@ function selectAllCandidates(): void {
 
 /**
  * 只选中某一个探测来源分组下的模型。
- * 这样用户在创建网关时就能直接选“Claude 外接 / Codex 外接 / 国产模型外接”整组，而不是逐条手点。
+ * 这样用户在创建网关时就能直接选“Claude 外接 / Grok 外接 / Codex 外接 / 国产模型外接”整组，而不是逐条手点。
  */
 function selectCandidatesBySourceLabel(sourceLabel: string): void {
   if (isOpenClaudeCodeVendor.value) {
@@ -624,6 +629,9 @@ watch(
               <p class="muted-text">
                 这里选的是模板规则，不是最终模型名。探测完成后，下方会按模板来源分组展示真实模型，并自动带出对应协议、鉴权、User-Agent 和 Base URL 规则。
               </p>
+              <p class="muted-text">
+                现在已经提供单独的 Grok 模板入口；如果同名模型在某个分组里调用仍报“无法解析响应”，通常就是这组协议不匹配，或者上游返回的是流式事件而不是普通 JSON。
+              </p>
             </div>
 
             <ElCheckboxGroup
@@ -652,7 +660,7 @@ watch(
                   填完 URL 和 API Key 后点“探测模型”，下方会列出可用模型。勾选后，保存网关时会把这些模型一起创建到当前网关下。
                 </p>
                 <p v-if="shortcutSourceLabels.length > 0" class="muted-text">
-                  当前供应商支持按来源分组快捷勾选，可直接只选 Claude / Codex / 国产模型这一类。
+                  当前供应商支持按来源分组快捷勾选，可直接只选 Claude / Grok / Codex / 国产模型这一类；如果同一个模型名同时出现在多个分组里，优先保留实际能稳定返回的那一组。
                 </p>
               </div>
               <ElButton :loading="discoveringModels" @click="handlePreviewModels">
@@ -756,7 +764,7 @@ watch(
             <strong>模型选择区</strong>
             <p class="muted-text">
               <template v-if="isOpenClaudeCodeVendor">
-                这里选的不是模板名，而是探测出来的实际模型。先勾选上面的 Claude / Codex / 国产模型模板，再填写基础 URL 和 API Key，点击“探测模型”后，这里会按模板分组列出真实模型。
+                这里选的不是模板名，而是探测出来的实际模型。先勾选上面的 Claude / Grok / Codex / 国产模型模板，再填写基础 URL 和 API Key，点击“探测模型”后，这里会按模板分组列出真实模型，并沿用对应的协议与 User-Agent 规则。
               </template>
               <template v-else>
                 这里就是模型选择的地方。现在还没有候选项，是因为还没完成探测。先填写基础 URL 和 API Key，再点击“探测模型”，探测成功后这里会出现可勾选模型列表。

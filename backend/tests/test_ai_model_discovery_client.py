@@ -133,3 +133,29 @@ class AIModelDiscoveryClientTestCase(unittest.TestCase):
 
         self.assertTrue(any(item["model_identifier"] == "gpt-5.4" for item in items))
         self.assertTrue(any(headers.get("User-Agent") == OPENCLAUDECODE_CODEX_UA for headers in client.captured_headers))
+
+    def test_discover_openclaudecode_retains_grok_under_dedicated_source_label(self) -> None:
+        """Grok 模型应落到独立的 Grok 外接分组，而不是继续混在 Claude 组里。"""
+
+        client = StubAIModelDiscoveryClient()
+        shared_url = "https://www.openclaudecode.cn/v1/models"
+        client.response_map[shared_url] = {
+            "data": [
+                {"id": "grok-4.20-fast"},
+            ]
+        }
+        client.response_map["https://www.openclaudecode.cn/models"] = {
+            "data": []
+        }
+
+        items = client.discover_models(
+            gateway_vendor=AIGatewayVendor.OPENCLAUDECODE,
+            base_url="https://www.openclaudecode.cn",
+            api_key="sk-opencc-demo",
+        )
+
+        grok_items = [item for item in items if item["model_identifier"] == "grok-4.20-fast"]
+        self.assertTrue(any(item["source_label"] == "OpenClaudeCode Grok 外接" for item in grok_items))
+        self.assertFalse(any(item["source_label"] == "OpenClaudeCode Claude 外接" for item in grok_items))
+        self.assertFalse(any(item["source_label"] == "OpenClaudeCode Codex 外接" for item in grok_items))
+        self.assertFalse(any(item["source_label"] == "OpenClaudeCode 国产模型外接" for item in grok_items))

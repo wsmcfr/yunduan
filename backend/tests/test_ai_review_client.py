@@ -40,6 +40,24 @@ class StubAIReviewClient(AIReviewClient):
         self.captured_payload = payload
         return self.next_response
 
+    def _post_stream_events(  # type: ignore[override]
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        payload: dict,
+    ):
+        """默认把非流式桩响应包装成一条 `__json__` 事件。
+
+        这样 Anthropic Messages 即使改成统一走 SSE/JSON 兼容入口，
+        现有测试也仍然可以复用同一套 `next_response` 断言。
+        """
+
+        self.captured_url = url
+        self.captured_headers = headers
+        self.captured_payload = payload
+        yield "__json__", self.next_response
+
 
 class ImageRejectingStubAIReviewClient(StubAIReviewClient):
     """模拟供应商拒绝图片消息块，再验证客户端是否自动退回纯文本重试。"""
@@ -98,6 +116,76 @@ class StreamingStubAIReviewClient(StubAIReviewClient):
         self.captured_headers = headers
         self.captured_payload = payload
         for event in self.stream_events:
+            yield event
+
+
+class InvalidJsonFallbackStubAIReviewClient(StubAIReviewClient):
+    """模拟 OpenClaudeCode `/responses` 返回非 JSON，再验证客户端是否回退。"""
+
+    def __init__(self) -> None:
+        """初始化可观察的回退请求上下文。"""
+
+        super().__init__()
+        self.captured_urls: list[str] = []
+        self.captured_payloads: list[dict] = []
+
+    def _post_json(self, *, url: str, headers: dict[str, str], payload: dict) -> dict:  # type: ignore[override]
+        """首次命中 `/responses` 时抛出非 JSON 错误，回退请求则返回成功。"""
+
+        self.captured_url = url
+        self.captured_headers = headers
+        self.captured_payload = payload
+        self.captured_urls.append(url)
+        self.captured_payloads.append(payload)
+
+        if url.endswith("/responses"):
+            raise IntegrationError(
+                code="ai_provider_invalid_json",
+                message="AI 供应商返回了无法解析的响应内容。",
+                details={
+                    "endpoint": url,
+                    "response": "<html>proxy mismatch</html>",
+                },
+            )
+
+        return self.next_response
+
+
+class InvalidJsonStreamingFallbackStubAIReviewClient(StreamingStubAIReviewClient):
+    """模拟 OpenClaudeCode 流式 `/responses` 返回非 JSON，再验证客户端是否回退。"""
+
+    def __init__(self) -> None:
+        """初始化流式回退桩客户端。"""
+
+        super().__init__()
+        self.captured_urls: list[str] = []
+        self.stream_event_map: dict[str, list[tuple[str | None, dict]]] = {}
+
+    def _post_stream_events(  # type: ignore[override]
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        payload: dict,
+    ):
+        """按不同端点返回不同事件，便于验证回退是否真的改走了兼容协议。"""
+
+        self.captured_url = url
+        self.captured_headers = headers
+        self.captured_payload = payload
+        self.captured_urls.append(url)
+
+        if url.endswith("/responses"):
+            raise IntegrationError(
+                code="ai_provider_invalid_json",
+                message="AI 供应商返回了无法解析的流式响应内容。",
+                details={
+                    "endpoint": url,
+                    "response": "<html>proxy mismatch</html>",
+                },
+            )
+
+        for event in self.stream_event_map.get(url, []):
             yield event
 
 
@@ -325,6 +413,195 @@ class AIReviewClientTestCase(unittest.TestCase):
             "image",
         )
 
+    def test_chat_about_record_falls_back_to_openai_compatible_when_openclaudecode_responses_returns_invalid_json(self) -> None:
+        """验证 OpenClaudeCode `/responses` 返回非 JSON 时，会自动回退到 Chat Completions。"""
+
+        client = InvalidJsonFallbackStubAIReviewClient()
+        client.next_response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "已自动回退到 Chat Completions 并返回回答。",
+                    }
+                }
+            ]
+        }
+
+        response = client.chat_about_record(
+            record_id=1,
+            provider_hint="grok / gork",
+            question="请说明为什么统计 AI 会失败。",
+            history=[],
+            context=self.context,
+            referenced_files=self.referenced_files,
+            model_context={
+                "display_name": "grok-4.20-fast",
+                "model_identifier": "grok-4.20-fast",
+                "protocol_type": "openai_responses",
+                "auth_mode": "authorization_bearer",
+                "base_url": "https://www.openclaudecode.cn/v1",
+                "user_agent": "codex_cli_rs/0.77.0 (Windows 10.0.26100; x86_64) WindowsTerminal",
+                "supports_vision": True,
+                "supports_stream": True,
+                "gateway_name": "gork",
+                "gateway_vendor": "openclaudecode",
+                "api_key": "sk-demo-grok",
+            },
+        )
+
+        self.assertEqual(response["status"], "completed")
+        self.assertEqual(response["answer"], "已自动回退到 Chat Completions 并返回回答。")
+        self.assertEqual(
+            client.captured_urls,
+            [
+                "https://www.openclaudecode.cn/v1/responses",
+                "https://www.openclaudecode.cn/v1/chat/completions",
+            ],
+        )
+
+    def test_chat_about_record_reads_anthropic_messages_event_stream_for_grok(self) -> None:
+        """验证 OpenClaudeCode Grok 即使直接返回 SSE，也能被 Anthropic Messages 兼容层正确拼出答案。"""
+
+        client = StreamingStubAIReviewClient()
+        client.stream_events = [
+            ("message_start", {"type": "message_start", "message": {"content": []}}),
+            (
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "text", "text": ""},
+                },
+            ),
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "这是来自 SSE 的 "},
+                },
+            ),
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "Grok 回答。"},
+                },
+            ),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+
+        response = client.chat_about_record(
+            record_id=1,
+            provider_hint="grok / OpenClaudeCode",
+            question="帮我总结当前记录。",
+            history=[],
+            context=self.context,
+            referenced_files=self.referenced_files,
+            model_context={
+                "display_name": "OpenClaudeCode Grok",
+                "model_identifier": "grok-4.20-fast",
+                "protocol_type": "anthropic_messages",
+                "auth_mode": "authorization_bearer",
+                "base_url": "https://www.openclaudecode.cn",
+                "user_agent": "claude-cli/2.0.76 (external, cli)",
+                "supports_vision": True,
+                "supports_stream": True,
+                "gateway_name": "grok",
+                "gateway_vendor": "openclaudecode",
+                "api_key": "sk-demo-grok",
+            },
+        )
+
+        self.assertEqual(response["status"], "completed")
+        self.assertEqual(response["answer"], "这是来自 SSE 的 Grok 回答。")
+        self.assertEqual(client.captured_url, "https://www.openclaudecode.cn/v1/messages")
+
+    def test_stream_chat_about_record_yields_anthropic_message_deltas(self) -> None:
+        """验证 Anthropic Messages 直接返回 SSE 时，流式接口会逐段转发文本。"""
+
+        client = StreamingStubAIReviewClient()
+        client.stream_events = [
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "第一段。"},
+                },
+            ),
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "第二段。"},
+                },
+            ),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+
+        chunks = list(
+            client.stream_chat_about_record(
+                record_id=1,
+                provider_hint="grok / OpenClaudeCode",
+                question="继续分析这条记录。",
+                history=[],
+                context=self.context,
+                referenced_files=self.referenced_files,
+                model_context={
+                    "display_name": "OpenClaudeCode Grok",
+                    "model_identifier": "grok-4.20-fast",
+                    "protocol_type": "anthropic_messages",
+                    "auth_mode": "authorization_bearer",
+                    "base_url": "https://www.openclaudecode.cn",
+                    "user_agent": "claude-cli/2.0.76 (external, cli)",
+                    "supports_vision": True,
+                    "supports_stream": True,
+                    "gateway_name": "grok",
+                    "gateway_vendor": "openclaudecode",
+                    "api_key": "sk-demo-grok",
+                },
+            )
+        )
+
+        self.assertEqual(chunks, ["第一段。", "第二段。"])
+        self.assertEqual(client.captured_url, "https://www.openclaudecode.cn/v1/messages")
+
+    def test_statistics_prompt_uses_text_snapshot_instead_of_raw_json(self) -> None:
+        """验证统计页提示词改为文本摘要，避免把整包 JSON 直接塞进 Grok Messages。"""
+
+        prompt = self.client._build_statistics_user_prompt(
+            note=None,
+            statistics_context={
+                "filters": {
+                    "start_date": None,
+                    "end_date": None,
+                    "days": 7,
+                    "part_id": None,
+                    "device_id": None,
+                },
+                "summary": {
+                    "total_count": 10,
+                    "good_count": 8,
+                    "bad_count": 1,
+                    "uncertain_count": 1,
+                    "reviewed_count": 6,
+                    "pending_review_count": 4,
+                    "pass_rate": 0.8,
+                },
+                "defect_distribution": [{"defect_type": "毛刺", "count": 1}],
+                "sample_gallery": {"groups": [{"part_name": "不应直接原样进提示词"}]},
+            },
+        )
+
+        self.assertIn("统计报告摘要：", prompt)
+        self.assertIn("【汇总指标】", prompt)
+        self.assertIn("【缺陷分布", prompt)
+        self.assertNotIn("\"sample_gallery\"", prompt)
+        self.assertNotIn("{\"filters\"", prompt)
+
     def test_chat_about_record_retries_without_images_when_provider_rejects_image_blocks(self) -> None:
         """验证文本模型被误标为视觉时，会自动退回纯文本对话。"""
 
@@ -519,3 +796,68 @@ class AIReviewClientTestCase(unittest.TestCase):
         self.assertEqual("".join(output_chunks), full_answer)
         self.assertEqual(client.captured_url, "https://www.openclaudecode.cn/v1/responses")
         self.assertTrue(client.captured_payload["stream"])  # type: ignore[index]
+
+    def test_stream_statistics_analysis_falls_back_when_openclaudecode_responses_returns_invalid_json(self) -> None:
+        """验证统计流式分析在 `/responses` 返回非 JSON 时，会自动改走 Chat Completions。"""
+
+        client = InvalidJsonStreamingFallbackStubAIReviewClient()
+        fallback_url = "https://www.openclaudecode.cn/v1/chat/completions"
+        client.stream_event_map[fallback_url] = [
+            (
+                None,
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": "回退后的第一段。",
+                            }
+                        }
+                    ]
+                },
+            ),
+            (
+                None,
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "content": "回退后的第二段。",
+                            }
+                        }
+                    ]
+                },
+            ),
+        ]
+
+        output_chunks = list(
+            client.stream_statistics_analysis(
+                provider_hint="grok / gork",
+                note="请总结当前批次的主要风险。",
+                statistics_context={
+                    "summary": {"total_count": 16, "bad_count": 3},
+                    "key_findings": ["某零件风险持续升高"],
+                },
+                model_context={
+                    "display_name": "grok-4.20-fast",
+                    "model_identifier": "grok-4.20-fast",
+                    "protocol_type": "openai_responses",
+                    "auth_mode": "authorization_bearer",
+                    "base_url": "https://www.openclaudecode.cn/v1",
+                    "user_agent": "codex_cli_rs/0.77.0",
+                    "supports_vision": False,
+                    "supports_stream": True,
+                    "gateway_name": "gork",
+                    "gateway_vendor": "openclaudecode",
+                    "api_key": "sk-demo-grok",
+                },
+            )
+        )
+
+        self.assertEqual(output_chunks, ["回退后的第一段。", "回退后的第二段。"])
+        self.assertEqual(
+            client.captured_urls,
+            [
+                "https://www.openclaudecode.cn/v1/responses",
+                "https://www.openclaudecode.cn/v1/chat/completions",
+            ],
+        )

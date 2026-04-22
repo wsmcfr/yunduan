@@ -42,6 +42,7 @@ import {
   AI_CHAT_QUESTION_MAX_CHARACTERS,
   buildAiChatHistoryPayload,
 } from "@/utils/aiChatHistory";
+import { getAiProviderErrorMessage } from "@/utils/aiRequestError";
 import { exportStatisticsReportPng } from "@/utils/statisticsReport";
 
 const DEFAULT_DAYS = 14;
@@ -508,7 +509,7 @@ export function useStatisticsOverview() {
         return;
       }
 
-      aiError.value = caughtError instanceof Error ? caughtError.message : "统计 AI 分析失败";
+      aiError.value = getAiProviderErrorMessage(caughtError, "统计 AI 分析失败");
       throw caughtError;
     } finally {
       if (activeAiStreamAbortController.value === abortController) {
@@ -610,7 +611,7 @@ export function useStatisticsOverview() {
         return;
       }
 
-      aiError.value = caughtError instanceof Error ? caughtError.message : "统计 AI 追问失败";
+      aiError.value = getAiProviderErrorMessage(caughtError, "统计 AI 追问失败");
       throw caughtError;
     } finally {
       if (activeAiStreamAbortController.value === abortController) {

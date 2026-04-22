@@ -5,7 +5,6 @@ import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
 
 import AppDialog from "@/components/common/AppDialog.vue";
 import { useAiAutoScroll } from "@/composables/useAiAutoScroll";
-import { ApiClientError } from "@/services/api/client";
 import { streamAiChat } from "@/services/api/records";
 import { fetchRuntimeAIModels } from "@/services/api/settings";
 import {
@@ -36,6 +35,7 @@ import {
   getAiFileKindLabel,
   sortAiDisplayFiles,
 } from "@/utils/aiReview";
+import { getAiProviderErrorMessage } from "@/utils/aiRequestError";
 
 interface AiPreviewFile {
   id: number;
@@ -490,41 +490,7 @@ function stopVoiceInput(): void {
  * 这里优先把后端已经返回的供应商错误细节展开，避免前端只看到笼统的 HTTP 401。
  */
 function getAiChatRequestErrorMessage(caughtError: unknown): string {
-  if (!(caughtError instanceof ApiClientError)) {
-    return caughtError instanceof Error ? caughtError.message : "AI 对话调用失败";
-  }
-
-  if (
-    caughtError.code === "ai_provider_invalid_json" &&
-    typeof caughtError.details?.response === "string"
-  ) {
-    const normalizedResponse = caughtError.details.response.trim();
-    if (normalizedResponse.startsWith("<")) {
-      return "AI 供应商返回了网页内容而不是接口 JSON，通常表示网关 URL、协议或鉴权配置不匹配。";
-    }
-    return "AI 供应商返回的内容不符合当前协议格式，通常表示网关 URL、模型协议或中转规则配置有误。";
-  }
-
-  if (
-    caughtError.code === "ai_provider_http_error" &&
-    caughtError.statusCode === 502 &&
-    typeof caughtError.details?.response === "string"
-  ) {
-    try {
-      const providerPayload = JSON.parse(caughtError.details.response);
-      const providerMessage =
-        providerPayload?.error?.message ??
-        providerPayload?.message ??
-        "";
-      if (typeof providerMessage === "string" && providerMessage.trim()) {
-        return `AI 供应商鉴权失败：${providerMessage.trim()}`;
-      }
-    } catch {
-      // 供应商返回的响应不一定总是标准 JSON，解析失败时回退到通用提示。
-    }
-  }
-
-  return caughtError.message || "AI 对话调用失败";
+  return getAiProviderErrorMessage(caughtError, "AI 对话调用失败");
 }
 
 /**

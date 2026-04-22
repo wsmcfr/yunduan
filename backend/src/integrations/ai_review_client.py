@@ -438,8 +438,8 @@ class AIReviewClient:
                 "分析时请不要只重复图表数值，而要指出哪些现象最值得业务侧优先处理、哪些只是背景信息、哪些结论仍然不稳。",
                 "如果当前筛选条件只覆盖某个零件、某台设备或较短时间窗口，请把结论限定在这个范围内。",
                 note_block,
-                "统计报告快照：",
-                json.dumps(statistics_context, ensure_ascii=False, indent=2),
+                "统计报告摘要：",
+                self._build_statistics_snapshot_for_prompt(statistics_context=statistics_context),
             ]
         )
 
@@ -483,11 +483,130 @@ class AIReviewClient:
                 "如果问题涉及设备责任、零件风险、缺陷集中、审核积压或时间趋势，请明确说明判断依据来自哪些统计字段，而不是只给结论。",
                 "如果原因只能推断，必须说明这是推断，不得写成已经验证的事实。",
                 note_block,
-                "统计报告快照：",
-                json.dumps(statistics_context, ensure_ascii=False, indent=2),
+                "统计报告摘要：",
+                self._build_statistics_snapshot_for_prompt(statistics_context=statistics_context),
                 f"用户问题：{question.strip()}",
             ]
         )
+
+    def _build_statistics_snapshot_for_prompt(
+        self,
+        *,
+        statistics_context: dict[str, Any],
+    ) -> str:
+        """把统计概览整理成更适合模型消费的结构化文本摘要。
+
+        这里刻意不直接塞整包 JSON，原因有两个：
+        1. 统计页原始快照里包含较深的嵌套结构和图库数据，提示词会显著膨胀。
+        2. 生产实测 `OpenClaudeCode + Grok + /v1/messages` 在用户消息中携带较长 JSON 块时，
+           可能只返回 `message_start` 后直接结束，导致“已消费但没有输出”。
+        因此这里统一压缩成稳定的文本摘要，既减小输入体积，也规避该兼容性问题。
+        """
+
+        filters = statistics_context.get("filters") if isinstance(statistics_context.get("filters"), dict) else {}
+        summary = statistics_context.get("summary") if isinstance(statistics_context.get("summary"), dict) else {}
+        daily_trend = statistics_context.get("daily_trend") if isinstance(statistics_context.get("daily_trend"), list) else []
+        defect_distribution = (
+            statistics_context.get("defect_distribution")
+            if isinstance(statistics_context.get("defect_distribution"), list)
+            else []
+        )
+        result_distribution = (
+            statistics_context.get("result_distribution")
+            if isinstance(statistics_context.get("result_distribution"), list)
+            else []
+        )
+        review_status_distribution = (
+            statistics_context.get("review_status_distribution")
+            if isinstance(statistics_context.get("review_status_distribution"), list)
+            else []
+        )
+        part_quality_ranking = (
+            statistics_context.get("part_quality_ranking")
+            if isinstance(statistics_context.get("part_quality_ranking"), list)
+            else []
+        )
+        device_quality_ranking = (
+            statistics_context.get("device_quality_ranking")
+            if isinstance(statistics_context.get("device_quality_ranking"), list)
+            else []
+        )
+        key_findings = statistics_context.get("key_findings") if isinstance(statistics_context.get("key_findings"), list) else []
+
+        lines = [
+            "【筛选条件】",
+            (
+                f"- 开始日期：{filters.get('start_date') or '未指定'}；"
+                f"结束日期：{filters.get('end_date') or '未指定'}；"
+                f"回看天数：{filters.get('days') or '未指定'}。"
+            ),
+            (
+                f"- 零件 ID：{filters.get('part_id') or '全部'}；"
+                f"设备 ID：{filters.get('device_id') or '全部'}。"
+            ),
+            "【汇总指标】",
+            (
+                f"- 总数：{summary.get('total_count', 0)}；良品：{summary.get('good_count', 0)}；"
+                f"不良：{summary.get('bad_count', 0)}；待确认：{summary.get('uncertain_count', 0)}；"
+                f"已审核：{summary.get('reviewed_count', 0)}；待审核：{summary.get('pending_review_count', 0)}；"
+                f"良率：{summary.get('pass_rate', 0)}。"
+            ),
+        ]
+
+        if daily_trend:
+            lines.append("【时间趋势（最多 7 条）】")
+            for item in daily_trend[:7]:
+                lines.append(
+                    f"- {item.get('date') or '未知日期'}：总数 {item.get('total_count', 0)}，"
+                    f"良品 {item.get('good_count', 0)}，不良 {item.get('bad_count', 0)}，"
+                    f"待确认 {item.get('uncertain_count', 0)}。"
+                )
+
+        if defect_distribution:
+            lines.append("【缺陷分布（最多 8 条）】")
+            for item in defect_distribution[:8]:
+                lines.append(f"- {item.get('defect_type') or '未分类'}：{item.get('count', 0)}。")
+
+        if result_distribution:
+            lines.append("【结果分布】")
+            for item in result_distribution[:8]:
+                lines.append(f"- {item.get('result') or '未知'}：{item.get('count', 0)}。")
+
+        if review_status_distribution:
+            lines.append("【审核状态分布】")
+            for item in review_status_distribution[:8]:
+                lines.append(f"- {item.get('review_status') or '未知'}：{item.get('count', 0)}。")
+
+        if part_quality_ranking:
+            lines.append("【零件风险排行（最多 5 条）】")
+            for item in part_quality_ranking[:5]:
+                lines.append(
+                    f"- {item.get('part_name') or '未知零件'}（{item.get('part_code') or '无编码'}）："
+                    f"总数 {item.get('total_count', 0)}，不良 {item.get('bad_count', 0)}，"
+                    f"待确认 {item.get('uncertain_count', 0)}，良率 {item.get('pass_rate', 0)}。"
+                )
+
+        if device_quality_ranking:
+            lines.append("【设备风险排行（最多 5 条）】")
+            for item in device_quality_ranking[:5]:
+                lines.append(
+                    f"- {item.get('device_name') or '未知设备'}（{item.get('device_code') or '无编码'}）："
+                    f"总数 {item.get('total_count', 0)}，不良 {item.get('bad_count', 0)}，"
+                    f"待确认 {item.get('uncertain_count', 0)}，良率 {item.get('pass_rate', 0)}。"
+                )
+
+        if key_findings:
+            lines.append("【关键发现】")
+            for item in key_findings[:8]:
+                if isinstance(item, str) and item.strip():
+                    lines.append(f"- {item.strip()}")
+
+        generated_at = statistics_context.get("generated_at")
+        if isinstance(generated_at, str) and generated_at.strip():
+            lines.append("【生成时间】")
+            lines.append(f"- {generated_at}")
+
+        return "\n".join(lines)
 
     def _build_statistics_suggested_questions(
         self,
@@ -1200,6 +1319,86 @@ class AIReviewClient:
 
         return "\n".join(text_chunks)
 
+    def _extract_anthropic_stream_text_piece(self, *, event_data: dict[str, Any]) -> str:
+        """从 Anthropic SSE 事件里提取当前这一个文本片段。
+
+        OpenClaudeCode 下的部分 Messages 兼容模型即使没有显式开启 `stream=true`，
+        也会直接返回 `text/event-stream`。这里统一兼容两类事件：
+        1. `content_block_start` 里已经带了首段文本
+        2. `content_block_delta` 通过 `delta.text` 逐段追加文本
+        """
+
+        event_type = str(event_data.get("type") or "")
+
+        if event_type == "content_block_start":
+            content_block = event_data.get("content_block")
+            if isinstance(content_block, dict) and content_block.get("type") == "text":
+                start_text = content_block.get("text")
+                if isinstance(start_text, str):
+                    return start_text
+
+        if event_type == "content_block_delta":
+            delta = event_data.get("delta")
+            if isinstance(delta, dict):
+                delta_text = delta.get("text")
+                if isinstance(delta_text, str):
+                    return delta_text
+
+        return ""
+
+    def _request_anthropic_messages_text(
+        self,
+        *,
+        model_context: dict[str, Any],
+        system_instruction: str,
+        history: list[dict[str, str]],
+        user_prompt: str,
+        image_assets: list[dict[str, str]],
+    ) -> str:
+        """兼容 JSON 与 SSE 两种返回形态，获取 Anthropic Messages 文本结果。
+
+        这样做的原因是：
+        - Claude 官方通常会返回普通 JSON
+        - OpenClaudeCode 下某些 Grok 模型会直接返回 SSE
+        - 这两种都属于 `anthropic_messages` 协议，调用方不应该再各自分支
+        """
+
+        endpoint_url, headers, payload = self._build_anthropic_messages_request(
+            model_context=model_context,
+            system_instruction=system_instruction,
+            history=history,
+            user_prompt=user_prompt,
+            image_assets=image_assets,
+        )
+
+        text_chunks: list[str] = []
+        for event_name, event_data in self._post_stream_events(
+            url=endpoint_url,
+            headers=headers,
+            payload=payload,
+        ):
+            if event_name == "__json__":
+                return self._extract_anthropic_text(response_data=event_data)
+
+            self._raise_stream_event_error(
+                event_name=event_name,
+                event_data=event_data,
+                endpoint_url=endpoint_url,
+            )
+
+            text_piece = self._extract_anthropic_stream_text_piece(event_data=event_data)
+            if text_piece:
+                text_chunks.append(text_piece)
+
+        answer_text = "".join(text_chunks).strip()
+        if not answer_text:
+            raise IntegrationError(
+                code="ai_provider_empty_answer",
+                message="Anthropic Messages 未返回可读文本内容。",
+            )
+
+        return answer_text
+
     def _extract_gemini_text(self, *, response_data: dict[str, Any]) -> str:
         """从 Gemini GenerateContent 响应中提取文本。"""
 
@@ -1229,20 +1428,29 @@ class AIReviewClient:
 
         目前只对 OpenClaudeCode 的 Codex 外接场景做兼容：
         - 同样的模型和密钥走 `/responses` 时，部分模型会直接返回 Cloudflare 502。
+        - 还有一类中转会对 `/responses` 直接返回非 JSON 内容，说明当前模型并不真正兼容 Responses。
         - 但同一批模型改走 `/chat/completions` 又可以正常完成文本与多模态请求。
-        因此这里只在“OpenClaudeCode + Responses + HTTP 502”这一类已确认的兼容性故障下兜底，
-        避免误伤 OpenAI 官方或其他中转的正常错误语义。
+        因此这里只在 OpenClaudeCode + Responses 这一条已确认的兼容链路下兜底，
+        并且只放行“明显属于协议不兼容”的错误，避免误伤 OpenAI 官方或其他中转的正常错误语义。
         """
 
         if str(model_context.get("gateway_vendor") or "") != "openclaudecode":
             return False
         if str(model_context.get("protocol_type") or "") != "openai_responses":
             return False
-        if error.code != "ai_provider_http_error":
-            return False
 
         error_details = error.details or {}
-        return error_details.get("status_code") == 502
+
+        # 已确认的兼容性问题之一：Responses 端点返回 502，但同模型走 Chat Completions 可用。
+        if error.code == "ai_provider_http_error":
+            return error_details.get("status_code") == 502
+
+        # 另一类常见故障是中转没有按 Responses 协议返回 JSON，而是返回 HTML 或其他非 JSON 内容。
+        # 这通常意味着“当前模型不适合走 Responses”，继续回退到 Chat Completions 更稳妥。
+        if error.code == "ai_provider_invalid_json":
+            return isinstance(error_details.get("response"), str)
+
+        return False
 
     def _request_openai_responses_text_with_fallback(
         self,
@@ -1432,6 +1640,56 @@ class AIReviewClient:
                 image_assets=image_assets,
             )
 
+    def _stream_anthropic_messages_text(
+        self,
+        *,
+        model_context: dict[str, Any],
+        system_instruction: str,
+        history: list[dict[str, str]],
+        user_prompt: str,
+        image_assets: list[dict[str, str]],
+    ) -> Iterator[str]:
+        """按 Anthropic Messages 协议直接转发 SSE 文本增量。
+
+        如果上游仍返回普通 JSON，则退回后端切片输出，保持前端消费方式一致。
+        """
+
+        endpoint_url, headers, payload = self._build_anthropic_messages_request(
+            model_context=model_context,
+            system_instruction=system_instruction,
+            history=history,
+            user_prompt=user_prompt,
+            image_assets=image_assets,
+        )
+
+        has_emitted_text = False
+        for event_name, event_data in self._post_stream_events(
+            url=endpoint_url,
+            headers=headers,
+            payload=payload,
+        ):
+            if event_name == "__json__":
+                answer_text = self._extract_anthropic_text(response_data=event_data)
+                yield from self._iter_text_chunks(text=answer_text)
+                return
+
+            self._raise_stream_event_error(
+                event_name=event_name,
+                event_data=event_data,
+                endpoint_url=endpoint_url,
+            )
+
+            text_piece = self._extract_anthropic_stream_text_piece(event_data=event_data)
+            if text_piece:
+                has_emitted_text = True
+                yield text_piece
+
+        if not has_emitted_text:
+            raise IntegrationError(
+                code="ai_provider_empty_answer",
+                message="Anthropic Messages 未返回可流式输出的文本内容。",
+            )
+
     def _stream_protocol_text(
         self,
         *,
@@ -1462,6 +1720,16 @@ class AIReviewClient:
 
         if supports_stream and protocol_type == "openai_compatible":
             yield from self._stream_openai_compatible_text(
+                model_context=model_context,
+                system_instruction=system_instruction,
+                history=history,
+                user_prompt=user_prompt,
+                image_assets=image_assets,
+            )
+            return
+
+        if supports_stream and protocol_type == "anthropic_messages":
+            yield from self._stream_anthropic_messages_text(
                 model_context=model_context,
                 system_instruction=system_instruction,
                 history=history,
@@ -1517,15 +1785,13 @@ class AIReviewClient:
             return self._extract_openai_compatible_text(response_data=response_data)
 
         if protocol_type == "anthropic_messages":
-            endpoint_url, headers, payload = self._build_anthropic_messages_request(
+            return self._request_anthropic_messages_text(
                 model_context=model_context,
                 system_instruction=system_instruction,
                 history=history,
                 user_prompt=user_prompt,
                 image_assets=image_assets,
             )
-            response_data = self._post_json(url=endpoint_url, headers=headers, payload=payload)
-            return self._extract_anthropic_text(response_data=response_data)
 
         if protocol_type == "gemini_generate_content":
             endpoint_url, headers, payload = self._build_gemini_generate_content_request(

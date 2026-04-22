@@ -459,6 +459,47 @@ class AIModelDiscoveryClient:
             raise last_error
         return []
 
+    def _retag_openclaudecode_anthropic_items(
+        self,
+        *,
+        items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """把共用 Claude UA 探测出来的 Messages 模型再细分成 Claude / Grok 两组。
+
+        OpenClaudeCode 下的 Claude 与 Grok 目前都走 Anthropic Messages，
+        但前端建网关时需要把它们拆成不同模板入口，避免用户继续把 Grok 误放到 Claude 组里。
+        """
+
+        retagged_items: list[dict[str, Any]] = []
+        for item in items:
+            next_item = dict(item)
+            normalized_identifier = str(item.get("model_identifier") or "").lower()
+            next_item["source_label"] = (
+                "OpenClaudeCode Grok 外接"
+                if "grok" in normalized_identifier
+                else "OpenClaudeCode Claude 外接"
+            )
+            retagged_items.append(next_item)
+        return retagged_items
+
+    def _drop_grok_items_from_openai_like_groups(
+        self,
+        *,
+        items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """从 OpenClaudeCode 的 OpenAI-like 分组里排除 Grok 模型。
+
+        实测 Grok 在 OpenClaudeCode 下真正稳定可用的是 Messages 路径。
+        如果继续让同名 Grok 同时出现在 Codex / 国产模型分组里，
+        建网关时就会把错误模板一起批量创建出来。
+        """
+
+        return [
+            item
+            for item in items
+            if "grok" not in str(item.get("model_identifier") or "").lower()
+        ]
+
     def _dedupe_candidates(self, *, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """对多策略探测结果做去重。"""
 
@@ -569,38 +610,44 @@ class AIModelDiscoveryClient:
             )
         elif gateway_vendor == AIGatewayVendor.OPENCLAUDECODE:
             run_probe(
-                "openclaudecode-claude",
-                lambda: self._discover_anthropic_models(
-                    gateway_vendor=gateway_vendor,
-                    base_url=normalized_base_url,
-                    api_key=normalized_api_key,
-                    auth_mode=AIAuthMode.AUTHORIZATION_BEARER,
-                    user_agent=OPENCLAUDECODE_CLAUDE_UA,
-                    source_label="OpenClaudeCode Claude 外接",
+                "openclaudecode-anthropic",
+                lambda: self._retag_openclaudecode_anthropic_items(
+                    items=self._discover_anthropic_models(
+                        gateway_vendor=gateway_vendor,
+                        base_url=normalized_base_url,
+                        api_key=normalized_api_key,
+                        auth_mode=AIAuthMode.AUTHORIZATION_BEARER,
+                        user_agent=OPENCLAUDECODE_CLAUDE_UA,
+                        source_label="OpenClaudeCode Claude 外接",
+                    )
                 ),
             )
             run_probe(
                 "openclaudecode-codex",
-                lambda: self._discover_openai_like_models(
-                    gateway_vendor=gateway_vendor,
-                    base_url=normalized_base_url,
-                    api_key=normalized_api_key,
-                    auth_mode=AIAuthMode.AUTHORIZATION_BEARER,
-                    protocol_type=AIProtocolType.OPENAI_RESPONSES,
-                    user_agent=OPENCLAUDECODE_CODEX_UA,
-                    source_label="OpenClaudeCode Codex 外接",
+                lambda: self._drop_grok_items_from_openai_like_groups(
+                    items=self._discover_openai_like_models(
+                        gateway_vendor=gateway_vendor,
+                        base_url=normalized_base_url,
+                        api_key=normalized_api_key,
+                        auth_mode=AIAuthMode.AUTHORIZATION_BEARER,
+                        protocol_type=AIProtocolType.OPENAI_RESPONSES,
+                        user_agent=OPENCLAUDECODE_CODEX_UA,
+                        source_label="OpenClaudeCode Codex 外接",
+                    )
                 ),
             )
             run_probe(
                 "openclaudecode-domestic",
-                lambda: self._discover_openai_like_models(
-                    gateway_vendor=gateway_vendor,
-                    base_url=normalized_base_url,
-                    api_key=normalized_api_key,
-                    auth_mode=AIAuthMode.AUTHORIZATION_BEARER,
-                    protocol_type=AIProtocolType.OPENAI_COMPATIBLE,
-                    user_agent=OPENCLAUDECODE_BROWSER_UA,
-                    source_label="OpenClaudeCode 国产模型外接",
+                lambda: self._drop_grok_items_from_openai_like_groups(
+                    items=self._discover_openai_like_models(
+                        gateway_vendor=gateway_vendor,
+                        base_url=normalized_base_url,
+                        api_key=normalized_api_key,
+                        auth_mode=AIAuthMode.AUTHORIZATION_BEARER,
+                        protocol_type=AIProtocolType.OPENAI_COMPATIBLE,
+                        user_agent=OPENCLAUDECODE_BROWSER_UA,
+                        source_label="OpenClaudeCode 国产模型外接",
+                    )
                 ),
             )
         else:
