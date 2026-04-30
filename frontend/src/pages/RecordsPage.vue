@@ -257,7 +257,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page-grid">
+  <div class="page-grid records-page">
     <PageHeader
       eyebrow="Records"
       title="检测记录"
@@ -490,6 +490,14 @@ onMounted(() => {
   padding: 22px;
 }
 
+.records-page {
+  align-content: start;
+}
+
+.records-table {
+  align-content: start;
+}
+
 .toolbar-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -538,9 +546,9 @@ onMounted(() => {
   text-align: left;
   color: inherit;
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.12), transparent 42%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.13), transparent 42%),
     rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(127, 228, 208, 0.12);
+  border: 1px solid rgba(255, 138, 31, 0.14);
   border-radius: 20px;
   appearance: none;
   cursor: pointer;
@@ -552,11 +560,11 @@ onMounted(() => {
 
 .category-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(127, 228, 208, 0.28);
+  border-color: rgba(255, 138, 31, 0.34);
 }
 
 .category-card--active {
-  border-color: rgba(127, 228, 208, 0.54);
+  border-color: rgba(255, 138, 31, 0.58);
   box-shadow: 0 18px 38px rgba(4, 12, 22, 0.28);
 }
 

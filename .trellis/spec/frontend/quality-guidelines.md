@@ -41,6 +41,8 @@ The web app should preserve those strengths.
 | Duplicating route strings such as `/records` or `/devices` in many files | Creates drift |
 | Hiding API transformations inside templates or render functions | Makes cross-layer bugs hard to trace |
 | Giant `DashboardPage` or `RecordsPage` files with all logic inline | Hard to maintain |
+| Letting authenticated console pages scroll through the browser document | Breaks the one-screen console model; route content must scroll inside `.page-grid` |
+| Fixing layout clipping by adding fixed stage heights or nested full-page scroll containers | Creates overlap, double scrollbars, and viewport-dependent hidden content |
 
 ---
 
@@ -113,6 +115,8 @@ The web app should preserve those strengths.
 | Repeating status text and badge logic in every page | Causes inconsistent UI behavior |
 | Shipping real production credentials in login helper copy | Exposes operator secrets through public frontend assets |
 | Letting one sparse side panel stretch to the full height of a dense detail area without meaningful filler content | Creates a large empty block that users perceive as unfinished or visually broken |
+| Switching `body` back to `overflow-y: auto` to reveal clipped content | Fixes one screenshot by making the whole app a long page; use the internal `.page-grid` scroll contract instead |
+| Adding `height="100%"` to route-level tables inside compressed grid rows | The table can shrink into a tiny pane and make pagination or bottom rows look cut off |
 
 ### Convention: Visual QA Is Part of Done
 
@@ -122,6 +126,9 @@ Required visual QA pass:
 
 - inspect the changed page at `100%`, `125%`, and `150%` browser zoom
 - inspect at least one narrow layout around `900px` width
+- for authenticated pages, verify the browser document itself does not vertically scroll
+- verify long records, detail, statistics, and gallery content scroll inside the right `.page-grid` panel
+- verify there is no competing full-page nested scroll container under `.page-grid`
 - verify repeated cards or action panels align consistently when they are presented as one group
 - verify sparse panels do not leave abnormal empty slabs beside dense panels
 - verify the page uses an aesthetic appropriate to the scenario:
@@ -133,6 +140,17 @@ Why:
 
 - many user complaints that sound like “layout bug” are actually failures of visual balance, not failures of data binding
 - symmetry, spacing, and proportion are part of perceived quality in the same way loading and empty states are part of behavioral quality
+- the console shell is part of the product contract: outside-page scrolling makes the system feel like an uncontrolled long document
+
+Executable assertion points:
+
+```ts
+const pageGrid = document.querySelector(".page-grid") as HTMLElement;
+
+expect(document.documentElement.scrollHeight).toBe(document.documentElement.clientHeight);
+expect(getComputedStyle(document.body).overflow).toBe("hidden");
+expect(getComputedStyle(pageGrid).overflowY).toBe("auto");
+```
 
 ---
 

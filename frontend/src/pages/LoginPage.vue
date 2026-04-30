@@ -24,6 +24,7 @@ import type { RegisterMode } from "@/types/api";
 import type { AuthRuntimeOptions, RegisterResponse } from "@/types/models";
 
 type PublicAuthPanel = "login" | "register" | "forgot";
+type RegisterStep = "profile" | "security";
 
 const authStore = useAuthStore();
 const route = useRoute();
@@ -41,6 +42,8 @@ const runtimeOptions = ref<AuthRuntimeOptions>({
 
 // 公共认证入口在登录、注册、找回密码三块之间切换。
 const activePanel = ref<PublicAuthPanel>("login");
+// 注册表单字段较多，拆成两步显示，避免右侧认证卡片出现突兀的浏览器滚动条。
+const activeRegisterStep = ref<RegisterStep>("profile");
 
 // 不同流程的提交状态分别维护，避免一个流程锁死整页。
 const loginLoading = ref(false);
@@ -101,6 +104,38 @@ const isResetRoute = computed(() => route.name === routeNames.resetPassword);
 
 // 注册页当前是否走“邀请码加入公司”路径。
 const isInviteJoinMode = computed(() => registerFormState.registerMode === "invite_join");
+
+/**
+ * 注册页步骤配置。
+ * 第一步只收集身份与公司加入方式，第二步再处理密码与提交，保证单屏内信息密度稳定。
+ */
+const REGISTER_STEP_OPTIONS: Array<{
+  name: RegisterStep;
+  title: string;
+  description: string;
+}> = [
+  {
+    name: "profile",
+    title: "身份资料",
+    description: "账号、邮箱和公司加入方式",
+  },
+  {
+    name: "security",
+    title: "安全确认",
+    description: "密码策略与最终提交",
+  },
+];
+
+/**
+ * 当前注册步骤索引。
+ * 翻页按钮复用这里的索引，避免多个按钮各自判断边界。
+ */
+const activeRegisterStepIndex = computed(() =>
+  Math.max(
+    REGISTER_STEP_OPTIONS.findIndex((item) => item.name === activeRegisterStep.value),
+    0,
+  ),
+);
 
 /**
  * 根据注册模式返回按钮文案，让用户一眼知道当前提交会发生什么。
@@ -176,6 +211,7 @@ function clearRegisterBusinessFields(): void {
  */
 function resetRegisterForm(): void {
   registerFormState.registerMode = "invite_join";
+  activeRegisterStep.value = "profile";
   clearRegisterSensitiveFields();
   clearRegisterBusinessFields();
 }
@@ -238,6 +274,18 @@ function validateModeSpecificRegisterFields(): boolean {
   }
 
   return true;
+}
+
+/**
+ * 注册步骤翻页。
+ * 表单本身不再依赖纵向滚动，字段太多时交给步骤切换承接。
+ */
+function stepRegisterPage(direction: -1 | 1): void {
+  const nextIndex = Math.min(
+    Math.max(activeRegisterStepIndex.value + direction, 0),
+    REGISTER_STEP_OPTIONS.length - 1,
+  );
+  activeRegisterStep.value = REGISTER_STEP_OPTIONS[nextIndex]?.name ?? "profile";
 }
 
 /**
@@ -605,72 +653,98 @@ onMounted(() => {
             label-position="top"
             @submit.prevent="handleRegister"
           >
-            <ElAlert
-              class="login-page__alert login-page__alert--inline"
-              title="请选择注册方式"
-              type="info"
-              :closable="false"
-              description="邀请码路径适合加入现有公司；管理员申请路径适合新建全新的独立公司空间。"
-            />
-
-            <div class="login-page__mode-switch">
-              <ElRadioGroup v-model="registerFormState.registerMode" size="large">
-                <ElRadioButton value="invite_join">邀请码加入公司</ElRadioButton>
-                <ElRadioButton value="company_admin_request">申请新公司管理员</ElRadioButton>
-              </ElRadioGroup>
-              <p class="login-page__mode-note">{{ registerModeSummary }}</p>
+            <div class="login-page__stepper" aria-label="注册步骤">
+              <button
+                v-for="(item, index) in REGISTER_STEP_OPTIONS"
+                :key="item.name"
+                type="button"
+                class="login-page__stepper-item"
+                :class="{ 'login-page__stepper-item--active': activeRegisterStep === item.name }"
+                @click="activeRegisterStep = item.name"
+              >
+                <span>0{{ index + 1 }}</span>
+                <strong>{{ item.title }}</strong>
+                <small>{{ item.description }}</small>
+              </button>
             </div>
 
-            <ElFormItem label="用户名">
-              <ElInput
-                v-model="registerFormState.username"
-                :prefix-icon="User"
-                placeholder="请输入用户名"
-              />
-            </ElFormItem>
+            <section
+              v-show="activeRegisterStep === 'profile'"
+              class="login-page__step-page login-page__step-page--active"
+            >
+              <div class="login-page__mode-switch">
+                <ElRadioGroup v-model="registerFormState.registerMode" size="large">
+                  <ElRadioButton value="invite_join">邀请码加入公司</ElRadioButton>
+                  <ElRadioButton value="company_admin_request">申请新公司管理员</ElRadioButton>
+                </ElRadioGroup>
+                <p class="login-page__mode-note">{{ registerModeSummary }}</p>
+              </div>
 
-            <ElFormItem label="显示名称">
-              <ElInput
-                v-model="registerFormState.displayName"
-                :prefix-icon="User"
-                placeholder="请输入显示名称"
-              />
-            </ElFormItem>
+              <div class="login-page__field-grid">
+                <ElFormItem label="用户名">
+                  <ElInput
+                    v-model="registerFormState.username"
+                    :prefix-icon="User"
+                    placeholder="请输入用户名"
+                  />
+                </ElFormItem>
 
-            <ElFormItem label="邮箱">
-              <ElInput
-                v-model="registerFormState.email"
-                :prefix-icon="Message"
-                placeholder="请输入可接收邮件的邮箱"
-              />
-            </ElFormItem>
+                <ElFormItem label="显示名称">
+                  <ElInput
+                    v-model="registerFormState.displayName"
+                    :prefix-icon="User"
+                    placeholder="请输入显示名称"
+                  />
+                </ElFormItem>
 
-            <ElFormItem v-if="isInviteJoinMode" label="公司邀请码">
-              <ElInput
-                v-model="registerFormState.inviteCode"
-                :prefix-icon="Promotion"
-                placeholder="请输入公司管理员提供的邀请码"
-              />
-            </ElFormItem>
+                <ElFormItem label="邮箱" class="login-page__field-grid-wide">
+                  <ElInput
+                    v-model="registerFormState.email"
+                    :prefix-icon="Message"
+                    placeholder="请输入可接收邮件的邮箱"
+                  />
+                </ElFormItem>
 
-            <template v-else>
-              <ElFormItem label="公司名称">
-                <ElInput
-                  v-model="registerFormState.companyName"
-                  :prefix-icon="OfficeBuilding"
-                  placeholder="请输入准备创建的公司名称"
-                />
-              </ElFormItem>
+                <ElFormItem
+                  v-if="isInviteJoinMode"
+                  label="公司邀请码"
+                  class="login-page__field-grid-wide"
+                >
+                  <ElInput
+                    v-model="registerFormState.inviteCode"
+                    :prefix-icon="Promotion"
+                    placeholder="请输入公司管理员提供的邀请码"
+                  />
+                </ElFormItem>
 
-              <ElFormItem label="联系人">
-                <ElInput
-                  v-model="registerFormState.companyContactName"
-                  :prefix-icon="User"
-                  placeholder="请输入公司联系人"
-                />
-              </ElFormItem>
+                <template v-else>
+                  <ElFormItem label="公司名称">
+                    <ElInput
+                      v-model="registerFormState.companyName"
+                      :prefix-icon="OfficeBuilding"
+                      placeholder="请输入准备创建的公司名称"
+                    />
+                  </ElFormItem>
 
-              <ElFormItem label="申请备注">
+                  <ElFormItem label="联系人">
+                    <ElInput
+                      v-model="registerFormState.companyContactName"
+                      :prefix-icon="User"
+                      placeholder="请输入公司联系人"
+                    />
+                  </ElFormItem>
+                </template>
+              </div>
+            </section>
+
+            <section
+              v-show="activeRegisterStep === 'security'"
+              class="login-page__step-page login-page__step-page--active"
+            >
+              <ElFormItem
+                v-if="!isInviteJoinMode"
+                label="申请备注"
+              >
                 <ElInput
                   v-model="registerFormState.companyNote"
                   class="login-page__textarea"
@@ -680,39 +754,63 @@ onMounted(() => {
                   placeholder="可填写业务场景、设备规模或其他审批说明"
                 />
               </ElFormItem>
-            </template>
 
-            <ElFormItem label="密码">
-              <ElInput
-                v-model="registerFormState.password"
-                :prefix-icon="Lock"
-                placeholder="请输入密码"
-                show-password
-                type="password"
-              />
-            </ElFormItem>
+              <div class="login-page__field-grid">
+                <ElFormItem label="密码">
+                  <ElInput
+                    v-model="registerFormState.password"
+                    :prefix-icon="Lock"
+                    placeholder="请输入密码"
+                    show-password
+                    type="password"
+                  />
+                </ElFormItem>
 
-            <ElFormItem label="确认密码">
-              <ElInput
-                v-model="registerFormState.confirmPassword"
-                :prefix-icon="Lock"
-                placeholder="请再次输入密码"
-                show-password
-                type="password"
-              />
-            </ElFormItem>
+                <ElFormItem label="确认密码">
+                  <ElInput
+                    v-model="registerFormState.confirmPassword"
+                    :prefix-icon="Lock"
+                    placeholder="请再次输入密码"
+                    show-password
+                    type="password"
+                  />
+                </ElFormItem>
+              </div>
 
-            <p class="login-page__policy">{{ runtimeOptions.passwordPolicyHint }}</p>
+              <p class="login-page__policy">{{ runtimeOptions.passwordPolicyHint }}</p>
+            </section>
 
-            <ElButton
-              class="login-page__submit"
-              color="var(--app-primary)"
-              native-type="submit"
-              :loading="registerLoading"
-              size="large"
-            >
-              {{ registerSubmitText }}
-            </ElButton>
+            <div class="login-page__step-actions">
+              <ElButton
+                plain
+                native-type="button"
+                size="large"
+                :disabled="activeRegisterStepIndex <= 0"
+                @click="stepRegisterPage(-1)"
+              >
+                上一步
+              </ElButton>
+              <ElButton
+                v-if="activeRegisterStep !== 'security'"
+                type="primary"
+                plain
+                native-type="button"
+                size="large"
+                @click="stepRegisterPage(1)"
+              >
+                下一步
+              </ElButton>
+              <ElButton
+                v-else
+                class="login-page__submit"
+                color="var(--app-primary)"
+                native-type="submit"
+                :loading="registerLoading"
+                size="large"
+              >
+                {{ registerSubmitText }}
+              </ElButton>
+            </div>
           </ElForm>
         </ElTabPane>
 
@@ -786,12 +884,15 @@ onMounted(() => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(380px, 560px);
   gap: 28px;
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
   padding: 28px;
   max-width: 1520px;
   margin: 0 auto;
   position: relative;
   align-items: stretch;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .login-page::before,
@@ -858,7 +959,7 @@ onMounted(() => {
   width: 260px;
   height: 260px;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(127, 228, 208, 0.08), transparent 70%);
+  background: radial-gradient(circle, rgba(255, 138, 31, 0.1), transparent 70%);
 }
 
 .login-page__contest {
@@ -945,13 +1046,15 @@ onMounted(() => {
   justify-self: end;
   width: min(100%, 560px);
   min-height: min(820px, calc(100vh - 56px));
+  max-height: calc(100vh - 56px);
   padding: 34px 32px;
   border-radius: 30px;
   border: 1px solid rgba(149, 184, 223, 0.14);
   background:
-    radial-gradient(circle at top center, rgba(127, 228, 208, 0.08), transparent 30%),
+    radial-gradient(circle at top center, rgba(255, 138, 31, 0.1), transparent 30%),
     linear-gradient(180deg, rgba(13, 28, 48, 0.94), rgba(10, 22, 38, 0.92));
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .login-page__form-card::before {
@@ -959,7 +1062,7 @@ onMounted(() => {
   position: absolute;
   inset: 0 0 auto 0;
   height: 4px;
-  background: linear-gradient(90deg, rgba(127, 228, 208, 0.96), rgba(93, 151, 242, 0.92));
+  background: linear-gradient(90deg, rgba(255, 138, 31, 0.96), rgba(63, 167, 255, 0.92));
 }
 
 .login-page__tabs {
@@ -982,7 +1085,7 @@ onMounted(() => {
 .login-page__mode-switch {
   display: grid;
   gap: 10px;
-  margin-bottom: 18px;
+  margin-bottom: 0;
   padding: 16px 18px;
   border: 1px solid rgba(149, 184, 223, 0.12);
   border-radius: 16px;
@@ -1001,6 +1104,84 @@ onMounted(() => {
   color: var(--app-text-secondary);
   font-size: 13px;
   line-height: 1.7;
+}
+
+.login-page__stepper {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.login-page__stepper-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(149, 184, 223, 0.14);
+  border-radius: 14px;
+  color: var(--app-text-secondary);
+  text-align: left;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    color 0.2s ease;
+}
+
+.login-page__stepper-item span {
+  color: var(--app-copper);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.login-page__stepper-item strong {
+  color: var(--app-text);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.login-page__stepper-item small {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.login-page__stepper-item--active {
+  border-color: rgba(255, 138, 31, 0.5);
+  background:
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.14), transparent 38%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.login-page__step-page {
+  display: grid;
+  gap: 14px;
+  min-height: 292px;
+  align-content: start;
+}
+
+.login-page__field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.login-page__field-grid-wide {
+  grid-column: 1 / -1;
+}
+
+.login-page__step-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.login-page__step-actions :deep(.el-button) {
+  width: 100%;
+  margin: 0;
 }
 
 .login-page__actions {
@@ -1042,7 +1223,12 @@ onMounted(() => {
 
 @media (max-width: 1180px) {
   .login-page {
+    height: 100dvh;
+    min-height: 100dvh;
     grid-template-columns: 1fr;
+    align-items: start;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .login-page__highlights {
@@ -1057,6 +1243,8 @@ onMounted(() => {
     justify-self: stretch;
     width: 100%;
     min-height: auto;
+    max-height: none;
+    overflow: visible;
   }
 }
 
@@ -1088,6 +1276,16 @@ onMounted(() => {
 
   .login-page__actions {
     grid-template-columns: 1fr;
+  }
+
+  .login-page__stepper,
+  .login-page__field-grid,
+  .login-page__step-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .login-page__step-page {
+    min-height: auto;
   }
 }
 

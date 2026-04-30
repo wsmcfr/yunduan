@@ -503,7 +503,7 @@ function createTrendChartState(items: DailyTrendItem[]): TrendChartState {
   const seriesDefinitions = [
     {
       label: "总量",
-      color: "#7fe4d0",
+      color: "#ffb74d",
       values: items.map((item) => item.totalCount),
       withArea: true,
     },
@@ -963,8 +963,8 @@ function handleTrendMouseLeave(): void {
                 >
                   <defs>
                     <linearGradient id="stats-trend-area" x1="0%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stop-color="#7fe4d0" stop-opacity="0.26" />
-                      <stop offset="100%" stop-color="#7fe4d0" stop-opacity="0.02" />
+                      <stop offset="0%" stop-color="#ffb74d" stop-opacity="0.26" />
+                      <stop offset="100%" stop-color="#ffb74d" stop-opacity="0.02" />
                     </linearGradient>
                   </defs>
 
@@ -1566,7 +1566,7 @@ function handleTrendMouseLeave(): void {
 
 <style scoped>
 .stats-page {
-  --stats-workspace-stage-height: clamp(620px, calc(100vh - 320px), 920px);
+  /* 统计页内容会随筛选和 AI 对话自然增长，统一交给右侧 page-grid 内部滚动承接。 */
   gap: 22px;
 }
 
@@ -1624,12 +1624,13 @@ function handleTrendMouseLeave(): void {
 }
 
 .stats-page__hero {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .stats-page__hero-actions {
-  align-content: start;
-  justify-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
 }
 
 .stats-filter-card,
@@ -1663,7 +1664,7 @@ function handleTrendMouseLeave(): void {
 }
 
 .stats-filter-card__controls {
-  grid-template-columns: minmax(280px, 1.2fr) repeat(2, minmax(220px, 0.8fr)) auto;
+  grid-template-columns: minmax(280px, 1.15fr) repeat(2, minmax(220px, 0.82fr)) auto;
   align-items: center;
 }
 
@@ -1675,20 +1676,27 @@ function handleTrendMouseLeave(): void {
 
 .stats-page__metrics {
   display: grid;
-  gap: 18px;
+  gap: 14px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.stats-page__metrics :deep(.metric-card) {
+  min-height: 122px;
+  padding: 18px;
 }
 
 .stats-page__content {
   display: grid;
   gap: 20px;
   align-content: start;
+  min-height: 0;
+  grid-template-rows: auto auto;
 }
 
 .stats-workspace-pager {
-  padding: 22px;
+  padding: 18px;
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .stats-workspace-pager__header p,
@@ -1720,18 +1728,18 @@ function handleTrendMouseLeave(): void {
 
 .stats-workspace-pager__item:hover {
   transform: translateY(-1px);
-  border-color: rgba(127, 228, 208, 0.28);
+  border-color: rgba(255, 138, 31, 0.34);
 }
 
 .stats-workspace-pager__item--active {
-  border-color: rgba(127, 228, 208, 0.46);
+  border-color: rgba(255, 138, 31, 0.5);
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.12), transparent 38%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.14), transparent 38%),
     rgba(255, 255, 255, 0.04);
 }
 
 .stats-workspace-pager__item-index {
-  color: rgba(127, 228, 208, 0.86);
+  color: var(--app-copper);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -1758,17 +1766,12 @@ function handleTrendMouseLeave(): void {
 .stats-page__workspace-stage {
   display: grid;
   gap: 20px;
-  min-height: var(--stats-workspace-stage-height);
 }
 
 .stats-workspace-page {
   display: none;
   gap: 20px;
   align-content: start;
-  min-height: var(--stats-workspace-stage-height);
-  max-height: var(--stats-workspace-stage-height);
-  overflow-y: auto;
-  padding-right: 6px;
 }
 
 .stats-workspace-page--active {
@@ -1802,9 +1805,9 @@ function handleTrendMouseLeave(): void {
   gap: 16px;
   padding: 16px 18px;
   border-radius: 18px;
-  border: 1px solid rgba(127, 228, 208, 0.12);
+  border: 1px solid rgba(255, 138, 31, 0.14);
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.1), transparent 34%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.12), transparent 34%),
     rgba(255, 255, 255, 0.02);
 }
 
@@ -1848,7 +1851,7 @@ function handleTrendMouseLeave(): void {
 }
 
 .stats-trend__cursor-line {
-  stroke: rgba(127, 228, 208, 0.22);
+  stroke: rgba(255, 138, 31, 0.26);
   stroke-dasharray: 4 6;
 }
 
@@ -1973,7 +1976,7 @@ function handleTrendMouseLeave(): void {
 }
 
 .stats-bars__fill--defect {
-  background: linear-gradient(90deg, rgba(127, 228, 208, 0.92), rgba(57, 189, 162, 0.92));
+  background: linear-gradient(90deg, rgba(255, 138, 31, 0.94), rgba(255, 183, 77, 0.9));
 }
 
 .stats-bars__fill--risk {
@@ -1981,7 +1984,7 @@ function handleTrendMouseLeave(): void {
 }
 
 .stats-bars__fill--device {
-  background: linear-gradient(90deg, rgba(106, 167, 255, 0.92), rgba(127, 228, 208, 0.92));
+  background: linear-gradient(90deg, rgba(63, 167, 255, 0.92), rgba(255, 138, 31, 0.84));
 }
 
 .stats-findings__item {
@@ -2003,8 +2006,8 @@ function handleTrendMouseLeave(): void {
   border-radius: 999px;
   display: inline-grid;
   place-items: center;
-  background: rgba(127, 228, 208, 0.16);
-  color: #7fe4d0;
+  background: rgba(255, 138, 31, 0.18);
+  color: var(--app-copper);
   font-weight: 700;
 }
 
@@ -2034,7 +2037,7 @@ function handleTrendMouseLeave(): void {
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: rgba(127, 228, 208, 0.92);
+  background: rgba(255, 138, 31, 0.92);
   animation: stats-ai-thinking 1.2s infinite ease-in-out;
 }
 
@@ -2074,9 +2077,9 @@ function handleTrendMouseLeave(): void {
   padding: 22px;
   margin-bottom: 4px;
   border-radius: 18px;
-  border: 1px solid rgba(127, 228, 208, 0.16);
+  border: 1px solid rgba(255, 138, 31, 0.18);
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.12), transparent 34%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.13), transparent 34%),
     rgba(255, 255, 255, 0.025);
 }
 
@@ -2155,8 +2158,8 @@ function handleTrendMouseLeave(): void {
 
 .stats-ai-panel__message--user {
   margin-left: auto;
-  background: rgba(47, 182, 162, 0.12);
-  border-color: rgba(47, 182, 162, 0.22);
+  background: rgba(255, 138, 31, 0.14);
+  border-color: rgba(255, 138, 31, 0.26);
 }
 
 .stats-ai-panel__message-meta {
@@ -2243,7 +2246,7 @@ function handleTrendMouseLeave(): void {
 
 @media (max-width: 900px) {
   .stats-page {
-    --stats-workspace-stage-height: auto;
+    gap: 18px;
   }
 
   .stats-page__hero {
@@ -2287,8 +2290,6 @@ function handleTrendMouseLeave(): void {
 
   .stats-page__workspace-stage,
   .stats-workspace-page {
-    min-height: auto;
-    max-height: none;
     overflow: visible;
     padding-right: 0;
   }

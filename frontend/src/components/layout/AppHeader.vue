@@ -140,7 +140,7 @@ onUnmounted(() => {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(47, 182, 162, 0.22), rgba(106, 167, 255, 0.34));
+  background: linear-gradient(135deg, rgba(255, 138, 31, 0.28), rgba(63, 167, 255, 0.3));
   font-weight: 800;
 }
 

@@ -700,7 +700,7 @@ function stepWorkspacePage(direction: -1 | 1): void {
 
 <style scoped>
 .dashboard-page {
-  --dashboard-workspace-stage-height: clamp(620px, calc(100vh - 320px), 900px);
+  /* 仪表盘分页只切换内容，不再锁定工作区高度，避免底部建议区被桌面 shell 裁掉。 */
   gap: 22px;
 }
 
@@ -754,18 +754,18 @@ function stepWorkspacePage(direction: -1 | 1): void {
 
 .dashboard-pager__item:hover {
   transform: translateY(-1px);
-  border-color: rgba(127, 228, 208, 0.28);
+  border-color: rgba(255, 138, 31, 0.34);
 }
 
 .dashboard-pager__item--active {
-  border-color: rgba(127, 228, 208, 0.46);
+  border-color: rgba(255, 138, 31, 0.5);
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.12), transparent 38%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.14), transparent 38%),
     rgba(255, 255, 255, 0.04);
 }
 
 .dashboard-pager__item-index {
-  color: rgba(127, 228, 208, 0.86);
+  color: var(--app-copper);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -790,17 +790,12 @@ function stepWorkspacePage(direction: -1 | 1): void {
 .dashboard-workspace-stage {
   display: grid;
   gap: 20px;
-  min-height: var(--dashboard-workspace-stage-height);
 }
 
 .dashboard-workspace-page {
   display: none;
   gap: 20px;
   align-content: start;
-  min-height: var(--dashboard-workspace-stage-height);
-  max-height: var(--dashboard-workspace-stage-height);
-  overflow-y: auto;
-  padding-right: 6px;
 }
 
 .dashboard-workspace-page--active {
@@ -880,6 +875,7 @@ function stepWorkspacePage(direction: -1 | 1): void {
   grid-template-columns: minmax(0, 1.3fr) minmax(340px, 0.9fr);
   gap: 20px;
   align-items: start;
+  min-height: 0;
 }
 
 .dashboard-panel {
@@ -944,7 +940,7 @@ function stepWorkspacePage(direction: -1 | 1): void {
 .dashboard-trend-row__total-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(47, 182, 162, 0.9), rgba(106, 167, 255, 0.92));
+  background: linear-gradient(90deg, rgba(255, 138, 31, 0.92), rgba(63, 167, 255, 0.9));
 }
 
 .dashboard-trend-row__composition {
@@ -1025,7 +1021,7 @@ function stepWorkspacePage(direction: -1 | 1): void {
 .dashboard-ranking-item__fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(47, 182, 162, 0.95), rgba(127, 228, 208, 0.86));
+  background: linear-gradient(90deg, rgba(255, 138, 31, 0.95), rgba(255, 183, 77, 0.88));
 }
 
 .dashboard-result-grid,
@@ -1122,7 +1118,7 @@ function stepWorkspacePage(direction: -1 | 1): void {
 }
 
 .dashboard-ranking-item__fill.is-device {
-  background: linear-gradient(90deg, rgba(106, 167, 255, 0.95), rgba(47, 182, 162, 0.88));
+  background: linear-gradient(90deg, rgba(63, 167, 255, 0.95), rgba(255, 138, 31, 0.82));
 }
 
 .dashboard-gallery__stats {
@@ -1187,11 +1183,15 @@ function stepWorkspacePage(direction: -1 | 1): void {
   color: #081523;
   font-size: 13px;
   font-weight: 700;
-  background: linear-gradient(135deg, rgba(127, 228, 208, 0.98), rgba(106, 167, 255, 0.92));
+  background: linear-gradient(135deg, rgba(255, 138, 31, 0.98), rgba(63, 167, 255, 0.92));
 }
 
 .dashboard-panel--empty {
   padding: 24px;
+}
+
+.dashboard-panel--findings {
+  min-height: 190px;
 }
 
 @media (max-width: 1280px) {
@@ -1211,7 +1211,7 @@ function stepWorkspacePage(direction: -1 | 1): void {
 
 @media (max-width: 900px) {
   .dashboard-page {
-    --dashboard-workspace-stage-height: auto;
+    gap: 18px;
   }
 
   .dashboard-pager__header,
@@ -1244,8 +1244,6 @@ function stepWorkspacePage(direction: -1 | 1): void {
 
   .dashboard-workspace-stage,
   .dashboard-workspace-page {
-    min-height: auto;
-    max-height: none;
     overflow: visible;
     padding-right: 0;
   }

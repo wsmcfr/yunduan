@@ -807,6 +807,7 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
 }
 
 .stats-gallery {
+  /* 图库分页只负责切换视图，内容高度由当前分类和样本数量自然撑开。 */
   padding: 24px;
   align-content: start;
 }
@@ -872,18 +873,18 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
 
 .stats-gallery__workspace-pager-item:hover {
   transform: translateY(-1px);
-  border-color: rgba(127, 228, 208, 0.28);
+  border-color: rgba(255, 138, 31, 0.34);
 }
 
 .stats-gallery__workspace-pager-item--active {
-  border-color: rgba(127, 228, 208, 0.46);
+  border-color: rgba(255, 138, 31, 0.5);
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.12), transparent 38%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.14), transparent 38%),
     rgba(255, 255, 255, 0.04);
 }
 
 .stats-gallery__workspace-pager-index {
-  color: rgba(127, 228, 208, 0.86);
+  color: var(--app-copper);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -910,6 +911,7 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
 .stats-gallery__workspace-page {
   display: none;
   align-content: start;
+  min-width: 0;
 }
 
 .stats-gallery__workspace-page--active {
@@ -951,13 +953,13 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
   gap: 16px;
   padding: 18px;
   border-radius: 22px;
-  border: 1px solid rgba(127, 228, 208, 0.12);
+  border: 1px solid rgba(255, 138, 31, 0.14);
 }
 
 .stats-gallery__category-card,
 .stats-gallery__group-focus {
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.08), transparent 34%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.1), transparent 34%),
     rgba(255, 255, 255, 0.02);
 }
 
@@ -976,7 +978,7 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
   padding: 12px;
   border-radius: 16px;
   background:
-    radial-gradient(circle at top left, rgba(127, 228, 208, 0.2), transparent 45%),
+    radial-gradient(circle at top left, rgba(255, 138, 31, 0.2), transparent 45%),
     linear-gradient(160deg, rgba(20, 45, 62, 0.96), rgba(8, 20, 33, 0.98));
 }
 
@@ -1052,11 +1054,11 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
 
 .stats-gallery__group-chip:hover {
   transform: translateY(-2px);
-  border-color: rgba(127, 228, 208, 0.3);
+  border-color: rgba(255, 138, 31, 0.34);
 }
 
 .stats-gallery__group-chip--active {
-  border-color: rgba(127, 228, 208, 0.56);
+  border-color: rgba(255, 138, 31, 0.58);
   box-shadow: 0 18px 32px rgba(4, 12, 22, 0.24);
 }
 
@@ -1117,6 +1119,10 @@ function buildDefectSummary(item: StatisticsSampleImageItem): string {
 }
 
 @media (max-width: 900px) {
+  .stats-gallery {
+    padding: 18px;
+  }
+
   .stats-gallery__header,
   .stats-gallery__workspace-pager-header,
   .stats-gallery__workspace-pager-footer,

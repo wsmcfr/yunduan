@@ -559,7 +559,7 @@ watch(
   border-radius: 18px;
   overflow: hidden;
   background:
-    radial-gradient(circle at top left, rgba(127, 228, 208, 0.16), transparent 42%),
+    radial-gradient(circle at top left, rgba(255, 138, 31, 0.16), transparent 42%),
     rgba(255, 255, 255, 0.03);
 }
 
@@ -625,9 +625,9 @@ watch(
 .detail-review-workspace__assistant {
   padding: 18px;
   border-radius: 18px;
-  border: 1px solid rgba(127, 228, 208, 0.12);
+  border: 1px solid rgba(255, 138, 31, 0.14);
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.08), transparent 36%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.1), transparent 36%),
     rgba(255, 255, 255, 0.02);
 }
 

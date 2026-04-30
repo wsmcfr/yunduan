@@ -149,14 +149,14 @@ function handleSubmit(): void {
 }
 
 .stats-pdf-export__option:hover {
-  border-color: rgba(127, 228, 208, 0.24);
+  border-color: rgba(255, 138, 31, 0.28);
   transform: translateY(-1px);
 }
 
 .stats-pdf-export__option--active {
-  border-color: rgba(127, 228, 208, 0.42);
+  border-color: rgba(255, 138, 31, 0.48);
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.12), transparent 36%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.14), transparent 36%),
     rgba(255, 255, 255, 0.04);
 }
 

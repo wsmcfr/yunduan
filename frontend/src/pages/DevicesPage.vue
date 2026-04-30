@@ -119,7 +119,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page-grid">
+  <div class="page-grid devices-page">
     <PageHeader
       eyebrow="Devices"
       title="设备管理"
@@ -215,6 +215,14 @@ onMounted(() => {
   display: grid;
   gap: 18px;
   padding: 22px;
+}
+
+.devices-page {
+  align-content: start;
+}
+
+.table-section {
+  align-content: start;
 }
 
 .toolbar-grid {

@@ -1,6 +1,7 @@
 html,
 body,
 #app {
+  height: 100%;
   min-height: 100%;
   margin: 0;
 }
@@ -8,14 +9,42 @@ body,
 body {
   font-family: "Bahnschrift", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--app-text);
+  overflow: hidden;
   background:
-    radial-gradient(circle at top left, rgba(47, 182, 162, 0.18), transparent 32%),
-    radial-gradient(circle at bottom right, rgba(106, 167, 255, 0.16), transparent 28%),
-    linear-gradient(135deg, #07111d 0%, #0c1a2d 46%, #0f2035 100%);
+    radial-gradient(circle at top left, rgba(255, 138, 31, 0.16), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(63, 167, 255, 0.14), transparent 28%),
+    linear-gradient(135deg, #10161c 0%, #151f28 48%, #202830 100%);
 }
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 138, 31, 0.58) rgba(15, 22, 29, 0.74);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(15, 22, 29, 0.74);
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border: 2px solid rgba(15, 22, 29, 0.86);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 183, 77, 0.86), rgba(255, 138, 31, 0.66));
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(255, 198, 112, 0.96), rgba(255, 138, 31, 0.82));
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 a {
@@ -36,6 +65,7 @@ a {
 .page-grid {
   display: grid;
   gap: 20px;
+  min-height: 0;
 }
 
 .page-grid.two-col {
@@ -55,9 +85,9 @@ a {
  * 这样表格、输入框、分页和弹层都能融入当前深色工业控制台风格。
  */
 :root {
-  --el-bg-color: #0d1a2a;
-  --el-bg-color-page: #0d1a2a;
-  --el-bg-color-overlay: #10243a;
+  --el-bg-color: #161d24;
+  --el-bg-color-page: #161d24;
+  --el-bg-color-overlay: #202a33;
   --el-fill-color-blank: transparent;
   --el-fill-color-light: rgba(255, 255, 255, 0.03);
   --el-fill-color-lighter: rgba(255, 255, 255, 0.04);
@@ -81,10 +111,10 @@ a {
 
 .el-button {
   --el-button-bg-color: rgba(255, 255, 255, 0.04);
-  --el-button-border-color: rgba(149, 184, 223, 0.18);
+  --el-button-border-color: rgba(255, 183, 77, 0.18);
   --el-button-text-color: var(--app-text);
-  --el-button-hover-bg-color: rgba(47, 182, 162, 0.12);
-  --el-button-hover-border-color: rgba(47, 182, 162, 0.36);
+  --el-button-hover-bg-color: rgba(255, 138, 31, 0.14);
+  --el-button-hover-border-color: rgba(255, 138, 31, 0.42);
   --el-button-hover-text-color: var(--app-text);
 }
 
@@ -103,7 +133,7 @@ a {
 .el-select__wrapper:hover,
 .el-date-editor.el-input__wrapper:hover,
 .el-input-number:hover {
-  box-shadow: 0 0 0 1px rgba(47, 182, 162, 0.28) inset;
+  box-shadow: 0 0 0 1px rgba(255, 138, 31, 0.34) inset;
 }
 
 .el-textarea__inner,
@@ -118,7 +148,7 @@ a {
 .el-select__popper.el-popper,
 .el-picker__popper.el-popper,
 .el-message {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent), #10233a;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent), #202a33;
   border: 1px solid rgba(149, 184, 223, 0.16);
   box-shadow: var(--app-shadow);
 }
@@ -205,7 +235,7 @@ a {
 }
 
 .el-message-box {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent), #10233a;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent), #202a33;
   border: 1px solid rgba(149, 184, 223, 0.16);
   border-radius: 20px;
   box-shadow: var(--app-shadow);
@@ -238,20 +268,20 @@ a {
 .el-select-dropdown__item.is-hovering,
 .el-select-dropdown__item:hover,
 .el-dropdown-menu__item:hover {
-  background: rgba(47, 182, 162, 0.12);
+  background: rgba(255, 138, 31, 0.14);
   color: var(--app-text);
 }
 
 .el-table {
   --el-table-bg-color: transparent;
   --el-table-tr-bg-color: rgba(255, 255, 255, 0.02);
-  --el-table-row-hover-bg-color: rgba(47, 182, 162, 0.08);
+  --el-table-row-hover-bg-color: rgba(255, 138, 31, 0.08);
   --el-table-header-bg-color: rgba(255, 255, 255, 0.03);
   --el-table-fixed-box-shadow: none;
   --el-table-border-color: rgba(149, 184, 223, 0.12);
   --el-table-header-text-color: rgba(198, 214, 230, 0.88);
   --el-table-text-color: var(--app-text);
-  --el-table-current-row-bg-color: rgba(47, 182, 162, 0.08);
+  --el-table-current-row-bg-color: rgba(255, 138, 31, 0.08);
   border-radius: 16px;
   overflow: hidden;
 }
@@ -294,8 +324,8 @@ a {
 }
 
 .el-pager li.is-active {
-  color: #04201b;
-  background: linear-gradient(135deg, var(--app-primary), #7fe4d0);
+  color: #1b1208;
+  background: linear-gradient(135deg, var(--app-primary), var(--app-copper));
   border-color: transparent;
 }
 
@@ -352,15 +382,15 @@ a {
 }
 
 .el-radio-button__original-radio:checked + .el-radio-button__inner {
-  background: linear-gradient(135deg, rgba(47, 182, 162, 0.94), rgba(120, 229, 209, 0.92));
+  background: linear-gradient(135deg, rgba(255, 138, 31, 0.96), rgba(255, 183, 77, 0.94));
   border-color: transparent;
-  color: #05211c;
+  color: #1b1208;
   box-shadow: none;
 }
 
 .el-switch.is-checked .el-switch__core {
   border-color: transparent;
-  background: linear-gradient(135deg, var(--app-primary), #7fe4d0);
+  background: linear-gradient(135deg, var(--app-primary), var(--app-copper));
 }
 
 @media (max-width: 1200px) {
@@ -371,6 +401,7 @@ a {
 }
 
 @media (max-width: 768px) {
+
   .app-dialog .el-dialog__header {
     padding: 16px 18px 12px;
   }

@@ -99,7 +99,7 @@ watch(
 </script>
 
 <template>
-  <div class="page-grid">
+  <div class="page-grid gallery-page">
     <PageHeader
       eyebrow="Gallery"
       title="样本图库"
@@ -141,6 +141,11 @@ watch(
 .gallery-page__scope,
 .gallery-page__loading {
   padding: 22px;
+}
+
+.gallery-page {
+  /* 独立图库页交给右侧 page-grid 内部滚动，确保分页导航和分类详情都完整显示。 */
+  align-content: start;
 }
 
 .gallery-page__scope {

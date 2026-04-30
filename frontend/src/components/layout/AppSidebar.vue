@@ -103,6 +103,9 @@ function navigate(routeName: string): void {
   flex-direction: column;
   gap: 26px;
   width: var(--app-sidebar-width);
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
   padding: 24px 18px 24px 24px;
 }
 
@@ -134,7 +137,7 @@ function navigate(routeName: string): void {
 
 .sidebar__brand-mark {
   width: 100%;
-  --contest-brand-ink: #76a8dd;
+  --contest-brand-ink: var(--app-copper);
   --contest-brand-core: rgba(239, 247, 255, 0.96);
 }
 
@@ -172,8 +175,8 @@ function navigate(routeName: string): void {
 .sidebar__nav-item:hover,
 .sidebar__nav-item.is-active {
   color: var(--app-text);
-  border-color: rgba(47, 182, 162, 0.28);
-  background: linear-gradient(135deg, rgba(47, 182, 162, 0.18), rgba(21, 47, 70, 0.72));
+  border-color: rgba(255, 138, 31, 0.34);
+  background: linear-gradient(135deg, rgba(255, 138, 31, 0.18), rgba(32, 42, 51, 0.78));
   transform: translateX(4px);
 }
 
@@ -236,6 +239,8 @@ function navigate(routeName: string): void {
 @media (max-width: 1024px) {
   .sidebar {
     width: 100%;
+    height: auto;
+    overflow: visible;
     padding: 18px;
   }
 

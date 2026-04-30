@@ -1309,8 +1309,8 @@ onBeforeUnmount(() => {
 
 .ai-chat__message--user {
   margin-left: auto;
-  background: rgba(47, 182, 162, 0.12);
-  border-color: rgba(47, 182, 162, 0.22);
+  background: rgba(255, 138, 31, 0.14);
+  border-color: rgba(255, 138, 31, 0.26);
 }
 
 .ai-chat__message-meta {
@@ -1338,7 +1338,7 @@ onBeforeUnmount(() => {
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: rgba(127, 228, 208, 0.9);
+  background: rgba(255, 138, 31, 0.92);
   animation: ai-chat-thinking 1.2s infinite ease-in-out;
 }
 

@@ -1,21 +1,24 @@
 :root {
-  --app-bg: #0a1220;
-  --app-surface: rgba(9, 24, 39, 0.86);
-  --app-surface-soft: rgba(16, 35, 56, 0.72);
-  --app-surface-strong: #10233a;
-  --app-border: rgba(149, 184, 223, 0.18);
-  --app-text: #e8f0ff;
-  --app-text-secondary: #98b0c7;
-  --app-primary: #2fb6a2;
-  --app-primary-strong: #1f8f80;
-  --app-warning: #f6c95d;
-  --app-danger: #ff6d62;
-  --app-success: #28cb82;
-  --app-info: #6aa7ff;
+  /* 比赛主视觉采用“工业石墨 + 安全橙 + 电路蓝”，贴近嵌入式竞赛与缺陷检测场景。 */
+  --app-bg: #111820;
+  --app-surface: rgba(22, 29, 36, 0.9);
+  --app-surface-soft: rgba(31, 39, 47, 0.76);
+  --app-surface-strong: #202a33;
+  --app-border: rgba(255, 183, 77, 0.2);
+  --app-text: #f4f7fb;
+  --app-text-secondary: #aeb9c5;
+  --app-primary: #ff8a1f;
+  --app-primary-strong: #f36c21;
+  --app-warning: #ffd166;
+  --app-danger: #ff5a4f;
+  --app-success: #39d98a;
+  --app-info: #3fa7ff;
+  --app-circuit: #3fa7ff;
+  --app-copper: #ffb74d;
   --app-sidebar-width: 248px;
   --app-radius-lg: 24px;
   --app-radius-md: 18px;
   --app-radius-sm: 12px;
-  --app-shadow: 0 20px 80px rgba(4, 10, 18, 0.45);
-  --app-grid-line: rgba(255, 255, 255, 0.04);
+  --app-shadow: 0 20px 80px rgba(0, 0, 0, 0.42);
+  --app-grid-line: rgba(255, 183, 77, 0.055);
 }

@@ -1635,7 +1635,7 @@ watch(gatewayDialogVisible, (visible) => {
 </script>
 
 <template>
-  <div class="page-grid">
+  <div class="page-grid settings-page">
     <PageHeader
       eyebrow="Settings"
       title="系统设置"
@@ -2767,6 +2767,10 @@ watch(gatewayDialogVisible, (visible) => {
   align-content: start;
 }
 
+.settings-page {
+  align-content: start;
+}
+
 .settings-panel__header,
 .settings-panel__actions,
 .settings-panel__status-tags,
@@ -2801,6 +2805,7 @@ watch(gatewayDialogVisible, (visible) => {
 .settings-tabs {
   display: grid;
   gap: 18px;
+  align-content: start;
 }
 
 .settings-tabs :deep(.el-tabs__header) {
@@ -2829,7 +2834,7 @@ watch(gatewayDialogVisible, (visible) => {
 .settings-tabs :deep(.el-tabs__item.is-active) {
   color: #eef5fc;
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.14), transparent 44%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.16), transparent 44%),
     rgba(255, 255, 255, 0.05);
 }
 
@@ -2843,6 +2848,10 @@ watch(gatewayDialogVisible, (visible) => {
   gap: 18px;
   padding-top: 6px;
   align-content: start;
+}
+
+.settings-tabs :deep(.el-tabs__content) {
+  padding-right: 6px;
 }
 
 .account-overview,
@@ -2865,7 +2874,7 @@ watch(gatewayDialogVisible, (visible) => {
   border: 1px solid rgba(149, 184, 223, 0.12);
   border-radius: 18px;
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.08), transparent 34%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.1), transparent 34%),
     rgba(255, 255, 255, 0.02);
 }
 
@@ -2899,7 +2908,7 @@ watch(gatewayDialogVisible, (visible) => {
   border: 1px solid rgba(149, 184, 223, 0.12);
   border-radius: 20px;
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.08), transparent 34%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.1), transparent 34%),
     rgba(255, 255, 255, 0.02);
 }
 
@@ -2964,7 +2973,7 @@ watch(gatewayDialogVisible, (visible) => {
   border: 1px solid rgba(149, 184, 223, 0.12);
   border-radius: 20px;
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.1), transparent 42%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.12), transparent 42%),
     rgba(255, 255, 255, 0.025);
 }
 
@@ -3104,7 +3113,7 @@ watch(gatewayDialogVisible, (visible) => {
   border: 1px solid rgba(149, 184, 223, 0.08);
   border-radius: 16px;
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.08), transparent 40%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.1), transparent 40%),
     rgba(255, 255, 255, 0.028);
 }
 
@@ -3150,13 +3159,13 @@ watch(gatewayDialogVisible, (visible) => {
 
 .gateway-summary:hover {
   transform: translateY(-1px);
-  border-color: rgba(127, 228, 208, 0.34);
+  border-color: rgba(255, 138, 31, 0.36);
 }
 
 .gateway-summary--active {
-  border-color: rgba(127, 228, 208, 0.48);
+  border-color: rgba(255, 138, 31, 0.5);
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.12), transparent 36%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.14), transparent 36%),
     rgba(255, 255, 255, 0.03);
 }
 
@@ -3195,7 +3204,7 @@ watch(gatewayDialogVisible, (visible) => {
   border-radius: 16px;
   border: 1px solid rgba(149, 184, 223, 0.08);
   background:
-    radial-gradient(circle at top right, rgba(127, 228, 208, 0.08), transparent 40%),
+    radial-gradient(circle at top right, rgba(255, 138, 31, 0.1), transparent 40%),
     rgba(255, 255, 255, 0.028);
 }
 
