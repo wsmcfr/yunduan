@@ -1,0 +1,484 @@
+# Journal - caofengrui (Part 1)
+
+> AI development session journal
+> Started: 2026-04-19
+
+---
+
+
+
+## Session 1: Cloud MVP progress and spec consolidation
+
+**Date**: 2026-04-20
+**Task**: Cloud MVP progress and spec consolidation
+**Branch**: `main`
+
+### Summary
+
+Completed the cloud inspection MVP fullstack integration on top of commit `d1ad167`, then consolidated the newly validated frontend and cross-layer contracts into `.trellis/spec/` so the next session can continue from a stable backend/frontend baseline.
+
+### Main Changes
+
+| Area | Progress |
+|---|---|
+| Fullstack MVP | Completed local integration for FastAPI + Vue cloud inspection MVP based on commit `d1ad167` |
+| Backend | Login, parts, devices, detection records, manual review, statistics, MySQL/Alembic, and COS upload reservation are scaffolded and linked |
+| Frontend | Login, records, detail review workspace, parts, devices, dashboard, statistics, shell layout, dark industrial UI theme, and real-time local clock are working |
+| Real Integration | Verified login, part/device creation, record creation, detail jump, manual review overwrite behavior, AI review placeholder, and frontend console error count = 0 |
+| Cross-layer Fixes | Corrected manual review path to `/api/v1/records/{id}/manual-review`; corrected `ElRadioButton` selected value binding from `label` to `value` |
+| Spec Updates | Updated frontend type/state/component specs and the cross-layer thinking guide to capture result semantics, review workspace boundary, timestamp semantics, router aggregation checks, and UI conventions |
+| Pending Git State | `.trellis/spec/*` updates are still uncommitted in the working tree and should be committed together with the next batch if the user wants a clean checkpoint |
+
+**Next Step**:
+- Continue the server-side implementation beyond MVP, starting from the next backend expansion requested by the user.
+- Keep the current rule that records detail is the review workspace, while parts/devices remain master-data pages.
+- If resuming UI work, connect more CRUD pages and extend review/upload/COS flows without breaking the `result` vs `effective_result` contract.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d1ad167` | (see git log) |
+
+### Testing
+
+- [OK] Verified local login with `admin / admin123`
+- [OK] Verified part creation, device creation, and detection record creation
+- [OK] Verified jump from records list to record detail page
+- [OK] Verified manual review submission and latest review overriding `effective_result`
+- [OK] Verified AI review placeholder endpoint call
+- [OK] Verified frontend local clock auto-refresh and frontend console error count = 0
+
+### Status
+
+# **In Progress**
+
+### Next Steps
+
+- Continue the next backend implementation request on top of the current MVP instead of rebuilding the scaffold
+- Keep the records detail page as the only review workspace; do not move manual/AI review entry points into parts or devices master-data pages
+- Preserve the `result` vs `effective_result` contract and the four timestamp fields when extending upload, COS, or review flows
+- Commit the pending `.trellis/spec/*` updates together with the next clean checkpoint if a repository snapshot is needed
+
+
+## Session 2: AI review streaming, gateway config, and analytics delivery
+
+**Date**: 2026-04-20
+**Task**: AI review streaming, gateway config, and analytics delivery
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| 模块 | 记录 |
+|---|---|
+| 后端能力 | 新增 AI 网关与模型配置、密钥加密存储、模型自动探测、单条记录 AI 对话/复核流式 SSE、统计分析流式 SSE、统计导出服务、COS 预览地址支持，以及相关路由、Schema、仓储、服务与迁移。 |
+| 前端能力 | 新增设置页 AI 网关/模型配置界面、单条记录 AI 对话弹窗、语音输入、多图切换、统计页 AI 流式分析、图表与导出辅助逻辑，并完成多轮对话交互。 |
+| 线上修复 | 定位并修复 AI 对话“请求 200 但无输出”的真实根因：SSE 第一帧 `meta` 事件携带 `datetime` 导致 `json.dumps` 失败。后端改为先经 `jsonable_encoder` 再编码，并为记录流/统计流补充未处理异常转 `error` 事件。 |
+| 前端修复 | 定位并修复 AI 回答串入用户问题气泡的问题：消息流式更新不再依赖 `createdAt` 时间戳，而是引入前端本地 `localId` 精确锁定 assistant 占位消息。 |
+| Spec 沉淀 | 更新 `.trellis/spec/backend/error-handling.md`、`.trellis/spec/frontend/state-management.md`、`.trellis/spec/guides/cross-layer-thinking-guide.md`，补充 SSE 首帧序列化约束、前端流式消息定位约束与跨层检查清单。 |
+| 验证 | 完成 `frontend` 构建、`frontend` Vitest 测试、`backend` unittest 测试，并确认工作树干净。 |
+| Git 提交 | 完成功能提交 `bbcbf1e feat(fullstack): add configurable AI review and analytics workflows`，以及忽略资料目录提交 `bc06f68 chore(gitignore): ignore ziliao directory`，二者均已推送到 `origin/main`。 |
+| 安全处理 | 未提交真实服务器密码、COS SecretId/SecretKey、私有网关密钥或下载资料目录 `ziliao/`；已将 `ziliao/` 写入 `.gitignore`。 |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bbcbf1e` | (see git log) |
+| `bc06f68` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 3: 图库分类与轻量PDF导出收尾
+
+**Date**: 2026-04-21
+**Task**: 图库分类与轻量PDF导出收尾
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| 类别 | 内容 |
+|---|---|
+| 提交 | `44479e8 feat(fullstack): refine gallery analytics and lightweight pdf export` |
+| 统计图库 | 完成样本图库独立页、分类入口、记录跳转复检、图片显示比例与卡片布局优化，避免图片在宽屏下过大铺满 |
+| 复检上下文 | 检测记录补充 `vision_context / sensor_context / decision_context / device_context`，详情页与 AI 复核上下文同步展示 |
+| 统计分析 | 新增图库摘要入口、零件类型活跃度汇总、样本分类聚合与统计页联动 |
+| 轻量 PDF | 新增 `statistics_lightweight_pdf_renderer.py`，将轻量导出拆成稳定多页布局，首页保留总览与排行，摘要/AI 全文分后续页 |
+| 测试策略 | 为轻量 PDF 增加 fake canvas 分页回归测试，不依赖本地 `reportlab`；生产侧补做真实 smoke render 与页数验证 |
+| 数据库 | 新增 `20260420_0003_detection_record_contexts.py` 迁移，补齐检测记录结构化上下文字段 |
+| Spec 沉淀 | 更新前端图片证据缩放规范、后端部署规范、后端 PDF 分页测试规范 |
+| 验证 | `npm run build`、`npm run test`、`python -m compileall backend/src backend/tests backend/alembic/versions`、`backend\\.venv\\Scripts\\python.exe -m unittest tests.test_statistics_export_service` 均通过；生产 `/health` 正常 |
+| 部署 | 已将图库样式优化与轻量 PDF 热修复部署到 `yunfuwu-prod`，并完成备份、依赖检查、重启与健康校验 |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `44479e8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 4: 统计导出、仪表盘与管理界面收尾
+
+**Date**: 2026-04-21
+**Task**: 统计导出、仪表盘与管理界面收尾
+**Branch**: `backup-pre-multitenant-auth-20260421`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| 类别 | 内容 |
+|---|---|
+| 提交 | `4744160 feat(fullstack): polish analytics reporting and admin workspace` |
+| 统计导出 | 完成统计海报图方案与完整 PDF 双轨导出收尾，修复 AI 长文本跨页与导出截断问题，并补充统计导出测试。 |
+| 仪表盘与统计页 | 重写仪表盘总览信息组织，补充风险聚焦、关键发现、图库摘要与趋势概览；统计页继续收口 AI 分析、导出与摘要展示。 |
+| AI 对话体验 | 补充 AI 历史记录与自动滚动能力，优化复检 AI 对话的流式体验与消息展示。 |
+| 设置页与管理区 | 优化 AI 网关预设卡片与网关列表布局，消除左侧大块空白，增强概览信息与管理界面的整齐度。 |
+| 品牌与视觉 | 新增竞赛主题 Logo/芯片标识组件，更新站点图标与部分页面视觉呈现。 |
+| 后端统计支持 | 同步扩展统计接口、Schema、服务与轻量 PDF 渲染，保证前后端统计与导出链路一致。 |
+| 规范沉淀 | 更新前端组件与质量规范，明确界面设计必须考虑美观、对称、场景化审美与视觉 QA。 |
+| 验证 | 完成 `frontend npm run build`、`frontend npm run test`、`backend unittest`，并已部署前端到 `yunfuwu-prod` 验证线上静态资源切换。 |
+| 安全 | 推送前执行敏感信息扫描，未提交真实密钥、密码、服务器口令等敏感数据；代码已推送到备份分支 `backup-pre-multitenant-auth-20260421`。 |
+
+**测试命令**:
+- `frontend: npm run build`
+- `frontend: npm run test`
+- `backend: $env:DATABASE_URL=''sqlite+pysqlite:///:memory:''; $env:JWT_SECRET_KEY=''test-secret-key''; .\\.venv\\Scripts\\python.exe -m unittest tests.test_auth_service tests.test_app tests.test_statistics_export_service`
+
+**部署记录**:
+- 前端已通过 `yunfuwu-prod` 部署到 `/opt/yunduan/frontend/dist`
+- 远端备份目录：`/opt/yunduan/backups/frontend/20260421_220026`
+
+**后续建议**:
+- 下一阶段可继续收口登录注册体系、主线分支合并策略，以及现网界面的细节巡检
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4744160` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 5: 多租户认证、统计工作区与主线收口
+
+**Date**: 2026-04-22
+**Task**: 多租户认证、统计工作区与主线收口
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| 类别 | 内容 |
+|---|---|
+| 提交 | 本次收口对应主提交为 `3ff201f`、`4744160`、`63a4f05`，并已最终合并进 `main`。 |
+| 认证与多租户 | 完成正式登录注册、多租户公司模型、邀请码加入、管理员审批建公司、站内密码申请/重置流与用户 AI 权限控制；明确暂停 SMTP 邮箱找回密码路线。 |
+| 统计工作区 | 统计页改造成分页工作区，拆分为总览 / 风险 / 图库 / AI 四页；AI 主分析与追问历史分层展示，修复流式回答串屏与自动滚动问题。 |
+| 导出能力 | 完成统计海报图、视觉版 PDF、轻量 PDF 双轨导出收口；补齐 AI 分析/追问内容、分页逻辑、样本图片和轻量渲染器稳定性。 |
+| 仪表盘与图库 | 仪表盘重构为分页总览工作区；样本图库完成分类入口、分页浏览、复检跳转与图片比例优化。 |
+| 管理与视觉 | 设置页、网关配置、管理员工作区和品牌视觉做了系统性整理，补充竞赛主题 Logo/芯片标识，收敛大块空白与不对称布局。 |
+| 线上部署 | 多次通过 `yunfuwu-prod` 完成前后端热更新、备份、健康检查与真实页面巡检；最后一轮统计 AI 工作台修复已上线，线上前端入口切换到最新 bundle。 |
+| 规范沉淀 | 更新前端状态管理、组件规范与后端错误处理/部署规范，补齐统计 AI 消息归属、分页工作区、导出与渲染相关约束。 |
+| 验证 | 完成 `frontend npm run build`、`frontend npm run test`、`backend python -m compileall src`、`backend python -m unittest discover tests`，并做了线上登录、统计页、AI 工作台、部署资源切换与健康检查验收。 |
+| 分支收口 | 已将备份分支 `backup-pre-multitenant-auth-20260421` 快进合并到 `main` 并推送远端；本次记录时工作树干净。 |
+
+**测试命令**:
+- `frontend: npm run build`
+- `frontend: npm run test`
+- `backend: python -m compileall src`
+- `backend: $env:DATABASE_URL='sqlite+pysqlite:///:memory:'; $env:JWT_SECRET_KEY='test-secret-key'; python -m unittest discover tests`
+
+**部署记录**:
+- 服务器别名：`yunfuwu-prod`
+- 后端健康检查：`http://127.0.0.1:8000/health`
+- 最近线上前端 bundle：`index-CvkJm2St.js`
+- 最近线上前端备份：`/opt/yunduan/frontend/dist_backup_20260422_092727`
+
+**任务收口**:
+- 已归档 `00-bootstrap-guidelines`
+- 已归档 `04-21-auth-system`
+- 已归档 `04-21-statistics-pdf-complete-export`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3ff201f` | (see git log) |
+| `4744160` | (see git log) |
+| `63a4f05` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 6: 统计页 AI 工作台外层大框修复与规范补充
+
+**Date**: 2026-04-22
+**Task**: 统计页 AI 工作台外层大框修复与规范补充
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| 项目 | 内容 |
+|------|------|
+| 主题 | 修复统计页 AI 工作台外层多余大框，并补充前端视觉组合规范 |
+| 代码提交 | `66edcae fix(ui): remove extra stats ai shell wrapper` |
+| 附带提交 | `4c2882e chore(trellis): clean archived bootstrap task metadata` |
+| 代码改动 | 将 `frontend/src/pages/StatisticsPage.vue` 中统计页 AI 工作台根节点从 `app-panel stats-ai-panel` 调整为单独的 `stats-ai-panel`，避免共享卡片外壳把“本轮分析 + 多轮追问”整体框成一个大盒子。 |
+| 规范更新 | 在 `.trellis/spec/frontend/component-guidelines.md` 新增 `Avoid Double-Shell Wrappers In Dense Workspaces`，明确密集工作区根节点不能再叠加 `.app-panel` 这类共享外壳，并补充 Wrong/Correct 示例与缩放检查点。 |
+| 验证 | 本地执行 `frontend/npm run build` 与 `frontend/npm run test` 通过；已部署到 `yunfuwu-prod`；用户已人工确认统计页 AI 工作台外层大框视觉确实消失。 |
+| 结果 | 统计页 AI 工作台视觉层级恢复正常，分析区与追问区不再被额外的全局面板外壳包住，后续分页工作区可按新增规范避免同类回归。 |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `66edcae` | (see git log) |
+| `4c2882e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 7: 线上验收收尾与静态资源清理，邮箱找回密码暂缓
+
+**Date**: 2026-04-22
+**Task**: 线上验收收尾与静态资源清理，邮箱找回密码暂缓
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| 项目 | 内容 |
+|------|------|
+| 主题 | 线上验收收尾、远端静态资源清理、邮箱找回密码暂缓决策 |
+| 关联提交 | `66edcae fix(ui): remove extra stats ai shell wrapper` |
+| 人工验收 | 用户已完成线上完整人工巡检，并确认统计页 AI 工作台外层大框视觉问题已消失。 |
+| 运维处理 | 对 `yunfuwu-prod` 执行了一次安全的前端静态资源清理：以本地当前 `frontend/dist` 为唯一真值，上传到新目录后原子切换为正式 `dist`，避免服务器继续累积历史哈希资源。 |
+| 清理结果 | 新的线上 `dist/assets` 仅保留当前版本文件，共 `62` 个资源文件；`http://127.0.0.1/` 返回 `200`；当前入口 bundle 为 `index-B-EJb_Sx.js`。 |
+| 回滚保障 | 保留了 `/opt/yunduan/frontend/dist_backup_cleanup_20260422_103650` 作为本次清理切换前的整包备份。 |
+| 产品决策 | 邮箱找回密码链路明确暂缓，当前阶段不要继续开发或改动该链路；后续密码相关流程继续以站内申请改密 / 管理员重置方案为主。 |
+| 结果 | 当前线上验收与静态资源收尾已完成，项目短期内无需再动邮箱找回密码功能。 |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `66edcae` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 8: OpenClaudeCode Grok 兼容探索收口
+
+**Date**: 2026-04-22
+**Task**: OpenClaudeCode Grok 兼容探索收口
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| 项目 | 内容 |
+|---|---|
+| 主题 | OpenClaudeCode / Grok 兼容性探索与当前收口 |
+| 代码提交 | `fc557cb fix(ai): improve openclaudecode model compatibility` |
+| 后端改动 | 补充 OpenClaudeCode Grok 来源分组与 Anthropic Messages SSE 兼容解析，增强 Responses 失败回退相关测试。 |
+| 前端改动 | 新增 OpenClaudeCode Grok 模板、模型来源匹配与供应商错误分类提示，统计页与单零件 AI 共享运行时模型选择逻辑。 |
+| 验证 | 前端 `npm run build` 通过，前端 `npm run test` 通过，后端 `python -m unittest backend.tests.test_ai_review_client backend.tests.test_ai_model_discovery_client` 通过。 |
+| 结果 | 用户已完成提交并推送；本轮决定不再继续深挖 Grok 路线，保留当前兼容性改动作为阶段性结果。 |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fc557cb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 9: Fix console shell internal scrolling
+
+**Date**: 2026-04-30
+**Task**: Fix console shell internal scrolling
+**Branch**: `main`
+
+### Summary
+
+Fixed the authenticated frontend shell so the browser document stays locked to one viewport while long business pages scroll inside the right-side `.page-grid` panel.
+
+### Main Changes
+
+| Area | Change |
+|---|---|
+| Shell layout | Locked `body` and `AppShell` to a one-screen viewport with `overflow: hidden`, then made `.page-grid` the default internal scroll owner. |
+| Page layout | Removed fixed workspace-stage heights that caused clipping or overlap in dashboard, statistics, gallery, records, parts, devices, and settings pages. |
+| Login page | Split the large registration form into two steps and added internal overflow handling so the public auth view does not depend on document scrolling. |
+| Visual theme | Tuned the console palette toward graphite, safety orange, copper, and circuit blue for a less one-note visual system. |
+| Spec memory | Added `frontend/layout-scroll-contract.md` and linked it from frontend spec indexes and quality guidelines. |
+
+### Git Commits
+
+| Hash | Message |
+|---|---|
+| `a746d62` | `fix(frontend): keep console shell internally scrollable` |
+
+### Validation
+
+- [OK] `npm run test` in `frontend`: 10 files and 39 tests passed.
+- [OK] `npm run build` in `frontend`: `vue-tsc --noEmit` and Vite production build passed.
+- [OK] `git diff --check`: no whitespace errors.
+- [OK] Risk search: no `console.log`, `any`, or common non-null assertion patterns found in `frontend/src`.
+- [OK] Production layout probe verified `body` does not vertically scroll and `.page-grid` owns route scrolling on key routes.
+
+### Status
+
+[OK] **Completed**. The fix was committed and pushed to `origin/main`.
+
+### Next Steps
+
+- Keep future authenticated console pages aligned with `.trellis/spec/frontend/layout-scroll-contract.md`.
+- For any future page clipping issue, verify the outer document is still locked before adding route-level height or overflow rules.
+
+
+## Session 10: Document MP157 EC20 COS upload flow
+
+**Date**: 2026-05-02
+**Task**: Document MP157 EC20 COS upload flow
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| Item | Details |
+|------|---------|
+| User request | Wrote a practical document for STM32MP157 using EC20 PPP networking to upload inspection images and detection metadata. |
+| Main output | Added `docs/mp157-ec20-ppp-cos-upload-guide.md`. |
+| Architecture covered | EC20 PPP creates `ppp0`; MP157 uses curl/HTTP; backend creates detection records; backend issues COS presigned PUT URLs; MP157 uploads images directly to COS; backend records file metadata. |
+| Included examples | Login, create record, prepare COS upload, curl PUT image, register file object, local retry state, failure handling, minimum bring-up flow. |
+| Verification | Ran `$finish-work` style checks: document has 615 lines, key EC20/PPP/COS/API terms are present, no conflict markers/TODO/TBD matched. |
+| Notes | Existing untracked `.tmp/uvc_kms_probe_overlay_rect.c` was left untouched. |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `37b5770` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
