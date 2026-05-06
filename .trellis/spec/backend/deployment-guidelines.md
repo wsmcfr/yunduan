@@ -162,6 +162,121 @@ exit 1
 
 ---
 
+## Scenario: Production COS Delete Authorization Diagnosis
+
+### 1. Scope / Trigger
+
+- Trigger: any production delete flow where device purge, company purge, or other storage-coupled cleanup fails with a user-visible delete error, backend `502`, or storage cleanup interruption
+- Affected layers: frontend delete action -> backend service cleanup order -> `CosClient.delete_object(...)` -> COS CAM policy / bucket authorization -> production logs
+
+### 2. Signatures
+
+```http
+DELETE /api/v1/devices/{id}
+DELETE /api/v1/companies/{id}
+```
+
+```powershell
+ssh yunfuwu-prod 'tail -n 200 /opt/yunduan/backend/uvicorn.log'
+ssh yunfuwu-prod 'grep -nE "cos.delete_failed|AccessDenied|company_storage_cleanup_failed" /opt/yunduan/backend/uvicorn.log | tail -n 50'
+ssh yunfuwu-prod 'cd /opt/yunduan/backend && .venv/bin/python -c "from src.core.config import get_settings; s=get_settings(); print(s.cos_region, s.cos_bucket)"'
+```
+
+```json
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": [
+        "cos:GetObject",
+        "cos:HeadObject",
+        "cos:PutObject",
+        "cos:DeleteObject"
+      ],
+      "resource": [
+        "qcs::cos:ap-guangzhou:uid/<uin>:<bucket-name>/*"
+      ]
+    }
+  ]
+}
+```
+
+### 3. Contracts
+
+| Item | Contract |
+|---|---|
+| Delete execution owner | Current business delete flows remove COS objects through backend-side SDK calls, not browser-direct COS `DELETE` requests |
+| Primary evidence source | Diagnose production delete failures from `/opt/yunduan/backend/uvicorn.log` before changing COS console settings |
+| Runtime config contract | The running backend process must load the same `COS_REGION` and `COS_BUCKET` that appear in the failing log entry |
+| Authorization contract | The production COS credential used by the backend must include object-level `cos:DeleteObject` on the target bucket path |
+| Bucket-policy contract | If a bucket policy exists, it must not explicitly deny `DeleteObject` for the backend subaccount / role on the target object prefix |
+| CORS decision rule | If backend logs already show `qcloud_cos.cos_client delete object ...` followed by COS XML `AccessDenied`, the failure is authorization, not browser CORS |
+| Safety contract | Keep the existing “delete storage first, then commit database delete” behavior; do not bypass storage cleanup only to make the UI look successful |
+
+Additional rules:
+
+- do not start by editing COS CORS methods when the failing delete path is server-side SDK driven
+- if the object can be read through `HeadObject` but cannot be deleted, treat the issue as missing delete permission until proven otherwise
+- when logs show `AccessDenied`, capture `bucket`, `region`, `object_key`, and request time before editing CAM policies
+
+### 4. Validation & Error Matrix
+
+| Condition | Problem | Expected handling |
+|---|---|---|
+| Backend log shows `cos.delete_failed` and COS XML `AccessDenied` | The backend reached COS successfully but lacks delete authorization | Check CAM / bucket policy for `cos:DeleteObject`; do not spend time on CORS first |
+| `HeadObject` succeeds for the same object, but delete still fails | The credential can read object metadata but cannot delete objects | Add or restore object-level `cos:DeleteObject` on the bucket resource path |
+| Browser console shows preflight failure and backend log has no COS delete attempt | The request never reached backend cleanup or the backend never reached COS | Investigate frontend path, API auth, or CORS only in this case |
+| Runtime `COS_BUCKET` or `COS_REGION` differs from the operator assumption | The operator may be fixing the wrong bucket or wrong region policy | Print runtime config from the production backend process before editing permissions |
+| Bucket policy contains explicit deny for the backend subaccount | Allow policy alone will not help | Remove or narrow the deny rule, then retest |
+| UI delete still returns `502` after policy update | Policy may not have propagated yet, or the wrong subaccount was updated | Wait briefly, verify the credential owner, then retry and reread logs |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | Device delete returns `502`, logs show COS `AccessDenied`, the operator verifies the running backend bucket and region, adds `cos:DeleteObject` to the real backend subaccount policy, then the same delete succeeds |
+| Base | The operator first confirms whether the delete is browser-direct or backend-SDK-driven, and only changes COS CORS when the browser is actually the caller |
+| Bad | The operator sees “delete failed”, edits COS CORS to add `DELETE`, and stops there even though backend logs already prove the failure is server-side authorization |
+
+### 6. Tests Required
+
+- manual reproduction of one delete failure in production or staging with log capture
+- remote log inspection confirming whether `CosClient.delete_object(...)` reached COS
+- remote runtime-config check confirming `COS_REGION` and `COS_BUCKET`
+- policy review confirming the backend credential has `cos:DeleteObject` on `<bucket>/*`
+- manual re-test after policy update
+
+Assertion points:
+
+- the diagnosis distinguishes browser CORS from backend COS authorization
+- `AccessDenied` in server logs is treated as a permission issue, not a UI routing issue
+- the same object path that previously failed can be deleted after the policy update
+- the backend no longer returns storage-cleanup `502` for the reproduced case
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+Delete fails in UI
+-> add DELETE to COS CORS rules
+-> assume the problem is fixed without checking backend logs
+```
+
+#### Correct
+
+```text
+Delete fails in UI
+-> inspect /opt/yunduan/backend/uvicorn.log
+-> confirm qcloud_cos delete attempt + COS AccessDenied
+-> verify running backend COS bucket and region
+-> add cos:DeleteObject to the backend subaccount policy on <bucket>/*
+-> retry delete and confirm logs are clean
+```
+
+---
+
 ## Scenario: PowerShell-Driven Production Deployment and PDF Benchmark Flow
 
 ### 1. Scope / Trigger

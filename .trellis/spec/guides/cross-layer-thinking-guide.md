@@ -89,6 +89,7 @@ After implementation:
 - [ ] Tested with edge cases (null, empty, invalid)
 - [ ] Verified error handling at each boundary
 - [ ] Checked data survives round-trip
+- [ ] For browser -> backend -> COS flows, verified whether the failure came from browser CORS or backend-side COS SDK authorization before changing console settings
 - [ ] Verified the first SSE frame can be serialized before the browser waits on streaming UI initialization
 - [ ] Verified approval-flow features allow only one pending snapshot per entity and clear encrypted pending secrets on terminal states such as approve/reject
 
