@@ -6,20 +6,23 @@
 
 核心原则是：**图片走腾讯云 COS，对象元数据和检测信息走云端后端 API**。MP157 不直接保存腾讯云永久密钥，只向后端申请一次性 COS 预签名上传地址，然后用 `curl -X PUT` 把图片传到 COS。
 
+设备口径需要固定：**云端设备管理只登记 STM32MP157 主控设备**。STM32F4 不单独作为云端设备建档；F4 的传感器、执行器和控制状态通过串口传给 MP157，再由 MP157 放进检测记录的上下文字段一起上传。
+
 | 项目 | 推荐做法 | 原因 |
 |---|---|---|
 | 4G 联网 | EC20 通过 PPP 拨号生成 `ppp0` 网卡 | 你当前已经能 PPP 上网并使用 `curl`，最适合继续沿用 |
 | 图片上传 | MP157 先向后端申请 COS 预签名 URL，再用 curl 直传 COS | 图片不经过后端转发，省服务器带宽和内存 |
 | 检测信息上传 | MP157 调用后端 `/api/v1/records` 创建检测记录 | 数据进入 MySQL，便于前端查询、统计和 AI 复核 |
 | 图片与记录绑定 | 图片上传成功后调用 `/api/v1/records/{record_id}/files` 登记对象元数据 | 云端知道这张图片属于哪条检测记录 |
+| F4 数据归属 | F4 串口数据放入 MP157 检测记录上下文 | 避免把 F4 当成独立云端设备，统计和删除都以 MP157 为主线 |
 | 断网处理 | 本地保存待上传队列，恢复 4G 后补传 | PPP 网络不稳定时不丢检测数据 |
 
 ## 2. 整体数据链路
 
 ```text
-摄像头/检测算法
+摄像头/检测算法 + F4 串口数据
     |
-    | 1. 生成原图、标注图、缩略图和检测结果 JSON
+    | 1. 生成原图、标注图、缩略图、检测结果 JSON 和 F4 上下文
     v
 MP157 本地缓存目录
     |
@@ -89,12 +92,19 @@ PPP 常见拨号号一般为 `*99#`，APN 需要按 SIM 卡运营商配置。已
 
 | 目的 | 方法与路径 | MP157 什么时候调用 |
 |---|---|---|
+| 查询 MP157 设备 ID | `GET /api/v1/devices?limit=100` | 首次联调或本地配置丢失时，用设备编码确认云端 `device_id` |
 | 创建检测记录 | `POST /api/v1/records` | 每检测完一个零件后先调用 |
 | 申请 COS 上传地址 | `POST /api/v1/uploads/cos/prepare` | 每张图片上传前调用一次 |
 | 登记图片对象 | `POST /api/v1/records/{record_id}/files` | 每张图片 PUT 到 COS 成功后调用 |
 | 查看单条详情 | `GET /api/v1/records/{record_id}` | 调试或本地确认上传结果时调用 |
 
 后端接口当前通过登录会话鉴权。MP157 可以先用 `/api/v1/auth/login` 登录，保存后端返回的 Cookie，再带 Cookie 调用后续接口。量产时更推荐新增设备专用 Token 接口，但现阶段用 Cookie 足够联调。
+
+注意：
+
+- `POST /api/v1/records` 里的 `device_id` 必须是云端已有的 MP157 设备 ID。
+- 不要为 F4 调用设备创建接口，也不要发送 `device_type=f4`。当前云端服务会拒绝非 `mp157` 设备类型。
+- F4 通过串口传来的值应进入 `sensor_context`、`decision_context` 或 `device_context`，随检测记录保存。
 
 ## 5. MP157 应该发送什么
 
@@ -135,7 +145,17 @@ PPP 常见拨号号一般为 `*99#`，APN 需要按 SIM 卡运营商配置。已
   "sensor_context": {
     "ec20_rssi": 18,
     "ppp_interface": "ppp0",
-    "eddy_value": 0.42
+    "f4_uart_status": "ok",
+    "f4_sensor_values": {
+      "eddy_value": 0.42,
+      "photoelectric_triggered": true,
+      "temperature_c": 36.5
+    },
+    "f4_control_state": {
+      "motor_running": false,
+      "rejector_action": "none",
+      "last_command_seq": 128
+    }
   },
   "decision_context": {
     "algorithm": "opencv-surface-v1",
@@ -145,6 +165,8 @@ PPP 常见拨号号一般为 `*99#`，APN 需要按 SIM 卡运营商配置。已
   },
   "device_context": {
     "device_code": "MP157-VIS-01",
+    "f4_board_code": "F4-CTRL-01",
+    "f4_firmware_version": "f4-0.3.2",
     "software_version": "edge-0.1.0",
     "network": "EC20 PPP",
     "local_image_path": "/data/detections/20260502/source.jpg"
@@ -160,7 +182,7 @@ PPP 常见拨号号一般为 `*99#`，APN 需要按 SIM 卡运营商配置。已
 |---|---|---|
 | `record_no` | 必须建议 | MP157 本地生成唯一编号，断网补传时用于去重排查 |
 | `part_id` | 必须 | 云端已有的零件 ID |
-| `device_id` | 必须 | 云端已有的 MP157 设备 ID |
+| `device_id` | 必须 | 云端已有的 MP157 设备 ID，不能填 F4 |
 | `result` | 必须 | `good`、`bad`、`uncertain` 三选一 |
 | `surface_result` | 建议 | 表面视觉检测结果 |
 | `backlight_result` | 建议 | 背光轮廓检测结果 |
@@ -169,12 +191,12 @@ PPP 常见拨号号一般为 `*99#`，APN 需要按 SIM 卡运营商配置。已
 | `defect_desc` | 不良时建议 | 给人看的缺陷描述 |
 | `confidence_score` | 建议 | 0 到 1 的置信度 |
 | `vision_context` | 建议 | 图像尺寸、曝光、检测框、算法输出 |
-| `sensor_context` | 可选 | EC20 信号、涡流值、光电传感器状态等 |
+| `sensor_context` | 可选 | EC20 信号、F4 串口状态、涡流值、光电传感器状态、执行器状态等 |
 | `decision_context` | 建议 | 算法版本、阈值、耗时、是否建议 AI 复核 |
-| `device_context` | 建议 | 设备编号、软件版本、本地缓存路径、网络类型 |
+| `device_context` | 建议 | MP157 设备编号、F4 板卡编号、软件版本、本地缓存路径、网络类型 |
 | `captured_at` | 必须 | 相机拍到图片的时间，业务排序以它为准 |
 | `detected_at` | 建议 | 算法完成判定的时间 |
-| `uploaded_at` | 不建议创建时传 | 图片上传成功后由文件登记接口回写更准确 |
+| `uploaded_at` | 通常不传 | 图片上传成功后由文件登记接口回写更准确；只有需要保留边缘端历史上传时间时才传 |
 
 ### 5.2 图片文件
 
@@ -204,6 +226,7 @@ PPP 常见拨号号一般为 `*99#`，APN 需要按 SIM 卡运营商配置。已
 | 变量 | 示例 |
 |---|---|
 | 后端地址 | `https://api.example.com` |
+| 当前线上联调地址 | `http://119.91.65.122` |
 | Cookie 文件 | `/tmp/cloud_cookie.txt` |
 | 原图路径 | `/data/detections/MP157-20260502-153012-0001/source.jpg` |
 | 标注图路径 | `/data/detections/MP157-20260502-153012-0001/annotated.jpg` |
@@ -256,7 +279,18 @@ curl --interface ppp0 \
     },
     "sensor_context": {
       "ec20_rssi": 18,
-      "ppp_interface": "ppp0"
+      "ppp_interface": "ppp0",
+      "f4_uart_status": "ok",
+      "f4_sensor_values": {
+        "eddy_value": 0.42,
+        "photoelectric_triggered": true,
+        "temperature_c": 36.5
+      },
+      "f4_control_state": {
+        "motor_running": false,
+        "rejector_action": "none",
+        "last_command_seq": 128
+      }
     },
     "decision_context": {
       "algorithm": "opencv-surface-v1",
@@ -265,6 +299,8 @@ curl --interface ppp0 \
     },
     "device_context": {
       "device_code": "MP157-VIS-01",
+      "f4_board_code": "F4-CTRL-01",
+      "f4_firmware_version": "f4-0.3.2",
       "software_version": "edge-0.1.0",
       "network": "EC20 PPP"
     },
@@ -533,6 +569,7 @@ int upload_detection_record(const char *record_dir)
 | 腾讯云永久密钥泄露 | 不要把 `COS_SECRET_ID`、`COS_SECRET_KEY` 放到 MP157 |
 | 预签名 URL 泄露 | URL 有时效，建议 1 小时以内；上传完成后不要打印完整 URL 到公开日志 |
 | 后端账号泄露 | 给 MP157 单独建低权限账号，只允许本公司设备上传 |
+| MP157 设备被云端删除 | 设备管理页删除 MP157 会同步删除该设备关联的检测记录、审核记录、文件元数据和 COS 对象；边缘端本地缓存不要依赖云端记录长期保留 |
 | 设备时间不准 | PPP 联网后先 NTP 同步，否则 HTTPS 证书和业务时间都可能异常 |
 | 4G 流量过大 | 默认传 JPEG，列表用缩略图，必要时只上传不良品原图 |
 | 私有桶访问 | 前端不要自己拼 COS URL，统一由后端生成预览 URL |
@@ -563,6 +600,13 @@ healthcheck_url=https://api.example.com/health
 base_url=https://api.example.com
 account=edge_mp157
 password=替换成真实密码
+device_code=MP157-VIS-01
+device_id=1
+
+[f4]
+board_code=F4-CTRL-01
+uart_device=/dev/ttySTM1
+baudrate=115200
 
 [upload]
 root_dir=/data/detections
@@ -581,11 +625,12 @@ jpeg_quality=85
 | 1 | `ip addr show ppp0` | 有 IP 地址 |
 | 2 | `curl --interface ppp0 https://api.example.com/health` | 返回 `{"status":"ok"}` |
 | 3 | 登录 `/api/v1/auth/login` | Cookie 文件写入成功 |
-| 4 | 创建 `/api/v1/records` | 返回 `id` 和 `record_no` |
-| 5 | 调 `/api/v1/uploads/cos/prepare` | 返回 `enabled: true` 和 `upload_url` |
-| 6 | `curl -X PUT upload_url --data-binary @source.jpg` | HTTP 200，返回 ETag |
-| 7 | 调 `/api/v1/records/{record_id}/files` | 返回文件对象和 `preview_url` |
-| 8 | 前端打开检测详情页 | 能看到检测信息和图片 |
+| 4 | 调 `/api/v1/devices?limit=100` | 找到本机 `device_code` 对应的 MP157 `id` |
+| 5 | 创建 `/api/v1/records` | 返回 `id` 和 `record_no`，且 `device_id` 指向 MP157 |
+| 6 | 调 `/api/v1/uploads/cos/prepare` | 返回 `enabled: true` 和 `upload_url` |
+| 7 | `curl -X PUT upload_url --data-binary @source.jpg` | HTTP 200，返回 ETag |
+| 8 | 调 `/api/v1/records/{record_id}/files` | 返回文件对象和 `preview_url` |
+| 9 | 前端打开检测详情页 | 能看到检测信息、图片和 F4 上下文 |
 
 ## 13. 最小可跑通版本
 
@@ -593,7 +638,7 @@ jpeg_quality=85
 
 | 类型 | 内容 |
 |---|---|
-| 检测信息 | `record_no`、`part_id`、`device_id`、`result`、`captured_at` |
+| 检测信息 | `record_no`、`part_id`、MP157 的 `device_id`、`result`、`captured_at` |
 | 图片 | 至少一张 `source.jpg`，上传后按 `file_kind=source` 登记 |
 
 也就是说，第一阶段不必一次做全。先让 MP157 用 EC20 PPP 跑通：
@@ -608,6 +653,8 @@ jpeg_quality=85
 ```
 
 这条链路跑通后，再逐步加标注图、缩略图、缺陷框 JSON、EC20 信号质量、断网补传队列。
+
+F4 串口数据不影响最小链路跑通。最小链路稳定后，再把 F4 的传感器值、控制状态、串口状态补进 `sensor_context` 和 `device_context`。
 
 ## 14. 参考资料
 
