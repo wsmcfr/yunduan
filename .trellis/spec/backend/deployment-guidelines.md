@@ -50,6 +50,7 @@ nohup /opt/yunduan/backend/.venv/bin/uvicorn src.app:app --host 127.0.0.1 --port
 | Backend bind address | `127.0.0.1:8000` |
 | Backend health check | `GET /health` on `http://127.0.0.1:8000/health` |
 | Backend log file | `/opt/yunduan/backend/uvicorn.log` |
+| Backend single-instance restart | Stop the old `uvicorn`, wait until `127.0.0.1:8000` is no longer listening, then start the new process and retry `/health` for a few seconds |
 | Nginx role | Serves frontend static assets and proxies API requests to `127.0.0.1:8000` |
 | Deployment backups | Store timestamped backups under `/opt/yunduan/deploy_backups/` for backend files, and `dist_backup_<timestamp>` for frontend static assets |
 | Live frontend verification | After a frontend upload, validate either `/opt/yunduan/frontend/dist/index.html` or `curl -s http://127.0.0.1/` on the server to confirm the currently served entry HTML |
@@ -59,6 +60,8 @@ Additional rules:
 - do not depend on the raw public IP in routine deployment commands; use `yunfuwu-prod`
 - do not overwrite production files without a backup when changing backend source or frontend `dist`
 - backend updates are not complete until `curl http://127.0.0.1:8000/health` returns `{"status":"ok"}`
+- after stopping `uvicorn`, wait until `ss -ltn '( sport = :8000 )'` no longer shows `127.0.0.1:8000` before starting the new process; otherwise the new instance can fail with `Errno 98` while the old one keeps serving traffic
+- treat backend restart as incomplete until process list, port listener, and `/health` all agree the new instance is active
 - frontend updates are not complete until the new bundle reference is visible in `/opt/yunduan/frontend/dist/index.html`
 - do not assume every asset hash changes on each frontend build; confirm the entry HTML now points at the expected new bundle(s)
 
@@ -69,6 +72,7 @@ Additional rules:
 | SSH alias does not resolve | Local machine is missing the expected SSH config | Fix local `~/.ssh/config` entry for `yunfuwu-prod` before any deployment |
 | Backend files uploaded but process not restarted | Old code keeps serving traffic | Restart `uvicorn` and verify `/health` |
 | Backend restart hangs or fails | Production may be partially updated | Read `/opt/yunduan/backend/uvicorn.log` and verify running `uvicorn` process before asking for browser validation |
+| Restart script starts a new `uvicorn` before the old listener releases `127.0.0.1:8000` | The new instance exits with `Errno 98`, while the old process may continue serving the previous code | Stop the old process, wait until `ss -ltn '( sport = :8000 )'` shows no listener, then start again and retry `/health` |
 | Frontend files uploaded but browser still shows old UI | Static cache or incomplete upload | Verify `dist/index.html` points to the new bundle and hard-refresh the browser |
 | Changed backend files contain syntax errors | Service fails after restart | Run `python3 -m py_compile` on the uploaded files before or immediately after restart |
 | Deployment touches the wrong directory | Files appear uploaded but product does not change | Recheck the fixed paths under `/opt/yunduan/backend` and `/opt/yunduan/frontend/dist` |
@@ -79,14 +83,15 @@ Additional rules:
 
 | Case | Example |
 |---|---|
-| Good | Use `ssh yunfuwu-prod`, back up the target, upload the changed files, run `py_compile`, restart `uvicorn`, and verify `/health` plus the new frontend bundle |
+| Good | Use `ssh yunfuwu-prod`, back up the target, upload the changed files, run `py_compile`, stop `uvicorn`, wait for port `8000` to release, restart once, and verify `/health` plus the new frontend bundle |
 | Base | Frontend-only update: back up `/opt/yunduan/frontend/dist`, upload new `dist/*`, verify `index.html`, then hard-refresh the browser |
-| Bad | Upload files directly to a guessed path with the raw IP, skip backups, skip restart, and assume the change is live without checking `/health` or logs |
+| Bad | Upload files directly to a guessed path with the raw IP, skip backups, start a second `uvicorn` before the old one exits, and assume the change is live without checking `/health` or logs |
 
 ### 6. Tests Required
 
 - local command verification that `ssh yunfuwu-prod` reaches the correct host
 - remote verification that `ps -ef | grep uvicorn` shows the expected backend process
+- remote verification that `ss -ltnp | grep 8000` shows a single active listener after restart
 - remote verification that `curl -s http://127.0.0.1:8000/health` returns success
 - remote verification that `/opt/yunduan/frontend/dist/index.html` references the latest built bundle after frontend deployment
 - remote verification that `curl -s http://127.0.0.1/` returns entry HTML referencing the same active frontend bundle when a UI fix is being validated live
@@ -96,6 +101,7 @@ Assertion points:
 - the deployment command path always uses `yunfuwu-prod`
 - uploaded backend files are placed under `/opt/yunduan/backend`
 - uploaded frontend assets are placed under `/opt/yunduan/frontend/dist`
+- backend restart leaves exactly one active listener on `127.0.0.1:8000`
 - production verification uses remote logs and health checks, not guesswork
 - frontend verification checks the served entry HTML, not only the local `dist` directory contents
 
@@ -112,6 +118,14 @@ ssh yunfuwu-prod "cd /opt/yunduan/backend && cp new_file.py src/services/ && exi
 # No backup, no syntax check, no restart, no health check.
 ```
 
+```powershell
+(@'
+pkill -f 'uvicorn src.app:app --host 127.0.0.1 --port 8000' || true
+nohup /opt/yunduan/backend/.venv/bin/uvicorn src.app:app --host 127.0.0.1 --port 8000 > /opt/yunduan/backend/uvicorn.log 2>&1 < /dev/null &
+'@) -replace "`r", "" | ssh yunfuwu-prod 'bash -s'
+# Starts too quickly; the new process can die with Errno 98 while the old one is still releasing the port.
+```
+
 #### Correct
 
 ```powershell
@@ -123,6 +137,27 @@ ssh yunfuwu-prod 'curl -s http://127.0.0.1:8000/health'
 ```powershell
 scp -r frontend/dist/* yunfuwu-prod:/opt/yunduan/frontend/dist/
 ssh yunfuwu-prod 'sed -n "1,20p" /opt/yunduan/frontend/dist/index.html'
+```
+
+```powershell
+(@'
+set -euo pipefail
+pkill -f 'uvicorn src.app:app --host 127.0.0.1 --port 8000' || true
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if ! ss -ltn '( sport = :8000 )' | grep -q 127.0.0.1:8000; then
+    break
+  fi
+  sleep 1
+done
+nohup /opt/yunduan/backend/.venv/bin/uvicorn src.app:app --host 127.0.0.1 --port 8000 > /opt/yunduan/backend/uvicorn.log 2>&1 < /dev/null &
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -s http://127.0.0.1:8000/health; then
+    exit 0
+  fi
+  sleep 1
+done
+exit 1
+'@) -replace "`r", "" | ssh yunfuwu-prod 'bash -s'
 ```
 
 ---
@@ -361,7 +396,17 @@ ssh yunfuwu-prod 'curl -s http://127.0.0.1:8000/health'
 git status --short
 git diff --cached --stat
 git log --oneline -1
-git push origin main
+gh auth status
+gh auth setup-git
+git push --verbose origin main
+git rev-parse HEAD
+git rev-parse origin/main
+```
+
+```powershell
+gh repo view --json nameWithOwner,url
+git config --show-origin --get-regexp "credential|credential\.https://github\.com"
+Get-CimInstance Win32_Process -Filter "name = 'git.exe'" | Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine
 ```
 
 ```powershell
@@ -390,6 +435,9 @@ PASSWORD_PEPPER=replace_me
 | Secret-handling code | It is allowed to commit password hashing, cookie session, encryption, and decryption logic; the forbidden part is committing real secret material or reversible data derived from production secrets |
 | Test fixtures | Demo tokens and fake API keys may exist in tests only when they are clearly fake values such as `sk-demo-*`, never copied from production |
 | Push gate | Before `git push`, the staged diff must be reviewed specifically for secrets, unsafe defaults, and docs/spec leakage |
+| GitHub push credentials | On this Windows workspace, prefer the already-authenticated GitHub CLI credential helper; run `gh auth setup-git` before pushing when `gh auth status` shows a logged-in GitHub account with `repo` scope |
+| Non-interactive push | Do not wait for a manual Git Credential Manager approval prompt if GitHub CLI is already authenticated; configure Git to use `gh auth git-credential` and retry `git push --verbose origin main` |
+| Push success verification | A push is not complete until `git rev-parse HEAD` and `git rev-parse origin/main` return the same commit hash |
 
 Additional rules:
 
@@ -397,6 +445,7 @@ Additional rules:
 - do not assume “already encrypted” means safe to commit; if the committed data can still expose the real runtime secret or operator identity, it must be removed
 - do not keep a real admin password as a fallback default in `config.py`, seed scripts, or frontend helper text
 - when a push includes auth, secret storage, COS, SMTP, or AI gateway changes, run an extra manual review of `.env.example`, spec docs, and staged tests before pushing
+- if `git push` times out while a `git credential-manager get` or `git remote-https` process remains, inspect the process command lines, stop only the stale Git push processes, run `gh auth setup-git`, and retry the push with verbose output
 
 ### 4. Validation & Error Matrix
 
@@ -408,22 +457,28 @@ Additional rules:
 | Admin seed script still creates an account when password env is blank | Public deployment can accidentally boot with an unsafe fallback | Skip bootstrap and print an explicit operator message |
 | Test files contain obvious demo keys such as `sk-demo-*` | These are not real secrets, but they resemble secrets syntactically | Keep only if they are clearly fake and scoped to tests |
 | Code adds hashing/encryption helpers | This is security implementation, not a secret leak by itself | Allow commit as long as actual secret values stay in ignored env/config stores |
+| `git push origin main` hangs at HTTPS credential lookup | Git Credential Manager is waiting for manual approval or cannot return credentials to the non-interactive shell | Check `gh auth status`; if logged in with `repo` scope, run `gh auth setup-git` and retry `git push --verbose origin main` |
+| Timed-out push leaves `git.exe`, `git remote-https`, or `credential-manager get` processes running | Later push attempts can remain blocked by stale credential or network helper processes | Inspect with `Get-CimInstance Win32_Process -Filter "name = 'git.exe'"`, stop only the stale push-related Git processes, then retry through the GitHub CLI helper |
+| `git push` exits successfully but local tracking ref was not checked | The operator may assume remote sync without proof | Run `git rev-parse HEAD` and `git rev-parse origin/main`; both hashes must match |
 
 ### 5. Good / Base / Bad Cases
 
 | Case | Example |
 |---|---|
-| Good | Push includes auth hardening and secret-storage code, but `.env` stays ignored, `.env.example` uses placeholders, docs use `<server-ip>`, and the commit is scanned before `git push` |
+| Good | Push includes auth hardening and secret-storage code, but `.env` stays ignored, `.env.example` uses placeholders, docs use `<server-ip>`, the commit is scanned before push, `gh auth setup-git` is used for GitHub HTTPS credentials, and `HEAD == origin/main` is verified afterward |
 | Base | Tests contain `sk-demo-codex` and similar fake tokens under `backend/tests`, while production secrets stay only in runtime env |
-| Bad | A commit pushes real COS keys, a real public admin password in a spec screenshot/example, or a working default admin password baked into source defaults |
+| Bad | A commit pushes real COS keys, a real public admin password in a spec screenshot/example, a working default admin password baked into source defaults, or waits indefinitely for a manual Git Credential Manager prompt even though `gh` is already authenticated |
 
 ### 6. Tests Required
 
 - staged-diff review via `git diff --cached --stat` and targeted file inspection before `git commit`
 - repository secret scan using `rg` for cloud-key, JWT-secret, PEM, and API-key shaped patterns before `git push`
+- GitHub credential verification via `gh auth status` before pushing from this Windows workspace
+- Git credential helper verification via `git config --show-origin --get-regexp "credential|credential\.https://github\.com"` after running `gh auth setup-git`
 - backend test run after changing auth/seed/config defaults, at minimum covering auth smoke paths
 - frontend build/test run if login helper copy, auth UI hints, or public-facing docs embedded in frontend code changed
-- post-commit verification that `git status --short` is clean and the commit message matches the reviewed safe change set
+- post-commit verification that `git status --short` contains no unexpected tracked changes and the commit message matches the reviewed safe change set
+- post-push verification that `git rev-parse HEAD` equals `git rev-parse origin/main`
 
 Assertion points:
 
@@ -431,6 +486,8 @@ Assertion points:
 - secret defaults in source are blank or placeholders rather than working credentials
 - admin bootstrap behavior is safe when password env is missing
 - committed security code does not include the actual env values that make decryption or authentication possible
+- GitHub HTTPS pushes use the GitHub CLI credential helper when `gh` is already logged in, instead of relying on a manual credential-manager approval prompt
+- the remote-tracking branch points at the same commit as local `HEAD` after push
 
 ### 7. Wrong vs Correct
 
@@ -443,6 +500,11 @@ default_admin_password: str = Field(default="admin123", alias="DEFAULT_ADMIN_PAS
 ```markdown
 管理员账号：admin / <real-password>
 服务器：119.91.xx.xx
+```
+
+```powershell
+git push origin main
+# Hangs while credential-manager waits for manual approval; leave the stale push running.
 ```
 
 #### Correct
@@ -462,6 +524,19 @@ if not settings.default_admin_password.strip():
 服务器：yunfuwu-prod 或 <server-ip>
 ```
 
+```powershell
+gh auth status
+gh auth setup-git
+git push --verbose origin main
+git rev-parse HEAD
+git rev-parse origin/main
+```
+
+```powershell
+# If a previous push timed out, inspect first and stop only stale push-related Git processes.
+Get-CimInstance Win32_Process -Filter "name = 'git.exe'" | Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine
+```
+
 ---
 
 ## Deployment Sequence
@@ -471,9 +546,10 @@ if not settings.default_admin_password.strip():
 1. Back up the target backend files into `/opt/yunduan/deploy_backups/<timestamp>/`
 2. Upload the changed files with `scp`
 3. Run `python3 -m py_compile` against the uploaded files
-4. Restart the backend process in `/opt/yunduan/backend` with `/opt/yunduan/backend/.venv/bin/uvicorn`
+4. Stop the old backend process, wait until port `8000` is released, then restart `/opt/yunduan/backend/.venv/bin/uvicorn`
 5. Check `/opt/yunduan/backend/uvicorn.log`
-6. Check `curl -s http://127.0.0.1:8000/health`
+6. Check `ss -ltnp | grep 8000` and confirm there is one active listener
+7. Retry `curl -s http://127.0.0.1:8000/health` until it returns success or the restart is declared failed
 
 ### Frontend Update Sequence
 

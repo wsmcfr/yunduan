@@ -527,3 +527,36 @@ Fixed the authenticated frontend shell so the browser document stays locked to o
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: mp157 文档与设备管理调整
+
+**Date**: 2026-05-06
+**Task**: mp157 文档与设备管理调整
+**Branch**: `main`
+
+### Summary
+
+更新 mp157-ec20-ppp-cos-upload-guide.md，按新的设备管理约束修正文档：云端设备仅保留 MP157，F4 的数据通过串口上下文随 MP157 上报；补充删除前确认后可彻底删除的说明；记录当前仓库还存在的未提交杂项改动未纳入本次工作。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b726e5c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
