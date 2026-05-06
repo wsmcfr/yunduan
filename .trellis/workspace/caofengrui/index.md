@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
-- **Last Active**: 2026-05-02
+- **Total Sessions**: 11
+- **Last Active**: 2026-05-06
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~484 | Active |
+| `journal-1.md` | ~529 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-05-06 | MP157 设备管理删除与线上发布 | `b6ea21c` | `main` |
 | 10 | 2026-05-02 | Document MP157 EC20 COS upload flow | `37b5770` | `main` |
 | 9 | 2026-04-30 | Fix console shell internal scrolling | `a746d62` | `main` |
 | 8 | 2026-04-22 | OpenClaudeCode Grok 兼容探索收口 | `fc557cb` | `main` |

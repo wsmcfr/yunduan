@@ -482,3 +482,48 @@ Fixed the authenticated frontend shell so the browser document stays locked to o
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: MP157 设备管理删除与线上发布
+
+**Date**: 2026-05-06
+**Task**: MP157 设备管理删除与线上发布
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| 项目 | 内容 |
+|---|---|
+| 任务主题 | 设备管理收敛为仅管理 MP157 主控，并支持设备彻底删除 |
+| 关键产品决策 | 云端只登记 `MP157`；`F4` 数据通过串口进入 `MP157`，随检测记录上报，不再作为独立云端设备建档 |
+| 后端改动 | 新增 `DELETE /api/v1/devices/{id}`；服务层强制 `device_type=mp157`；删除设备时级联清理检测记录、审核记录、文件元数据和 COS 对象；补充 Alembic 迁移收敛数据库默认值 |
+| 前端改动 | 设备页表格增加 `recordCount`、`imageCount`；设备表单只允许 `MP157`；删除有数据的设备时弹出更强确认，并在成功提示中展示已清理的记录数量 |
+| 测试验证 | `backend` 执行 `python -m unittest tests.test_device_service tests.test_app -v` 通过；`frontend` 执行 `npm run build`、`npm run test` 通过 |
+| 线上部署 | 已部署到 `yunfuwu-prod`；执行后端文件上传、Alembic 迁移、单实例重启、前端 `dist` 上传，并验证 `http://127.0.0.1:8000/health` 返回 `{"status":"ok"}` |
+| 线上地址 | `http://119.91.65.122/devices` |
+| GitHub 提交 | `b6ea21c feat: support mp157-only device purge management`，已推送到 `origin/main` |
+| 经验沉淀 | 新增设备管理相关 code-spec，明确 MP157/F4 边界、DTO 契约与彻底删除流程；补记部署经验：重启 `uvicorn` 时必须等待 `8000` 端口释放，再做带重试的健康检查，否则可能出现 `Errno 98` 且旧进程继续服务 |
+| 会话结束时的本地状态 | 工作区仍保留未提交的 `.trellis/spec/backend/deployment-guidelines.md` 和 ` .tmp/`，未随本次功能提交推送 |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b6ea21c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
