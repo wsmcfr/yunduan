@@ -560,3 +560,43 @@ Fixed the authenticated frontend shell so the browser document stays locked to o
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: Diagnose Production COS Delete Authorization Failure
+
+**Date**: 2026-05-06
+**Task**: Diagnose Production COS Delete Authorization Failure
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| 项目 | 内容 |
+|---|---|
+| 问题现象 | 线上设备删除接口多次返回 502，后端日志显示 `cos.delete_failed`，COS 返回 `AccessDenied`。 |
+| 排障过程 | 通过生产日志确认删除链路已进入后端 COS SDK；核对运行时 `COS_REGION` 与 `COS_BUCKET`；验证对象 `HeadObject` 可读但 `DeleteObject` 被拒。 |
+| 根因 | 生产子账号 `cos-yunduan-prod` 关联的 `YunduanCosAccess` 策略缺少 `cos:DeleteObject`，导致对象能读写但不能删。 |
+| 处理结果 | 补充 `cos:DeleteObject` 权限后，设备删除恢复正常。 |
+| 知识沉淀 | 更新 `.trellis/spec/backend/deployment-guidelines.md`，新增生产 COS 删除授权排障场景；更新 `.trellis/spec/guides/cross-layer-thinking-guide.md`，补充“先区分 CORS 与服务端 COS 鉴权”的检查项。 |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `33318fb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
