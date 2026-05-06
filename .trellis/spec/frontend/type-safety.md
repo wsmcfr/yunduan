@@ -567,3 +567,105 @@ await submitCurrentUserPasswordChangeRequest({
   new_password: newPassword,
 });
 ```
+
+---
+
+## Scenario: MP157 Device Management DTO Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: any change touching `src/pages/DevicesPage.vue`, `DeviceFormDialog.vue`, `src/services/api/devices.ts`, device DTO/model types, or backend device schemas.
+- Affected layers: FastAPI device response -> `src/types/api.ts` -> mapper -> `src/types/models.ts` -> table/delete confirmation/form payload.
+
+### 2. Signatures
+
+```ts
+export type DeviceType = "mp157" | "f4" | "gateway" | "other";
+
+export interface DeviceDto {
+  id: number;
+  device_code: string;
+  name: string;
+  device_type: DeviceType;
+  status: DeviceStatus;
+  record_count: number;
+  image_count: number;
+}
+
+export interface DeviceModel {
+  id: number;
+  deviceCode: string;
+  name: string;
+  deviceType: DeviceType;
+  status: DeviceStatus;
+  recordCount: number;
+  imageCount: number;
+}
+
+export interface DeviceDeleteResponseDto {
+  message: string;
+  deleted_record_count: number;
+}
+
+deleteDevice(deviceId: number): Promise<DeviceDeleteResponseDto>;
+```
+
+### 3. Contracts
+
+| Boundary / field | Contract |
+|---|---|
+| `DeviceType` union | May remain wide for compatibility with old rows and backend enum values, but create/update UI must only submit `mp157` |
+| `deviceTypeOptions` | Must only expose MP157 in device-management forms |
+| `DeviceFormDialog` | Displays device type as read-only MP157 and submits `device_type: "mp157"` |
+| `record_count` / `image_count` | Required DTO fields used to build delete confirmation text |
+| `deleted_record_count` | DELETE response field used for the success toast |
+| F4 data | Display copy should say F4 data arrives through MP157 serial upload and detection-record context, not as a separate cloud device |
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Backend returns `record_count > 0` | Delete confirm title/button should use "彻底删除" and mention record/image cleanup |
+| Backend returns `record_count = 0` | Delete confirm can use normal device-delete wording |
+| User confirms purge | Frontend calls `DELETE /api/v1/devices/{id}` and reloads the table |
+| Backend rejects non-MP157 payload | Surface API error instead of widening frontend options |
+| Old row has `device_type="f4"` | Type can parse it, but form should not offer F4 as a selectable target |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | Table row shows record count; delete dialog says F4 serial data will be removed with the MP157 detection records |
+| Base | New device form shows read-only `MP157 主控设备` |
+| Bad | Form reintroduces a device-type dropdown with STM32F4, gateway, and other options |
+
+### 6. Tests Required
+
+- frontend build/typecheck after changing DTOs and mapper
+- backend service tests for MP157-only validation and purge response fields
+- manual or browser check for `/devices` delete dialog at rows with and without records
+
+Assertion points:
+
+- `mapDeviceDto(...)` maps `record_count -> recordCount` and `image_count -> imageCount`
+- `deleteDevice(...)` expects `deleted_record_count`
+- no visible device form lets the user create F4/gateway/other devices
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+export const deviceTypeOptions = [
+  { label: "MP157", value: "mp157" },
+  { label: "STM32F4", value: "f4" },
+];
+```
+
+#### Correct
+
+```ts
+export const deviceTypeOptions = [
+  { label: "MP157", value: "mp157" },
+];
+```

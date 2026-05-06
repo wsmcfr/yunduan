@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session
 from src.api.deps import get_current_company_admin_user, get_current_company_user, get_db
 from src.db.models.enums import DeviceStatus
 from src.db.models.user import User
-from src.schemas.device import DeviceCreateRequest, DeviceListResponse, DeviceResponse, DeviceUpdateRequest
+from src.schemas.device import (
+    DeviceCreateRequest,
+    DeviceDeleteResponse,
+    DeviceListResponse,
+    DeviceResponse,
+    DeviceUpdateRequest,
+)
 from src.services.device_service import DeviceService
 
 router = APIRouter()
@@ -67,3 +73,21 @@ def update_device(
         payload=payload,
     )
     return DeviceResponse.model_validate(device)
+
+
+@router.delete("/{device_id}", response_model=DeviceDeleteResponse)
+def delete_device(
+    device_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_company_admin_user),
+) -> DeviceDeleteResponse:
+    """彻底删除设备档案及其检测历史。"""
+
+    deleted_record_count = DeviceService(db).delete_device(
+        company_id=current_user.company_id or 0,
+        device_id=device_id,
+    )
+    return DeviceDeleteResponse(
+        message="设备已彻底删除。",
+        deleted_record_count=deleted_record_count,
+    )

@@ -85,6 +85,122 @@ There is no real migration setup in the repository yet. This file therefore reco
 
 ---
 
+## Scenario: MP157 Device Registry and Purge Delete
+
+### 1. Scope / Trigger
+
+- Trigger: any change touching `Device`, `DeviceService`, `/api/v1/devices`, device DTOs, or frontend device management.
+- Affected layers: device ORM -> repository usage summary and purge queries -> service validation/COS cleanup -> route schemas -> frontend DTO/model/table/delete confirmation.
+
+### 2. Signatures
+
+```py
+class DeviceCreateRequest(BaseModel):
+    device_code: str
+    name: str
+    device_type: DeviceType = DeviceType.MP157
+    status: DeviceStatus = DeviceStatus.OFFLINE
+    firmware_version: str | None
+    ip_address: str | None
+    last_seen_at: datetime | None
+
+class DeviceResponse(ORMBaseModel):
+    record_count: int = 0
+    image_count: int = 0
+
+class DeviceDeleteResponse(BaseModel):
+    message: str
+    deleted_record_count: int
+
+def delete_device(self, *, company_id: int, device_id: int) -> int: ...
+```
+
+```http
+GET /api/v1/devices
+POST /api/v1/devices
+PUT /api/v1/devices/{device_id}
+DELETE /api/v1/devices/{device_id}
+```
+
+### 3. Contracts
+
+| Boundary / field | Contract |
+|---|---|
+| `device_type` | Cloud device records are MP157-only. F4 is not an independent cloud-managed device; its serial data is stored in detection-record context fields through MP157 uploads |
+| `DeviceCreateRequest.device_type` | Defaults to `mp157`; service rejects `f4`, `gateway`, and `other` with `device_type_must_be_mp157` |
+| `DeviceUpdateRequest.device_type` | If present, must be `mp157`; changing a device into F4/gateway/other is forbidden |
+| `DeviceResponse.record_count` | Count of detection records linked to this MP157, used for delete confirmation |
+| `DeviceResponse.image_count` | Count of file-object metadata linked through the device's detection records |
+| `DELETE /devices/{id}` | Purge delete: delete COS objects first, then file metadata, review records, detection records, and finally the device in one DB transaction |
+| Tenant boundary | Every query and delete path must constrain by `company_id` |
+
+Additional rules:
+
+- object storage cleanup must happen before deleting DB metadata; if COS deletion raises `IntegrationError`, do not commit DB deletion
+- deletion returns the number of purged detection records so the UI can report the result
+- do not introduce F4 status management into cloud device pages unless the data model is deliberately redesigned
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Create/update payload uses `device_type="f4"` | Reject with `BadRequestError(code="device_type_must_be_mp157")` |
+| Delete target does not exist in current company | Reject with `NotFoundError(code="device_not_found")` |
+| Device has no detection records | Delete the device and return `deleted_record_count = 0` |
+| Device has detection records, reviews, and file objects | Delete COS objects, file metadata, reviews, records, and device; return deleted record count |
+| COS object deletion fails | Raise integration error and leave DB rows untouched |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | MP157 list row shows `record_count=3`, UI confirms purge, backend deletes those records and returns `deleted_record_count=3` |
+| Base | A newly created MP157 with no records can be deleted with normal confirmation |
+| Bad | A service accepts `DeviceType.F4`, causing frontend filters and statistics to treat serial subcontroller data as a separate cloud device |
+
+### 6. Tests Required
+
+- service test rejecting non-MP157 create and update payloads
+- service test deleting an unreferenced device
+- service test purging a referenced device and asserting detection records, file objects, reviews, and COS objects are deleted
+- service test attaching `record_count` and `image_count` to listed devices
+- route smoke test asserting `DELETE /api/v1/devices/{device_id}` is mounted
+
+Assertion points:
+
+- `DeviceService.delete_device(...)` returns the number of deleted detection records
+- device purge stays inside the current company
+- frontend DTOs include `record_count`, `image_count`, and `deleted_record_count`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+device = Device(device_type=DeviceType.F4, ...)
+self.device_repository.delete(device)
+self.db.commit()
+```
+
+#### Correct
+
+```py
+self._ensure_mp157_device_type(payload.device_type)
+record_ids = self.device_repository.list_detection_record_ids(
+    company_id=company_id,
+    device_id=device_id,
+)
+self._delete_device_cos_objects(company_id=company_id, record_ids=record_ids)
+self.device_repository.delete_detection_records_by_ids(
+    company_id=company_id,
+    record_ids=record_ids,
+)
+self.device_repository.delete(device)
+self.db.commit()
+```
+
+---
+
 ## Scenario: User Credential and Password Reset Storage
 
 ### 1. Scope / Trigger

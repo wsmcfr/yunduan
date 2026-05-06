@@ -299,6 +299,8 @@ export interface DeviceModel {
   firmwareVersion: string | null;
   ipAddress: string | null;
   lastSeenAt: string | null;
+  recordCount: number;
+  imageCount: number;
   createdAt: string;
   updatedAt: string;
 }

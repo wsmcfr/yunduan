@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class Device(Base, IdMixin, TimestampMixin):
-    """设备档案表，记录 MP157、F4 等边缘设备信息。"""
+    """设备档案表，记录云端管理的 MP157 主控设备信息。"""
 
     __tablename__ = "devices"
     __table_args__ = (
@@ -32,8 +32,8 @@ class Device(Base, IdMixin, TimestampMixin):
     device_type: Mapped[DeviceType] = mapped_column(
         SqlEnum(DeviceType, name="device_type_enum", values_callable=enum_values),
         nullable=False,
-        default=DeviceType.OTHER,
-        server_default=text("'other'"),
+        default=DeviceType.MP157,
+        server_default=text("'mp157'"),
     )
     status: Mapped[DeviceStatus] = mapped_column(
         SqlEnum(DeviceStatus, name="device_status_enum", values_callable=enum_values),

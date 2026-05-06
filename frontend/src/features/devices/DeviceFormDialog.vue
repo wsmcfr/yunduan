@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from "vue";
 import type { FormInstance, FormRules } from "element-plus";
 
 import AppDialog from "@/components/common/AppDialog.vue";
-import { deviceStatusOptions, deviceTypeOptions } from "@/constants/options";
+import { deviceStatusOptions } from "@/constants/options";
 import type { DeviceCreateRequestDto, DeviceUpdateRequestDto } from "@/types/api";
 import type { DeviceModel } from "@/types/models";
 import { formatDateTimeInputValue, normalizeOptionalDateTime, normalizeOptionalText } from "@/utils/form";
@@ -200,14 +200,7 @@ watch(
       <ElRow :gutter="16">
         <ElCol :span="12">
           <ElFormItem label="设备类型" prop="deviceType">
-            <ElSelect v-model="formState.deviceType" placeholder="请选择设备类型">
-              <ElOption
-                v-for="option in deviceTypeOptions"
-                :key="option.value"
-                :label="option.label"
-                :value="option.value"
-              />
-            </ElSelect>
+            <ElInput model-value="MP157 主控设备" disabled />
           </ElFormItem>
         </ElCol>
         <ElCol :span="12">

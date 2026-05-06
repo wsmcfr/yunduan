@@ -15,7 +15,7 @@ class DeviceCreateRequest(BaseModel):
 
     device_code: str = Field(min_length=2, max_length=64)
     name: str = Field(min_length=1, max_length=128)
-    device_type: DeviceType = DeviceType.OTHER
+    device_type: DeviceType = DeviceType.MP157
     status: DeviceStatus = DeviceStatus.OFFLINE
     firmware_version: str | None = Field(default=None, max_length=64)
     ip_address: str | None = Field(default=None, max_length=64)
@@ -53,8 +53,17 @@ class DeviceResponse(ORMBaseModel):
     firmware_version: str | None
     ip_address: str | None
     last_seen_at: datetime | None
+    record_count: int = 0
+    image_count: int = 0
     created_at: datetime
     updated_at: datetime
+
+
+class DeviceDeleteResponse(BaseModel):
+    """删除设备响应体。"""
+
+    message: str
+    deleted_record_count: int
 
 
 class DeviceListResponse(BaseModel):

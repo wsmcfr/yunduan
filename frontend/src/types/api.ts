@@ -475,6 +475,8 @@ export interface DeviceDto {
   firmware_version: string | null;
   ip_address: string | null;
   last_seen_at: string | null;
+  record_count: number;
+  image_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -487,6 +489,11 @@ export interface DeviceListResponseDto {
 }
 
 export type DeviceResponseDto = DeviceDto;
+
+export interface DeviceDeleteResponseDto {
+  message: string;
+  deleted_record_count: number;
+}
 
 export interface PartBriefDto {
   id: number;

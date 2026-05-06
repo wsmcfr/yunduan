@@ -71,3 +71,14 @@ class AppSmokeTestCase(unittest.TestCase):
         self.assertIn("/api/v1/companies", route_paths)
         self.assertIn("/api/v1/companies/admin-applications", route_paths)
         self.assertIn("/api/v1/companies/admin-applications/{user_id}/approve", route_paths)
+
+    def test_device_delete_route_is_mounted(self) -> None:
+        """验证设备彻底删除接口挂载在设备管理资源路径下。"""
+
+        device_routes = [
+            route
+            for route in app.routes
+            if route.path == "/api/v1/devices/{device_id}"
+        ]
+
+        self.assertTrue(any("DELETE" in getattr(route, "methods", set()) for route in device_routes))

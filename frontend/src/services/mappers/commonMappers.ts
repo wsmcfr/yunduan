@@ -498,6 +498,8 @@ export function mapDeviceDto(dto: DeviceDto): DeviceModel {
     firmwareVersion: dto.firmware_version,
     ipAddress: dto.ip_address,
     lastSeenAt: dto.last_seen_at,
+    recordCount: dto.record_count,
+    imageCount: dto.image_count,
     createdAt: dto.created_at,
     updatedAt: dto.updated_at,
   };

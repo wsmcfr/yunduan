@@ -22,12 +22,10 @@ export const detectionResultOptions: SelectOption<DetectionResult>[] = [
 
 /**
  * 设备类型候选项。
+ * 云端只登记 STM32MP157 主控；F4 的实时控制和传感器数据通过串口进入 MP157 后随检测记录上报。
  */
 export const deviceTypeOptions: SelectOption<DeviceType>[] = [
   { label: "MP157", value: "mp157" },
-  { label: "STM32F4", value: "f4" },
-  { label: "网关", value: "gateway" },
-  { label: "其他", value: "other" },
 ];
 
 /**

@@ -1,5 +1,6 @@
 import type {
   DeviceCreateRequestDto,
+  DeviceDeleteResponseDto,
   DeviceListResponseDto,
   DeviceResponseDto,
   DeviceStatus,
@@ -56,5 +57,14 @@ export function updateDevice(
   return apiRequest<DeviceResponseDto>(`/api/v1/devices/${deviceId}`, {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * 彻底删除指定 MP157 设备及其关联检测历史。
+ */
+export function deleteDevice(deviceId: number): Promise<DeviceDeleteResponseDto> {
+  return apiRequest<DeviceDeleteResponseDto>(`/api/v1/devices/${deviceId}`, {
+    method: "DELETE",
   });
 }
