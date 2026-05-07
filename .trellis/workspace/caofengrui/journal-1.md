@@ -676,3 +676,52 @@ Fixed the authenticated frontend shell so the browser document stays locked to o
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: Clean parts, admin reset, and Micu API gateway update
+
+**Date**: 2026-05-07
+**Task**: Clean parts, admin reset, and Micu API gateway update
+**Branch**: `main`
+
+### Summary
+
+Completed and published the combined server maintenance session covering invalid part cleanup after device deletion, admin-initiated member password reset, and the OpenClaudeCode-to-Micu API gateway URL migration. Captured the implementation contracts in `.trellis/spec/`, verified the related backend/frontend checks, committed the work as `9442d6d`, and pushed it to GitHub.
+
+### Main Changes
+
+| Area | Details |
+|------|---------|
+| Device / part cleanup | Fixed device deletion follow-up cleanup so affected parts that lose all detection-record references are removed, while shared/manual parts stay intact. Added list-time cleanup for historical unused `SIM-PART-*` leftovers. |
+| Admin password reset | Added privileged admin direct password reset for members without requiring a pending member request. The reset applies the default temporary password, clears pending password state, protects self/default-admin targets, and returns the applied password to the UI. |
+| OpenClaudeCode URL migration | Updated OpenClaudeCode gateway defaults to Micu API: gateway host `https://www.micuapi.ai` and Codex/Responses override `https://www.micuapi.ai/v1`. Added Alembic data migration for existing DB rows while preserving internal vendor `openclaudecode`. |
+| Frontend settings | Added row-level admin reset action and typed `AdminPasswordResetResponseDto`; updated gateway catalog and placeholders to the Micu API host. |
+| Specs / lessons | Updated `.trellis/spec/` with executable contracts and wrong-vs-correct examples for admin direct reset and AI gateway URL migrations, especially avoiding pending-request guards and frontend-only URL changes. |
+| Verification | Frontend `npm test` passed (11 files / 41 tests), frontend `npm run build` passed, backend related pytest passed (51 tests) with test env vars. |
+| Deployment / GitHub | Server deployment had already been completed successfully before recording. Committed and pushed `9442d6d fix: clean parts and update admin settings` to `origin/main`. |
+
+**Notes for future sessions**:
+- Do not commit local temporary folders `.playwright-cli/` and `.tmp/`.
+- Backend tests may require setting `DATABASE_URL=sqlite+pysqlite:///:memory:` and `JWT_SECRET_KEY=test-secret` before importing the FastAPI app.
+- Provider host migrations must update frontend presets, placeholders, backend runtime tests, and existing DB rows via Alembic.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9442d6d` | (see git log) |
+
+### Testing
+
+- [OK] Frontend `npm test`: 11 test files / 41 tests passed.
+- [OK] Frontend `npm run build`: type-check and Vite production build passed.
+- [OK] Backend related pytest: 51 tests passed with `DATABASE_URL=sqlite+pysqlite:///:memory:` and `JWT_SECRET_KEY=test-secret`.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
