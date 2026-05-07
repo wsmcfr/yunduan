@@ -600,3 +600,79 @@ Fixed the authenticated frontend shell so the browser document stays locked to o
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: 记录设备删除遗漏孤立零件清理复盘
+
+**Date**: 2026-05-07
+**Task**: 记录设备删除遗漏孤立零件清理复盘
+**Branch**: `main`
+
+### Summary
+
+记录一次线上零件管理残留问题：设备删除链路漏清受影响零件，已补设备删除后的孤立零件清理、列表前历史 SIM 残留清理，并热修线上数据。
+
+### Main Changes
+
+| 项目 | 记录 |
+|---|---|
+| 问题现象 | 线上 `/parts` 零件管理页出现两条无效零件类型：`SIM-PART-20260420183029`、`SIM-PART-20260420183132`，关联设备数/记录/图片均为 0，最近上传为未记录。 |
+| 用户纠正 | 用户指出根因不是普通列表展示问题，而是“删除设备时没有把这些零件一起清掉”。 |
+| 根因分类 | **C. Change Propagation Failure + D. Test Coverage Gap**：设备彻底删除链路只清理了 COS 对象、文件元数据、审核记录、检测记录和设备本体，漏掉了“被删除检测记录影响到的零件类型是否已变成孤立主数据”的后续传播。 |
+| 具体根因 | `DeviceService.delete_device(...)` 删除检测记录前没有收集 `part_id`，删除检测记录后也没有检查这些零件是否仍被其他检测记录引用。导致某些模拟导入/联调零件在设备和记录都删完后仍留在 `parts` 表。 |
+| 第二层根因 | 线上已经存在的历史残留在设备删除流程修复后不会自动再次触发，所以还需要列表查询前的窄范围历史清理：只清理无引用的 `SIM-PART-*`，不动普通手动新增零件。 |
+| 修复方案 | 1. 设备删除前通过 `list_part_ids_by_record_ids(...)` 收集受影响零件；2. 删除检测记录后通过 `delete_unreferenced_parts_by_ids(...)` 只删除已经没有任何记录引用的受影响零件；3. `PartService.list_parts(...)` 查询前调用 `delete_unused_simulated_parts(...)` 清理历史无引用 `SIM-PART-*`。 |
+| 安全边界 | 清理必须限定 `company_id`；设备删除只处理本次受影响 `part_ids`；列表前历史清理只匹配 `SIM-PART-*` 前缀，避免误删管理员刚创建但尚未上报的正式零件。 |
+| 测试补强 | 新增 `test_delete_device_removes_parts_that_become_unreferenced`，覆盖“孤立零件删除、共享零件保留”；新增 `test_list_parts_cleans_unused_sim_parts_only`，覆盖“无引用 SIM 删除、有引用 SIM 保留、普通零件保留”。 |
+| 本地验证 | `python -m unittest discover backend/tests` 在临时测试环境变量下通过 77 个测试；`python -m compileall -q backend/src` 通过；`npm run build` 通过。 |
+| 线上处理 | 已热修部署到 `yunfuwu-prod`，备份目录 `/opt/yunduan/deploy_backups/20260507_192931`；重启后 `/health` 返回 `{"status":"ok"}`；公网 `/health` 200；`/api/v1/parts` 未登录返回 401，说明路由和鉴权正常。 |
+| 线上数据修复 | 服务器数据库先查到 `系统默认公司` 下 2 条无引用 `SIM-PART-*`；已备份到 `/opt/yunduan/deploy_backups/20260507_192931/unused_sim_parts_before_cleanup.txt`，再调用新清理逻辑删除；复查 `unused-sim-parts=0`。 |
+
+### 错误复盘
+
+| 维度 | 结论 |
+|---|---|
+| 为什么会犯 | 当时把“删除设备”理解成删除设备及检测历史，没有继续追问检测历史删除后会不会产生孤立主数据。零件是主数据，但其中一部分来自模拟/联调上报，删除最后一条引用记录后应进入清理判断。 |
+| 为什么第一反应不够准 | 看到零件页残留时，最初倾向从零件列表展示或通用无效过滤入手；用户补充“因为我删除了设备”后才把根因定位到设备删除链路。以后遇到管理页残留，必须先追问/追踪最近触发该残留的写操作。 |
+| 漏掉的测试 | 原有 `test_delete_device_purges_detection_records_when_device_is_deleted` 只断言记录、文件、审核、设备消失，没有断言受影响零件是否变成孤立数据，也没有共享零件保留用例。 |
+| 线上教训 | 只修未来流程不够；如果生产库已经有历史残留，还要设计一次性或窄范围的线上修复路径，并且先备份被清理对象清单。 |
+
+### 防复发检查点
+
+| 优先级 | 下次必须检查 | 状态 |
+|---|---|---|
+| P0 | 任何“删除父实体/设备/公司/批次”的功能，都必须列出被删除子记录会影响到哪些主数据或聚合统计。 | 已记录 |
+| P0 | 删除检测记录前先收集关键外键，例如 `part_id`、`device_id`、文件对象 key；删除后再检查是否产生孤立对象。 | 已记录 |
+| P0 | 测试不能只断言被删对象消失，还要断言“该删的孤立对象被删、不该删的共享对象保留”。 | 已记录 |
+| P1 | 线上已有残留要单独验证和修复，不能只依赖新流程在未来生效。 | 已记录 |
+| P1 | 清理逻辑必须有窄边界和租户边界：`company_id` + 明确候选集，避免误删正式主数据。 | 已记录 |
+
+### 已同步到规范
+
+- `.trellis/spec/backend/database-guidelines.md` 已补充设备删除后的孤立零件清理合同。
+- 同一规范已补充列表前 `SIM-PART-*` 历史残留清理合同、测试要求和错误案例。
+
+### 当前代码状态说明
+
+| 项目 | 状态 |
+|---|---|
+| 业务代码 | 已本地修改并已热修部署到生产，但尚未形成业务代码提交。 |
+| 记忆记录 | 本 session 记录用于防止以后重复遗漏。 |
+| 未纳入本记录自动提交的内容 | 后端源码、测试、`.trellis/spec/backend/database-guidelines.md` 仍在工作区待提交；`.playwright-cli/`、`.tmp/` 为既有未跟踪目录。 |
+
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

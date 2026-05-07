@@ -344,7 +344,7 @@ class AIReviewClientTestCase(unittest.TestCase):
                 "model_identifier": "gpt-5.4",
                 "protocol_type": "openai_responses",
                 "auth_mode": "authorization_bearer",
-                "base_url": "https://www.openclaudecode.cn/v1",
+                "base_url": "https://www.micuapi.ai/v1",
                 "user_agent": "codex_cli_rs/0.77.0 (Windows 10.0.26100; x86_64) WindowsTerminal",
                 "supports_vision": True,
                 "supports_stream": True,
@@ -355,7 +355,7 @@ class AIReviewClientTestCase(unittest.TestCase):
 
         self.assertEqual(response["status"], "completed")
         self.assertEqual(response["answer"], "这是来自 Codex 协议的真实回答。")
-        self.assertEqual(client.captured_url, "https://www.openclaudecode.cn/v1/responses")
+        self.assertEqual(client.captured_url, "https://www.micuapi.ai/v1/responses")
         self.assertEqual(
             client.captured_headers["Authorization"],  # type: ignore[index]
             "Bearer sk-demo-codex",
@@ -439,7 +439,7 @@ class AIReviewClientTestCase(unittest.TestCase):
                 "model_identifier": "grok-4.20-fast",
                 "protocol_type": "openai_responses",
                 "auth_mode": "authorization_bearer",
-                "base_url": "https://www.openclaudecode.cn/v1",
+                "base_url": "https://www.micuapi.ai/v1",
                 "user_agent": "codex_cli_rs/0.77.0 (Windows 10.0.26100; x86_64) WindowsTerminal",
                 "supports_vision": True,
                 "supports_stream": True,
@@ -454,8 +454,8 @@ class AIReviewClientTestCase(unittest.TestCase):
         self.assertEqual(
             client.captured_urls,
             [
-                "https://www.openclaudecode.cn/v1/responses",
-                "https://www.openclaudecode.cn/v1/chat/completions",
+                "https://www.micuapi.ai/v1/responses",
+                "https://www.micuapi.ai/v1/chat/completions",
             ],
         )
 
@@ -504,7 +504,7 @@ class AIReviewClientTestCase(unittest.TestCase):
                 "model_identifier": "grok-4.20-fast",
                 "protocol_type": "anthropic_messages",
                 "auth_mode": "authorization_bearer",
-                "base_url": "https://www.openclaudecode.cn",
+                "base_url": "https://www.micuapi.ai",
                 "user_agent": "claude-cli/2.0.76 (external, cli)",
                 "supports_vision": True,
                 "supports_stream": True,
@@ -516,7 +516,7 @@ class AIReviewClientTestCase(unittest.TestCase):
 
         self.assertEqual(response["status"], "completed")
         self.assertEqual(response["answer"], "这是来自 SSE 的 Grok 回答。")
-        self.assertEqual(client.captured_url, "https://www.openclaudecode.cn/v1/messages")
+        self.assertEqual(client.captured_url, "https://www.micuapi.ai/v1/messages")
 
     def test_stream_chat_about_record_yields_anthropic_message_deltas(self) -> None:
         """验证 Anthropic Messages 直接返回 SSE 时，流式接口会逐段转发文本。"""
@@ -555,7 +555,7 @@ class AIReviewClientTestCase(unittest.TestCase):
                     "model_identifier": "grok-4.20-fast",
                     "protocol_type": "anthropic_messages",
                     "auth_mode": "authorization_bearer",
-                    "base_url": "https://www.openclaudecode.cn",
+                    "base_url": "https://www.micuapi.ai",
                     "user_agent": "claude-cli/2.0.76 (external, cli)",
                     "supports_vision": True,
                     "supports_stream": True,
@@ -567,7 +567,7 @@ class AIReviewClientTestCase(unittest.TestCase):
         )
 
         self.assertEqual(chunks, ["第一段。", "第二段。"])
-        self.assertEqual(client.captured_url, "https://www.openclaudecode.cn/v1/messages")
+        self.assertEqual(client.captured_url, "https://www.micuapi.ai/v1/messages")
 
     def test_statistics_prompt_uses_text_snapshot_instead_of_raw_json(self) -> None:
         """验证统计页提示词改为文本摘要，避免把整包 JSON 直接塞进 Grok Messages。"""
@@ -782,7 +782,7 @@ class AIReviewClientTestCase(unittest.TestCase):
                     "model_identifier": "gpt-5.4",
                     "protocol_type": "openai_responses",
                     "auth_mode": "authorization_bearer",
-                    "base_url": "https://www.openclaudecode.cn/v1",
+                    "base_url": "https://www.micuapi.ai/v1",
                     "user_agent": "codex_cli_rs/0.77.0",
                     "supports_vision": False,
                     "supports_stream": True,
@@ -794,14 +794,14 @@ class AIReviewClientTestCase(unittest.TestCase):
         )
 
         self.assertEqual("".join(output_chunks), full_answer)
-        self.assertEqual(client.captured_url, "https://www.openclaudecode.cn/v1/responses")
+        self.assertEqual(client.captured_url, "https://www.micuapi.ai/v1/responses")
         self.assertTrue(client.captured_payload["stream"])  # type: ignore[index]
 
     def test_stream_statistics_analysis_falls_back_when_openclaudecode_responses_returns_invalid_json(self) -> None:
         """验证统计流式分析在 `/responses` 返回非 JSON 时，会自动改走 Chat Completions。"""
 
         client = InvalidJsonStreamingFallbackStubAIReviewClient()
-        fallback_url = "https://www.openclaudecode.cn/v1/chat/completions"
+        fallback_url = "https://www.micuapi.ai/v1/chat/completions"
         client.stream_event_map[fallback_url] = [
             (
                 None,
@@ -842,7 +842,7 @@ class AIReviewClientTestCase(unittest.TestCase):
                     "model_identifier": "grok-4.20-fast",
                     "protocol_type": "openai_responses",
                     "auth_mode": "authorization_bearer",
-                    "base_url": "https://www.openclaudecode.cn/v1",
+                    "base_url": "https://www.micuapi.ai/v1",
                     "user_agent": "codex_cli_rs/0.77.0",
                     "supports_vision": False,
                     "supports_stream": True,
@@ -857,7 +857,7 @@ class AIReviewClientTestCase(unittest.TestCase):
         self.assertEqual(
             client.captured_urls,
             [
-                "https://www.openclaudecode.cn/v1/responses",
-                "https://www.openclaudecode.cn/v1/chat/completions",
+                "https://www.micuapi.ai/v1/responses",
+                "https://www.micuapi.ai/v1/chat/completions",
             ],
         )

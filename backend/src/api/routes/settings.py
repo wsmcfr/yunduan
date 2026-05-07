@@ -29,6 +29,7 @@ from src.schemas.ai_gateway import (
 )
 from src.schemas.common import ApiMessageResponse
 from src.schemas.system_user import (
+    AdminPasswordResetResponse,
     ApprovePasswordChangeRequestResponse,
     SubmitPasswordChangeRequest,
     SystemUserAiPermissionUpdateRequest,
@@ -135,6 +136,25 @@ def update_system_user_status(
         is_active=payload.is_active,
     )
     return SystemUserListItem.model_validate(user)
+
+
+@router.post("/users/{user_id}/password-reset", response_model=AdminPasswordResetResponse)
+def reset_system_user_password(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_company_admin_user),
+) -> AdminPasswordResetResponse:
+    """由公司管理员直接把指定成员密码重置为默认临时密码。"""
+
+    _, applied_password = SystemUserService(db).reset_user_password_to_default(
+        company_id=current_user.company_id,
+        current_user_id=current_user.id,
+        user_id=user_id,
+    )
+    return AdminPasswordResetResponse(
+        message="已将该用户密码重置为默认临时密码。",
+        applied_password=applied_password,
+    )
 
 
 @router.get("/users/me/password-request", response_model=UserPasswordChangeRequestInfo)

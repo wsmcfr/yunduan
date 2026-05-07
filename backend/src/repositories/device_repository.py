@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from src.db.models.detection_record import DetectionRecord
 from src.db.models.device import Device
 from src.db.models.file_object import FileObject
+from src.db.models.part import Part
 from src.db.models.review_record import ReviewRecord
 
 
@@ -128,6 +129,29 @@ class DeviceRepository:
             ).scalars()
         )
 
+    def list_part_ids_by_record_ids(self, *, company_id: int, record_ids: list[int]) -> list[int]:
+        """查询一批检测记录曾经关联过的零件 ID。
+
+        参数:
+            company_id: 当前用户所属公司，用于限定租户边界。
+            record_ids: 即将被删除的检测记录 ID 集合。
+
+        返回:
+            去重后的零件 ID 列表；这些零件后续需要检查是否已经没有记录引用。
+        """
+
+        if not record_ids:
+            return []
+
+        return list(
+            self.db.execute(
+                select(DetectionRecord.part_id)
+                .where(DetectionRecord.company_id == company_id)
+                .where(DetectionRecord.id.in_(record_ids))
+                .distinct()
+            ).scalars()
+        )
+
     def list_file_objects_by_record_ids(self, *, company_id: int, record_ids: list[int]) -> list[FileObject]:
         """查询指定检测记录下的文件对象，供彻底删除前清理对象存储。"""
 
@@ -171,6 +195,47 @@ class DeviceRepository:
             )
         )
         self.db.flush()
+
+    def delete_unreferenced_parts_by_ids(self, *, company_id: int, part_ids: list[int]) -> int:
+        """删除已经没有任何检测记录引用的零件类型。
+
+        参数:
+            company_id: 当前公司边界，避免跨租户误删同名或同 ID 以外的数据。
+            part_ids: 本次设备删除影响到的零件 ID 列表。
+
+        返回:
+            实际删除的零件类型数量。
+
+        这里不会扫描全表，只处理本次设备检测记录曾经引用过的零件；如果某个零件
+        仍然被其他设备的检测记录引用，就必须保留，避免破坏历史追溯链路。
+        """
+
+        if not part_ids:
+            return 0
+
+        still_referenced_part_ids = set(
+            self.db.execute(
+                select(DetectionRecord.part_id)
+                .where(DetectionRecord.company_id == company_id)
+                .where(DetectionRecord.part_id.in_(part_ids))
+                .distinct()
+            ).scalars()
+        )
+        removable_part_ids = [
+            part_id
+            for part_id in set(part_ids)
+            if part_id not in still_referenced_part_ids
+        ]
+        if not removable_part_ids:
+            return 0
+
+        result = self.db.execute(
+            delete(Part)
+            .where(Part.company_id == company_id)
+            .where(Part.id.in_(removable_part_ids))
+        )
+        self.db.flush()
+        return int(result.rowcount or 0)
 
     def delete(self, device: Device) -> None:
         """删除指定设备对象并刷新会话状态。"""

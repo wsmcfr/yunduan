@@ -9,6 +9,7 @@ import type {
   AIModelProfileDto,
   AIModelProfileUpdateRequestDto,
   AIRuntimeModelOptionListResponseDto,
+  AdminPasswordResetResponseDto,
   ApprovePasswordChangeRequestResponseDto,
   ApiMessageResponseDto,
   SubmitPasswordChangeRequestDto,
@@ -200,6 +201,20 @@ export function deleteSystemUser(userId: number): Promise<ApiMessageResponseDto>
   return apiRequest<ApiMessageResponseDto>(`/api/v1/settings/users/${userId}`, {
     method: "DELETE",
   });
+}
+
+/**
+ * 管理员直接把指定成员密码重置为系统默认临时密码。
+ */
+export function resetSystemUserPassword(
+  userId: number,
+): Promise<AdminPasswordResetResponseDto> {
+  return apiRequest<AdminPasswordResetResponseDto>(
+    `/api/v1/settings/users/${userId}/password-reset`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 /**

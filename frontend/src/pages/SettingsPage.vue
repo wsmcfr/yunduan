@@ -34,6 +34,7 @@ import {
   fetchCurrentUserPasswordChangeRequest,
   fetchSystemUsers,
   rejectSystemUserPasswordChangeRequest,
+  resetSystemUserPassword,
   submitCurrentUserPasswordChangeRequest,
   updateAIGateway,
   updateAIModel,
@@ -1304,6 +1305,42 @@ async function handleDeleteUser(user: SystemUserListItem): Promise<void> {
 }
 
 /**
+ * 管理员直接把指定成员密码重置为默认临时密码。
+ * 这里不要求成员先提交申请；成功后只短暂弹出默认密码，避免前端长期保存敏感信息。
+ */
+async function handleResetUserPassword(user: SystemUserListItem): Promise<void> {
+  const defaultPassword = defaultResetPasswordLabel.value;
+
+  try {
+    await ElMessageBox.confirm(
+      `确认要把账号“${user.displayName}”的密码重置为 ${defaultPassword} 吗？该成员之后需要使用这个临时密码登录。`,
+      "重置成员密码",
+      {
+        type: "warning",
+        confirmButtonText: "重置密码",
+        cancelButtonText: "取消",
+      },
+    );
+  } catch {
+    return;
+  }
+
+  await runUserRowAction(user.id, async () => {
+    try {
+      const response = await resetSystemUserPassword(user.id);
+      ElMessage.success(`${response.message} 临时密码为：${response.applied_password}`);
+      await loadSystemUsers();
+      if (isCurrentUserRow(user)) {
+        await loadCurrentPasswordRequest();
+      }
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : "重置用户密码失败";
+      ElMessage.error(message);
+    }
+  });
+}
+
+/**
  * 批准指定用户的站内改密申请。
  */
 async function handleApproveUserPasswordRequest(user: SystemUserListItem): Promise<void> {
@@ -2076,7 +2113,7 @@ watch(gatewayDialogVisible, (visible) => {
                 {{ formatDateTime(row.createdAt) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="操作" min-width="260">
+            <ElTableColumn label="操作" min-width="340">
               <template #default="{ row }">
                 <div class="table-actions">
                   <ElButton
@@ -2096,6 +2133,14 @@ watch(gatewayDialogVisible, (visible) => {
                     @click="handleRejectUserPasswordRequest(row)"
                   >
                     拒绝
+                  </ElButton>
+                  <ElButton
+                    text
+                    type="primary"
+                    :disabled="isCurrentUserRow(row) || isUserActionPending(row.id)"
+                    @click="handleResetUserPassword(row)"
+                  >
+                    重置密码
                   </ElButton>
                   <ElButton
                     text

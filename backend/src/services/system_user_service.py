@@ -280,6 +280,49 @@ class SystemUserService:
         self.db.refresh(user)
         return user, applied_password
 
+    def reset_user_password_to_default(
+        self,
+        *,
+        company_id: int | None,
+        current_user_id: int,
+        user_id: int,
+    ) -> tuple[User, str]:
+        """由公司管理员直接把成员密码重置为系统默认临时密码。
+
+        主要流程：
+        1. 先按公司边界加载目标用户，避免跨公司重置密码。
+        2. 复用高风险账号保护，禁止管理员重置自己或平台默认管理员。
+        3. 写入默认临时密码哈希，并清理邮箱找回密码令牌与站内待审批密文。
+        4. 返回本次实际生效的临时密码，供前端只在成功提示里短暂展示。
+        """
+
+        user = self._get_scoped_user(company_id=company_id, user_id=user_id)
+        self._ensure_manageable_user(
+            user=user,
+            current_user_id=current_user_id,
+            action_label="reset_password",
+        )
+
+        reviewed_at = datetime.now(timezone.utc)
+        # 如果原来没有用户申请，这里用管理员操作时间作为请求时间，保证列表里有完整审计快照。
+        requested_at = user.password_change_requested_at or reviewed_at
+
+        user.password_hash = hash_password(DEFAULT_APPROVED_RESET_PASSWORD)
+        user.password_changed_at = reviewed_at
+        self._clear_password_reset_state(user)
+        self._set_password_request_snapshot(
+            user=user,
+            status="approved",
+            request_type="reset_to_default",
+            encrypted_password=None,
+            requested_at=requested_at,
+            reviewed_at=reviewed_at,
+        )
+        self.user_repository.save(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user, DEFAULT_APPROVED_RESET_PASSWORD
+
     def reject_password_change_request(
         self,
         *,

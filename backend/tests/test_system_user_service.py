@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.core.config import get_settings
-from src.core.errors import BadRequestError
+from src.core.errors import BadRequestError, ForbiddenError, NotFoundError
 from src.core.security import hash_password, verify_password_and_update_hash
 from src.db.base import Base
 from src.db.models.company import Company
@@ -245,6 +245,151 @@ class SystemUserServiceTestCase(unittest.TestCase):
         self.assertEqual(refreshed_user.password_change_request_status, "approved")
         self.assertEqual(refreshed_user.password_change_request_type, "change_to_requested")
         self.assertIsNone(refreshed_user.password_change_requested_password_encrypted)
+
+    def test_admin_can_directly_reset_user_password_without_pending_request(self) -> None:
+        """管理员无需等待用户申请，也可以直接把同公司成员密码重置为默认临时密码。"""
+
+        self.target_user.password_reset_token_hash = "old-reset-token-hash"
+        self.target_user.password_reset_sent_at = datetime.now(timezone.utc)
+        self.target_user.password_reset_expires_at = datetime.now(timezone.utc)
+        self.user_repository.save(self.target_user)
+        self.db.commit()
+
+        refreshed_user, applied_password = self.service.reset_user_password_to_default(
+            company_id=self.company.id,
+            current_user_id=self.admin_user.id,
+            user_id=self.target_user.id,
+        )
+
+        verified, _ = verify_password_and_update_hash(
+            DEFAULT_APPROVED_RESET_PASSWORD,
+            refreshed_user.password_hash,
+        )
+        self.assertTrue(verified)
+        self.assertEqual(applied_password, DEFAULT_APPROVED_RESET_PASSWORD)
+        self.assertEqual(refreshed_user.password_change_request_status, "approved")
+        self.assertEqual(refreshed_user.password_change_request_type, "reset_to_default")
+        self.assertIsNone(refreshed_user.password_change_requested_password_encrypted)
+        self.assertIsNotNone(refreshed_user.password_change_requested_at)
+        self.assertIsNotNone(refreshed_user.password_change_reviewed_at)
+        self.assertIsNone(refreshed_user.password_reset_token_hash)
+        self.assertIsNone(refreshed_user.password_reset_sent_at)
+        self.assertIsNone(refreshed_user.password_reset_expires_at)
+        self.assertIsNotNone(refreshed_user.password_changed_at)
+
+    def test_admin_direct_reset_closes_existing_pending_password_request(self) -> None:
+        """管理员直接重置后，旧的待审批改密申请不应继续显示为可审批状态。"""
+
+        self.service.submit_password_change_request(
+            company_id=self.company.id,
+            user_id=self.target_user.id,
+            request_type="change_to_requested",
+            new_password="RequestedPass#2026",
+        )
+        pending_requested_at = self.target_user.password_change_requested_at
+
+        refreshed_user, applied_password = self.service.reset_user_password_to_default(
+            company_id=self.company.id,
+            current_user_id=self.admin_user.id,
+            user_id=self.target_user.id,
+        )
+
+        requested_verified, _ = verify_password_and_update_hash(
+            "RequestedPass#2026",
+            refreshed_user.password_hash,
+        )
+        default_verified, _ = verify_password_and_update_hash(
+            DEFAULT_APPROVED_RESET_PASSWORD,
+            refreshed_user.password_hash,
+        )
+        self.assertFalse(requested_verified)
+        self.assertTrue(default_verified)
+        self.assertEqual(applied_password, DEFAULT_APPROVED_RESET_PASSWORD)
+        self.assertEqual(refreshed_user.password_change_request_status, "approved")
+        self.assertEqual(refreshed_user.password_change_request_type, "reset_to_default")
+        self.assertEqual(refreshed_user.password_change_requested_at, pending_requested_at)
+        self.assertIsNone(refreshed_user.password_change_requested_password_encrypted)
+
+    def test_admin_direct_reset_rejects_self_operation(self) -> None:
+        """管理员不能直接重置自己的密码，避免当前会话被自己误伤。"""
+
+        with self.assertRaises(BadRequestError) as context:
+            self.service.reset_user_password_to_default(
+                company_id=self.company.id,
+                current_user_id=self.admin_user.id,
+                user_id=self.admin_user.id,
+            )
+
+        self.assertEqual(context.exception.code, "cannot_reset_password_self")
+
+    def test_admin_direct_reset_rejects_default_admin(self) -> None:
+        """平台默认管理员属于系统保留账号，不允许被公司管理员直接重置密码。"""
+
+        default_admin = self.user_repository.create(
+            User(
+                username="default-admin",
+                email="root@example.com",
+                password_hash=hash_password("RootPass#2026"),
+                password_changed_at=datetime.now(timezone.utc),
+                display_name="默认管理员",
+                role=UserRole.ADMIN,
+                company_id=self.company.id,
+                is_active=True,
+                can_use_ai_analysis=True,
+                is_default_admin=True,
+            )
+        )
+        self.db.commit()
+        self.db.refresh(default_admin)
+
+        with self.assertRaises(ForbiddenError) as context:
+            self.service.reset_user_password_to_default(
+                company_id=self.company.id,
+                current_user_id=self.admin_user.id,
+                user_id=default_admin.id,
+            )
+
+        self.assertEqual(context.exception.code, "cannot_reset_password_default_admin")
+
+    def test_admin_direct_reset_rejects_cross_company_user(self) -> None:
+        """管理员只能重置当前公司内成员，跨公司目标统一表现为不存在。"""
+
+        other_company = self.company_repository.create(
+            Company(
+                name="其他公司",
+                contact_name="其他联系人",
+                note="跨公司密码重置保护测试",
+                invite_code="OTHER001",
+                is_active=True,
+                is_system_reserved=False,
+            )
+        )
+        self.db.commit()
+        self.db.refresh(other_company)
+        outside_user = self.user_repository.create(
+            User(
+                username="outside-user",
+                email="outside@example.com",
+                password_hash=hash_password("OutsidePass#2026"),
+                password_changed_at=datetime.now(timezone.utc),
+                display_name="外部用户",
+                role=UserRole.OPERATOR,
+                company_id=other_company.id,
+                is_active=True,
+                can_use_ai_analysis=False,
+            )
+        )
+        self.db.commit()
+        self.db.refresh(outside_user)
+
+        with self.assertRaises(NotFoundError) as context:
+            self.service.reset_user_password_to_default(
+                company_id=self.company.id,
+                current_user_id=self.admin_user.id,
+                user_id=outside_user.id,
+            )
+
+        self.assertEqual(context.exception.code, "user_not_found")
 
     def test_reject_change_request_clears_encrypted_pending_password(self) -> None:
         """管理员拒绝申请后，不应继续保留待审批密码密文。"""

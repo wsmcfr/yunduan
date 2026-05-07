@@ -113,6 +113,9 @@ class DeviceDeleteResponse(BaseModel):
     deleted_record_count: int
 
 def delete_device(self, *, company_id: int, device_id: int) -> int: ...
+def list_part_ids_by_record_ids(self, *, company_id: int, record_ids: list[int]) -> list[int]: ...
+def delete_unreferenced_parts_by_ids(self, *, company_id: int, part_ids: list[int]) -> int: ...
+def delete_unused_simulated_parts(self, *, company_id: int) -> int: ...
 ```
 
 ```http
@@ -132,12 +135,17 @@ DELETE /api/v1/devices/{device_id}
 | `DeviceResponse.record_count` | Count of detection records linked to this MP157, used for delete confirmation |
 | `DeviceResponse.image_count` | Count of file-object metadata linked through the device's detection records |
 | `DELETE /devices/{id}` | Purge delete: delete COS objects first, then file metadata, review records, detection records, and finally the device in one DB transaction |
+| Orphan part cleanup after device delete | Before deleting detection records, collect the affected `part_id` values. After deleting those records, delete only those affected parts that no longer have any detection-record reference in the same company |
+| `PartService.list_parts(...)` legacy cleanup | Before listing parts, delete `SIM-PART-*` rows in the current company that have no detection-record reference |
 | Tenant boundary | Every query and delete path must constrain by `company_id` |
 
 Additional rules:
 
 - object storage cleanup must happen before deleting DB metadata; if COS deletion raises `IntegrationError`, do not commit DB deletion
 - deletion returns the number of purged detection records so the UI can report the result
+- orphan part cleanup is a scoped follow-up to device delete, not a full-table sweep; newly created manual part definitions that never had records must not be deleted by this path
+- if an affected part is still referenced by another device's detection records, keep the part so the remaining history stays traceable
+- the list-time legacy cleanup is intentionally limited to `SIM-PART-*` rows, so refreshing the parts page can remove historical simulator leftovers without deleting ordinary manually created part definitions
 - do not introduce F4 status management into cloud device pages unless the data model is deliberately redesigned
 
 ### 4. Validation & Error Matrix
@@ -148,15 +156,20 @@ Additional rules:
 | Delete target does not exist in current company | Reject with `NotFoundError(code="device_not_found")` |
 | Device has no detection records | Delete the device and return `deleted_record_count = 0` |
 | Device has detection records, reviews, and file objects | Delete COS objects, file metadata, reviews, records, and device; return deleted record count |
+| Deleted device was the only remaining source for a part | Delete the now-unreferenced part after its detection records are removed |
+| Deleted device shared a part with another device | Keep the part because another detection record still references it |
+| Parts page lists historical `SIM-PART-*` leftovers with zero records | Delete those unused simulated parts before returning the list |
+| Manually created part has zero records | Keep it; it may be a valid master-data entry waiting for device upload |
 | COS object deletion fails | Raise integration error and leave DB rows untouched |
 
 ### 5. Good / Base / Bad Cases
 
 | Case | Example |
 |---|---|
-| Good | MP157 list row shows `record_count=3`, UI confirms purge, backend deletes those records and returns `deleted_record_count=3` |
+| Good | MP157 list row shows `record_count=3`, UI confirms purge, backend deletes those records, removes parts that became unreferenced, and returns `deleted_record_count=3` |
 | Base | A newly created MP157 with no records can be deleted with normal confirmation |
-| Bad | A service accepts `DeviceType.F4`, causing frontend filters and statistics to treat serial subcontroller data as a separate cloud device |
+| Base | Opening `/parts` removes unused `SIM-PART-*` legacy rows while keeping unused `PART-*` manual rows |
+| Bad | Device delete removes records but leaves stale `parts` rows with `record_count=0`, `image_count=0`, and no source device |
 
 ### 6. Tests Required
 
@@ -164,12 +177,16 @@ Additional rules:
 - service test deleting an unreferenced device
 - service test purging a referenced device and asserting detection records, file objects, reviews, and COS objects are deleted
 - service test attaching `record_count` and `image_count` to listed devices
+- service test deleting a device that leaves one affected part unreferenced and one affected part still shared by another device
+- part service test asserting list-time cleanup removes unused `SIM-PART-*` rows only
 - route smoke test asserting `DELETE /api/v1/devices/{device_id}` is mounted
 
 Assertion points:
 
 - `DeviceService.delete_device(...)` returns the number of deleted detection records
 - device purge stays inside the current company
+- affected parts are removed only when no remaining detection record references them
+- `PartService.list_parts(...)` removes historical unused `SIM-PART-*` rows but keeps ordinary zero-record parts
 - frontend DTOs include `record_count`, `image_count`, and `deleted_record_count`
 
 ### 7. Wrong vs Correct
@@ -190,10 +207,18 @@ record_ids = self.device_repository.list_detection_record_ids(
     company_id=company_id,
     device_id=device_id,
 )
+affected_part_ids = self.device_repository.list_part_ids_by_record_ids(
+    company_id=company_id,
+    record_ids=record_ids,
+)
 self._delete_device_cos_objects(company_id=company_id, record_ids=record_ids)
 self.device_repository.delete_detection_records_by_ids(
     company_id=company_id,
     record_ids=record_ids,
+)
+self.device_repository.delete_unreferenced_parts_by_ids(
+    company_id=company_id,
+    part_ids=affected_part_ids,
 )
 self.device_repository.delete(device)
 self.db.commit()
@@ -245,7 +270,7 @@ Additional rules:
 
 ### 1. Scope / Trigger
 
-- Trigger: any change to station-inside password approval, admin approval/rejection, user deletion with pending password requests, or the user-table snapshot fields introduced by `20260421_0008_user_password_change_requests.py`
+- Trigger: any change to station-inside password approval, admin direct password reset, admin approval/rejection, user deletion with pending password requests, or the user-table snapshot fields introduced by `20260421_0008_user_password_change_requests.py`
 - Affected layers: Alembic migration -> `users` ORM columns -> `SystemUserService` -> settings schemas/routes
 
 ### 2. Signatures
@@ -277,6 +302,13 @@ def approve_password_change_request(
     user_id: int,
 ) -> tuple[User, str | None]: ...
 
+def reset_user_password_to_default(
+    *,
+    company_id: int | None,
+    current_user_id: int,
+    user_id: int,
+) -> tuple[User, str]: ...
+
 def reject_password_change_request(
     *,
     company_id: int | None,
@@ -296,8 +328,8 @@ def reject_password_change_request(
 | `users.password_change_requested_at` | UTC timestamp when the latest request snapshot was created |
 | `users.password_change_reviewed_at` | UTC timestamp when an admin approved or rejected the latest request |
 | `DEFAULT_APPROVED_RESET_PASSWORD` | Service constant only; do not persist this literal as plaintext in the database snapshot |
-| `users.password_changed_at` | Updates only when approval actually changes the effective password; request submission or rejection must not advance it |
-| `users.password_reset_*` | Existing email-reset token state must be cleared when a password request is approved so old reset links cannot remain valid |
+| `users.password_changed_at` | Updates only when approval or admin direct reset actually changes the effective password; request submission or rejection must not advance it |
+| `users.password_reset_*` | Existing email-reset token state must be cleared when a password request is approved or an admin direct reset succeeds so old reset links cannot remain valid |
 
 Additional rules:
 
@@ -305,6 +337,8 @@ Additional rules:
 - this flow uses a snapshot on `users`, not a separate history table; do not accumulate multiple pending rows elsewhere without a new code-spec update
 - `change_to_requested` must pass through `SecretCipher` before storage; plaintext requested passwords must never touch the database
 - approval and rejection must keep `requested_at` for traceability while clearing the encrypted pending secret
+- admin direct reset is a separate privileged action, not an approve/reject shortcut; it may succeed even when the member never submitted a pending request
+- admin direct reset must close any existing pending password-request snapshot by setting it to `approved + reset_to_default` and clearing the encrypted pending secret
 
 ### 4. Validation & Error Matrix
 
@@ -315,6 +349,8 @@ Additional rules:
 | `change_to_requested` approval finds no encrypted payload | The snapshot is corrupt and cannot safely apply a password | Fail approval and leave `password_hash` unchanged |
 | Request is rejected | Password should not change | Keep `password_hash` and `password_changed_at` unchanged, set status to `rejected`, and clear encrypted pending payload |
 | Request is approved | New password becomes effective | Update `password_hash`, set `password_changed_at = reviewed_at`, clear email reset token state, clear encrypted pending payload |
+| Admin directly resets a member with no pending request | Admins need an emergency recovery path without waiting for member action | Update `password_hash` to the default password hash, set `approved + reset_to_default`, set request/review timestamps to the admin action time, and clear `password_reset_*` |
+| Admin directly resets a member with a pending request | Old pending payload could remain approvable after the reset | Apply the default password, keep or create an audit snapshot, clear encrypted pending payload, and make the row no longer render as `pending` |
 
 ### 5. Good / Base / Bad Cases
 
@@ -322,6 +358,8 @@ Additional rules:
 |---|---|
 | Good | User submits `change_to_requested`, the DB stores only encrypted pending text, admin approval writes a new `password_hash`, and the encrypted payload is cleared |
 | Base | User submits `reset_to_default`, so the DB stores `pending + reset_to_default + NULL encrypted payload`, and approval returns the default password text only in the transient response |
+| Base | Admin directly resets a member who never submitted a request; the DB stores an approved reset snapshot and only returns the plaintext default password in the transient API response |
+| Bad | Admin direct reset reuses the approve path or `_require_pending_password_request(...)`, so no-pending members cannot be recovered until they submit a request |
 | Bad | Submitted password is written into `password_hash` or a plaintext temp column before approval, effectively bypassing the admin gate |
 
 ### 6. Tests Required
@@ -331,13 +369,16 @@ Additional rules:
 - service test asserting duplicate pending submit is rejected without overwriting the first snapshot
 - service test asserting approval updates `password_hash` and `password_changed_at` and clears `password_reset_*`
 - service test asserting rejection clears the encrypted payload without changing the effective password
+- service test asserting admin direct reset succeeds without a pending request and clears `password_reset_*`
+- service test asserting admin direct reset closes an existing pending request so it cannot still be approved
 
 Assertion points:
 
 - only one pending snapshot exists per user
 - no plaintext requested password is persisted
 - approval and rejection both clear `password_change_requested_password_encrypted`
-- `password_changed_at` advances only on approval
+- admin direct reset clears `password_change_requested_password_encrypted` and never requires `_require_pending_password_request(...)`
+- `password_changed_at` advances only on approval or admin direct reset
 
 ### 7. Wrong vs Correct
 
@@ -361,4 +402,140 @@ self._set_password_request_snapshot(
     requested_at=requested_at,
     reviewed_at=None,
 )
+```
+
+#### Wrong
+
+```py
+# Direct reset is not an approval action and must not require a pending request.
+user = self._require_pending_password_request(user)
+return self.approve_password_change_request(
+    company_id=company_id,
+    current_user_id=current_user_id,
+    user_id=user_id,
+)
+```
+
+#### Correct
+
+```py
+reviewed_at = datetime.now(timezone.utc)
+user.password_hash = hash_password(DEFAULT_APPROVED_RESET_PASSWORD)
+user.password_changed_at = reviewed_at
+self._set_password_request_snapshot(
+    user=user,
+    status="approved",
+    request_type="reset_to_default",
+    encrypted_password=None,
+    requested_at=reviewed_at,
+    reviewed_at=reviewed_at,
+)
+```
+
+---
+
+## Scenario: AI Gateway Provider URL Data Migration
+
+### 1. Scope / Trigger
+
+- Trigger: any provider host/domain migration for stored AI gateways or model `base_url_override` values.
+- Affected layers: Alembic data migration -> `ai_gateways` rows -> `ai_model_profiles.base_url_override` -> runtime model context -> frontend preset catalog.
+
+### 2. Signatures
+
+```py
+# alembic/versions/20260421_0010_openclaudecode_micuapi_urls.py
+OLD_PRIMARY_BASE_URL = "https://www.openclaudecode.cn"
+OLD_SLB_BASE_URL = "https://api-slb.openclaudecode.cn"
+NEW_BASE_URL = "https://www.micuapi.ai"
+NEW_V1_URL = "https://www.micuapi.ai/v1"
+```
+
+### 3. Contracts
+
+| Boundary / field | Contract |
+|---|---|
+| `ai_gateways.vendor` | Internal vendor remains `openclaudecode`; do not rename the enum for a host-only migration |
+| `ai_gateways.base_url` | Stored OpenClaudeCode rows using old primary or old SLB hosts must migrate to `https://www.micuapi.ai` |
+| `ai_gateways.official_url` | Historical `https://docs.openclaudecode.cn/#/` should migrate to `https://www.micuapi.ai` |
+| `ai_model_profiles.base_url_override` | Historical old-host `/v1` overrides must migrate to `https://www.micuapi.ai/v1` |
+| Runtime URL construction | OpenAI-compatible and Responses paths still append endpoints below `/v1`; Anthropic Messages uses the host without `/v1` and appends `/v1/messages` itself |
+
+Additional rules:
+
+- frontend preset changes for provider host migrations are not enough; existing production rows need a data migration
+- only known old provider URLs should be rewritten automatically, so custom user-entered third-party URLs are not unexpectedly changed
+- downgrade may return to the old primary host, but must not resurrect the old SLB host unless explicitly required
+
+### 4. Validation & Error Matrix
+
+| Condition | Problem | Expected behavior |
+|---|---|---|
+| Only `aiSettingsCatalog.ts` changes | Existing server rows still call the old host | Add Alembic data migration |
+| Codex override migrates to host without `/v1` | Responses runtime calls the wrong endpoint | Store `https://www.micuapi.ai/v1` for existing override rows |
+| OpenClaudeCode vendor enum is renamed | Existing rows and gateway-specific runtime logic break | Keep `vendor='openclaudecode'` and change URLs only |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | Alembic rewrites existing OpenClaudeCode gateway rows from old primary or old SLB hosts to `https://www.micuapi.ai` while keeping `vendor='openclaudecode'` |
+| Base | Existing Codex / Responses model overrides using an old `/v1` URL migrate to `https://www.micuapi.ai/v1` |
+| Base | Existing Anthropic-style gateway base URL migrates to the host-only `https://www.micuapi.ai`, and runtime code appends the correct endpoint later |
+| Bad | Only frontend presets are changed, leaving production database rows and server runtime traffic on the old OpenClaudeCode host |
+| Bad | `base_url_override` is migrated to `https://www.micuapi.ai` without `/v1`, so Responses requests are assembled under the wrong path |
+
+### 6. Tests Required
+
+- backend AI client tests asserting OpenClaudeCode runtime URLs use `https://www.micuapi.ai`
+- model discovery tests asserting OpenClaudeCode discovery probes Micu API URLs
+- frontend catalog tests asserting current preset and template URLs
+
+Assertion points:
+
+- gateway rows with known old OpenClaudeCode hosts are rewritten to `https://www.micuapi.ai`
+- model profile override rows with known old `/v1` URLs are rewritten to `https://www.micuapi.ai/v1`
+- custom third-party URLs are not rewritten by the data migration
+- internal vendor keys stay `openclaudecode`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+# Frontend defaults only affect new records; existing production rows stay stale.
+NEW_BASE_URL = "https://www.micuapi.ai"
+# No Alembic migration updates ai_gateways or ai_model_profiles.
+```
+
+#### Correct
+
+```py
+op.execute(
+    sa.text(
+        """
+        UPDATE ai_gateways
+        SET base_url = :new_base_url, official_url = :new_base_url
+        WHERE vendor = 'openclaudecode'
+          AND base_url IN (:old_primary_url, :old_slb_url)
+        """
+    ).bindparams(
+        new_base_url=NEW_BASE_URL,
+        old_primary_url=OLD_PRIMARY_BASE_URL,
+        old_slb_url=OLD_SLB_BASE_URL,
+    )
+)
+```
+
+#### Wrong
+
+```py
+# Responses runtime needs the versioned base URL.
+NEW_V1_URL = "https://www.micuapi.ai"
+```
+
+#### Correct
+
+```py
+NEW_V1_URL = "https://www.micuapi.ai/v1"
 ```

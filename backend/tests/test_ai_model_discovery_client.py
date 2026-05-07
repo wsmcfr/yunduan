@@ -115,19 +115,19 @@ class AIModelDiscoveryClientTestCase(unittest.TestCase):
         """OpenClaudeCode 需要按不同外接类型带不同 UA 探测。"""
 
         client = StubAIModelDiscoveryClient()
-        shared_url = "https://www.openclaudecode.cn/v1/models"
+        shared_url = "https://www.micuapi.ai/v1/models"
         client.response_map[shared_url] = {
             "data": [
                 {"id": "gpt-5.4"},
             ]
         }
-        client.response_map["https://www.openclaudecode.cn/models"] = {
+        client.response_map["https://www.micuapi.ai/models"] = {
             "data": []
         }
 
         items = client.discover_models(
             gateway_vendor=AIGatewayVendor.OPENCLAUDECODE,
-            base_url="https://www.openclaudecode.cn",
+            base_url="https://www.micuapi.ai",
             api_key="sk-opencc-demo",
         )
 
@@ -138,19 +138,19 @@ class AIModelDiscoveryClientTestCase(unittest.TestCase):
         """Grok 模型应落到独立的 Grok 外接分组，而不是继续混在 Claude 组里。"""
 
         client = StubAIModelDiscoveryClient()
-        shared_url = "https://www.openclaudecode.cn/v1/models"
+        shared_url = "https://www.micuapi.ai/v1/models"
         client.response_map[shared_url] = {
             "data": [
                 {"id": "grok-4.20-fast"},
             ]
         }
-        client.response_map["https://www.openclaudecode.cn/models"] = {
+        client.response_map["https://www.micuapi.ai/models"] = {
             "data": []
         }
 
         items = client.discover_models(
             gateway_vendor=AIGatewayVendor.OPENCLAUDECODE,
-            base_url="https://www.openclaudecode.cn",
+            base_url="https://www.micuapi.ai",
             api_key="sk-opencc-demo",
         )
 

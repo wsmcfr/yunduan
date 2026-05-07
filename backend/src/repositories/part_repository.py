@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from src.db.models.detection_record import DetectionRecord
@@ -77,6 +77,28 @@ class PartRepository:
             ).scalars()
         )
         return total, items
+
+    def delete_unused_simulated_parts(self, *, company_id: int) -> int:
+        """删除当前公司内没有检测记录引用的模拟零件类型。
+
+        返回:
+            实际删除的模拟零件数量。
+
+        这里只处理 `SIM-PART-` 前缀的历史模拟数据，避免列表页刷新时误删管理员
+        手动新增、但尚未被设备上报引用的正式零件定义。
+        """
+
+        referenced_part_ids = select(DetectionRecord.part_id).where(
+            DetectionRecord.company_id == company_id,
+        )
+        result = self.db.execute(
+            delete(Part)
+            .where(Part.company_id == company_id)
+            .where(Part.part_code.startswith("SIM-PART-"))
+            .where(~Part.id.in_(referenced_part_ids))
+        )
+        self.db.flush()
+        return int(result.rowcount or 0)
 
     def summarize_detection_usage(
         self,

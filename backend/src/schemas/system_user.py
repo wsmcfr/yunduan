@@ -99,3 +99,10 @@ class ApprovePasswordChangeRequestResponse(BaseModel):
 
     message: str
     applied_password: str | None = None
+
+
+class AdminPasswordResetResponse(BaseModel):
+    """管理员直接重置成员密码后的响应体。"""
+
+    message: str
+    applied_password: str

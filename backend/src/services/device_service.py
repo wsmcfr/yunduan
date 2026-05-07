@@ -148,7 +148,8 @@ class DeviceService:
         主要流程：
         1. 先限定公司边界查找设备，避免跨租户误删。
         2. 查出该 MP157 设备关联的检测记录，先清理审核和文件元数据等子记录。
-        3. 删除检测主记录和设备档案，并提交同一个事务。
+        3. 删除检测主记录后，顺手清理因此没有任何记录引用的零件类型。
+        4. 删除设备档案，并提交同一个事务。
         """
 
         device = self.device_repository.get_by_id(device_id, company_id=company_id)
@@ -159,10 +160,18 @@ class DeviceService:
             company_id=company_id,
             device_id=device_id,
         )
+        affected_part_ids = self.device_repository.list_part_ids_by_record_ids(
+            company_id=company_id,
+            record_ids=record_ids,
+        )
         self._delete_device_cos_objects(company_id=company_id, record_ids=record_ids)
         self.device_repository.delete_detection_records_by_ids(
             company_id=company_id,
             record_ids=record_ids,
+        )
+        self.device_repository.delete_unreferenced_parts_by_ids(
+            company_id=company_id,
+            part_ids=affected_part_ids,
         )
         self.device_repository.delete(device)
         self.db.commit()

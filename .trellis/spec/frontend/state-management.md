@@ -496,6 +496,7 @@ const updatingUserIds = ref<number[]>([]);
 async function loadCurrentUserPasswordRequestInfo(): Promise<void>;
 async function handleRequestDefaultPasswordReset(): Promise<void>;
 async function handleSubmitRequestedPasswordChange(): Promise<void>;
+async function handleResetUserPassword(user: SystemUserListItem): Promise<void>;
 async function handleApproveUserPasswordRequest(user: SystemUserListItem): Promise<void>;
 async function handleRejectUserPasswordRequest(user: SystemUserListItem): Promise<void>;
 ```
@@ -510,13 +511,14 @@ async function handleRejectUserPasswordRequest(user: SystemUserListItem): Promis
 | Admin row action loading | `SettingsPage.vue` local state | `updatingUserIds` tracks row-level mutations by `userId` so one approve/reject/status action does not freeze the entire table |
 | Auth identity | `useAuthStore` | Auth store still owns only the logged-in identity, not password-request drafts or admin row progress |
 | Server-backed user table data | settings page list loader | Admin table rows may include password-request summary fields, but the mutation in-flight markers stay local to the page |
+| Admin direct password reset | `SettingsPage.vue` local row action | Uses the same `updatingUserIds` guard as approve/reject/status/delete, succeeds even without a pending request, and refreshes the user table after the backend applies the reset |
 
 Additional rules:
 
 - do not move pending-password drafts into Pinia, `localStorage`, or URL query params
 - do not reuse one page-wide boolean for every admin row mutation
 - after a successful current-user submit, reload `passwordRequestInfo` from the backend instead of synthesizing status locally
-- after an admin approve/reject action, refresh the affected user table data and, when needed, the current-user panel so both views converge on the same backend snapshot
+- after an admin approve/reject/direct-reset action, refresh the affected user table data and, when needed, the current-user panel so both views converge on the same backend snapshot
 
 ### 4. Validation & Error Matrix
 
@@ -524,6 +526,7 @@ Additional rules:
 |---|---|---|
 | Current user already has a pending request | Repeated submit can overwrite the intended target password in UI memory | Keep the existing snapshot, surface the backend error, and leave the local form disabled by the pending-state guard |
 | Admin row action uses a single global loading flag | One row action blocks every user-management button | Track loading by `userId` in `updatingUserIds` |
+| Admin direct reset is hidden unless `passwordChangeRequestStatus === "pending"` | Admin cannot recover a member account unless the member asks first | Show direct reset as a normal admin row action, while keeping approve/reject conditional on pending requests |
 | Current user password draft is stored in a global store | Sensitive text can leak across routes or survive longer than necessary | Keep the draft in page-local refs only |
 | Submit succeeds but the page does not refetch the snapshot | UI can show stale status or old reviewed time | Reload the current-user request info after success |
 | Page is left or session changes | Old request snapshot can belong to a different session/company | Clear page-local password-request state on teardown or auth reset |
@@ -534,6 +537,8 @@ Additional rules:
 |---|---|
 | Good | `SettingsPage.vue` owns the password-request card state locally, submits through the settings API, then refetches the latest request snapshot |
 | Base | A non-admin user can only see their own request card; no admin row-action state exists in that view |
+| Base | Admin direct reset remains visible for normal member rows even when `passwordChangeRequestStatus` is `null` |
+| Bad | Direct reset is rendered inside the pending-request branch, so admins cannot reset a member until that member first submits an application |
 | Bad | Requested password text is moved into a Pinia store or reused across page navigations because the feature wants "shared state" |
 
 ### 6. Tests Required
@@ -570,4 +575,24 @@ const passwordRequestForm = ref({
 });
 
 const updatingUserIds = ref<number[]>([]);
+```
+
+#### Wrong
+
+```ts
+// Direct reset is an admin recovery action, not a pending-request-only action.
+if (hasPendingPasswordChangeRequest(user)) {
+  renderResetPasswordButton(user);
+}
+```
+
+#### Correct
+
+```ts
+renderResetPasswordButton(user);
+
+if (hasPendingPasswordChangeRequest(user)) {
+  renderApprovePasswordRequestButton(user);
+  renderRejectPasswordRequestButton(user);
+}
 ```

@@ -108,12 +108,19 @@ class DeviceServiceTestCase(unittest.TestCase):
         self.db.refresh(device)
         return device
 
-    def _create_part(self) -> Part:
-        """创建检测记录依赖的零件定义。"""
+    def _create_part(self, *, code: str = "PART-DELETE-01") -> Part:
+        """创建检测记录依赖的零件定义。
+
+        参数:
+            code: 零件编码；测试里会创建多个零件，用编码区分不同引用关系。
+
+        返回:
+            已写入数据库并刷新后的零件对象。
+        """
 
         part = Part(
             company_id=self.company.id,
-            part_code="PART-DELETE-01",
+            part_code=code,
             name="删除保护测试零件",
             category="测试",
             description=None,
@@ -124,12 +131,27 @@ class DeviceServiceTestCase(unittest.TestCase):
         self.db.refresh(part)
         return part
 
-    def _create_detection_record(self, *, device: Device, part: Part) -> DetectionRecord:
-        """创建引用指定设备的检测记录，用于验证删除保护。"""
+    def _create_detection_record(
+        self,
+        *,
+        device: Device,
+        part: Part,
+        record_no: str = "REC-DEVICE-DELETE-0001",
+    ) -> DetectionRecord:
+        """创建引用指定设备和零件的检测记录。
+
+        参数:
+            device: 当前记录归属的 MP157 设备。
+            part: 当前记录检测的零件类型。
+            record_no: 业务记录号；同一个测试内创建多条记录时必须唯一。
+
+        返回:
+            已写入数据库并刷新后的检测记录对象。
+        """
 
         record = DetectionRecord(
             company_id=self.company.id,
-            record_no="REC-DEVICE-DELETE-0001",
+            record_no=record_no,
             part_id=part.id,
             device_id=device.id,
             result=DetectionResult.GOOD,
@@ -232,6 +254,39 @@ class DeviceServiceTestCase(unittest.TestCase):
             self.cos_client.deleted_objects,
             [("demo-bucket", "ap-shanghai", "detections/demo/source.jpg")],
         )
+
+    def test_delete_device_removes_parts_that_become_unreferenced(self) -> None:
+        """删除设备检测历史后，应自动清理只被该设备使用过的零件类型。"""
+
+        device = self._create_device()
+        other_device = self._create_device(code="MP157-KEEP-PART-01")
+        orphan_part = self._create_part(code="SIM-PART-ORPHAN")
+        shared_part = self._create_part(code="PART-SHARED-01")
+        orphan_part_id = orphan_part.id
+        shared_part_id = shared_part.id
+        self._create_detection_record(
+            device=device,
+            part=orphan_part,
+            record_no="REC-DEVICE-DELETE-ORPHAN",
+        )
+        self._create_detection_record(
+            device=device,
+            part=shared_part,
+            record_no="REC-DEVICE-DELETE-SHARED-OLD",
+        )
+        self._create_detection_record(
+            device=other_device,
+            part=shared_part,
+            record_no="REC-DEVICE-DELETE-SHARED-KEEP",
+        )
+
+        deleted_record_count = self.service.delete_device(company_id=self.company.id, device_id=device.id)
+
+        removed_part = self.db.scalar(select(Part).where(Part.id == orphan_part_id))
+        persisted_shared_part = self.db.scalar(select(Part).where(Part.id == shared_part_id))
+        self.assertEqual(deleted_record_count, 2)
+        self.assertIsNone(removed_part)
+        self.assertIsNotNone(persisted_shared_part)
 
     def test_list_devices_attaches_record_and_image_counts(self) -> None:
         """设备列表应带上检测记录和图片数量，便于前端删除前二次确认。"""

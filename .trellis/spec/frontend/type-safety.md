@@ -478,6 +478,11 @@ export interface ApprovePasswordChangeRequestResponseDto {
   message: string;
   applied_password: string | null;
 }
+
+export interface AdminPasswordResetResponseDto {
+  message: string;
+  applied_password: string;
+}
 ```
 
 ```ts
@@ -505,6 +510,7 @@ export interface SystemUserListItem {
 | `SubmitPasswordChangeRequestDto.new_password` | Nullable in DTO because `reset_to_default` does not submit a new password |
 | `UserPasswordChangeRequestInfoDto.default_reset_password` | Backend-owned display value for the "reset to default" path; frontend may render it but must not infer it from unrelated constants once DTO data exists |
 | `ApprovePasswordChangeRequestResponseDto.applied_password` | Nullable because only `reset_to_default` returns the applied temporary password; `change_to_requested` returns `null` |
+| `AdminPasswordResetResponseDto.applied_password` | Non-null because admin direct reset always applies the default temporary password and the UI must show it only from the success response |
 | `SystemUserListItemDto.password_change_request_*` | Nullable summary fields used for the admin table only; components must handle `null` safely |
 | Mapper boundary | `mapUserPasswordChangeRequestInfoDto(...)` and `mapSystemUserListItemDto(...)` are the only snake_case -> camelCase conversion points for these password-request fields |
 
@@ -513,6 +519,7 @@ Additional rules:
 - do not let components read fields such as `password_change_request_status` or `default_reset_password` directly
 - keep `PasswordChangeRequestType` narrow to `"reset_to_default" | "change_to_requested"`
 - do not widen approval responses to `any` just because one branch returns `applied_password = null`
+- admin direct reset uses `/settings/users/{userId}/password-reset`; it does not require a pending request and should type its response separately from approval because `applied_password` is always present
 
 ### 4. Validation & Error Matrix
 
@@ -521,6 +528,7 @@ Additional rules:
 | Frontend sends `requestType` instead of `request_type` | API boundary | Request is wrong; keep DTO field names aligned with backend schema |
 | Component consumes `dto.password_change_request_status` directly | mapper boundary is bypassed | Fix the caller to map first and use camelCase |
 | Approval response is treated as always having `applied_password` | branch-specific contract is ignored | Handle `null` for `change_to_requested` |
+| Admin direct reset response is treated like approval and nullable | UI can hide the password even though the reset succeeded | Use `AdminPasswordResetResponseDto` and render the non-null `applied_password` from that response |
 | Password-request timestamps are `null` | rendering boundary | Render fallback text instead of an invalid date |
 | DTO enum is widened to `string` | UI loses exhaustiveness for request-type/status rendering | Keep literal unions in `src/types/api.ts` and `src/types/models.ts` |
 
@@ -530,6 +538,7 @@ Additional rules:
 |---|---|
 | Good | Page submits `{ request_type: "change_to_requested", new_password: "..." }`, then maps the returned request snapshot into camelCase before rendering |
 | Base | `password_change_request_status` is `null`, so the account card shows "no active request" without crashing |
+| Base | Admin directly resets a member without a pending request, and the UI shows the returned default password from `AdminPasswordResetResponseDto.applied_password` |
 | Bad | Component mixes snake_case and camelCase fields in the same branch and special-cases `applied_password` with `as any` |
 
 ### 6. Tests Required
@@ -538,6 +547,7 @@ Additional rules:
 - mapper test for `mapSystemUserListItemDto(...)`, including password-request summary fields
 - API payload test asserting the submit body uses `request_type` and `new_password`
 - consumer test asserting approval-result UI handles `applied_password = null` safely
+- consumer/API test asserting admin direct reset calls `/password-reset` and handles non-null `applied_password`
 
 Assertion points:
 
@@ -566,6 +576,123 @@ await submitCurrentUserPasswordChangeRequest({
   request_type: "change_to_requested",
   new_password: newPassword,
 });
+```
+
+---
+
+## Scenario: AI Gateway Preset URL Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: any change touching `aiSettingsCatalog.ts`, `AIGatewayFormDialog.vue`, AI gateway default URLs, model template `base_url_override`, or gateway vendor docs/placeholder text.
+- Affected layers: frontend preset catalog -> gateway form defaults/placeholders -> backend stored gateway/model URLs -> runtime AI request URL construction.
+
+### 2. Signatures
+
+```ts
+export const aiGatewayPresets: AIGatewayPreset[] = [
+  {
+    id: "openclaudecode-relay",
+    payload: {
+      vendor: "openclaudecode",
+      official_url: "https://www.micuapi.ai",
+      base_url: "https://www.micuapi.ai",
+    },
+  },
+];
+
+export const aiModelTemplates: AIModelTemplate[] = [
+  {
+    id: "openclaudecode-codex",
+    payload: {
+      base_url_override: "https://www.micuapi.ai/v1",
+    },
+  },
+];
+```
+
+### 3. Contracts
+
+| Boundary / field | Contract |
+|---|---|
+| OpenClaudeCode preset `official_url` | Must point to `https://www.micuapi.ai` after the provider migration |
+| OpenClaudeCode preset `base_url` | Must point to `https://www.micuapi.ai`; do not reintroduce `www.openclaudecode.cn` or `api-slb.openclaudecode.cn` in new presets |
+| OpenClaudeCode Codex `base_url_override` | Must keep `/v1` as `https://www.micuapi.ai/v1` because Responses runtime appends `/responses` |
+| Gateway form placeholders | Must use the same current host as presets so manual creation does not guide users back to the old host |
+| Vendor enum | The stable internal vendor remains `"openclaudecode"` even when the external service host is Micu API |
+
+### 4. Validation & Error Matrix
+
+| Condition | Boundary | Expected behavior |
+|---|---|---|
+| Preset host changes | frontend catalog boundary | Update gateway preset, Codex model template override, form placeholders, and catalog tests together |
+| Existing stored gateways still use old host | backend migration boundary | Add an Alembic data migration rather than only changing frontend defaults |
+| Responses template omits `/v1` | runtime URL boundary | Tests should catch missing `/v1` because requests would go to `/responses` instead of `/v1/responses` |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | `aiGatewayPresets` sets OpenClaudeCode `official_url` and `base_url` to `https://www.micuapi.ai`, and `aiModelTemplates` sets Codex `base_url_override` to `https://www.micuapi.ai/v1` |
+| Base | Gateway form placeholders use the same Micu API host as the preset catalog, so manual gateway creation follows the current provider URL |
+| Base | The internal vendor value stays `"openclaudecode"` even though the displayed provider host is Micu API |
+| Bad | A template stores `base_url_override: "https://www.micuapi.ai"` for Responses-compatible models and drops the required `/v1` segment |
+| Bad | Only label, docs text, or placeholders are changed, while the actual preset payload still writes the old OpenClaudeCode host |
+
+### 6. Tests Required
+
+- catalog test asserting OpenClaudeCode preset `official_url` and `base_url` equal `https://www.micuapi.ai`
+- catalog test asserting OpenClaudeCode Codex template `base_url_override` equals `https://www.micuapi.ai/v1`
+- backend AI client tests asserting runtime URLs are built from the Micu API host
+
+Assertion points:
+
+- no current frontend preset or placeholder guides users to `www.openclaudecode.cn` or `api-slb.openclaudecode.cn`
+- Responses/Codex template overrides include `/v1`
+- host migration does not widen `vendor` to arbitrary strings or rename `"openclaudecode"`
+- frontend catalog tests fail if the real payload changes but labels remain current
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+payload: {
+  vendor: "openclaudecode",
+  official_url: "https://www.micuapi.ai",
+  base_url: "https://www.micuapi.ai",
+  base_url_override: "https://www.micuapi.ai",
+}
+```
+
+#### Correct
+
+```ts
+payload: {
+  vendor: "openclaudecode",
+  official_url: "https://www.micuapi.ai",
+  base_url: "https://www.micuapi.ai",
+  base_url_override: "https://www.micuapi.ai/v1",
+}
+```
+
+#### Wrong
+
+```ts
+// Placeholder text is updated, but the actual preset still persists old rows for new gateways.
+placeholder: "https://www.micuapi.ai"
+payload: {
+  base_url: "https://www.openclaudecode.cn",
+}
+```
+
+#### Correct
+
+```ts
+placeholder: "https://www.micuapi.ai"
+payload: {
+  base_url: "https://www.micuapi.ai",
+}
 ```
 
 ---

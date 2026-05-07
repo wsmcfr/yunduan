@@ -28,7 +28,15 @@ class PartService:
         skip: int,
         limit: int,
     ) -> tuple[int, list[Part]]:
-        """分页查询零件列表。"""
+        """分页查询零件列表。
+
+        查询前会清理历史模拟数据留下的无效 `SIM-PART-*` 类型；这些类型通常是
+        删除设备及其检测记录后遗留的占位零件，没有任何记录引用时不应继续出现在
+        零件管理页。普通手动新增零件不会走这条清理路径。
+        """
+
+        self.part_repository.delete_unused_simulated_parts(company_id=company_id)
+        self.db.commit()
 
         total, items = self.part_repository.list_parts(
             company_id=company_id,

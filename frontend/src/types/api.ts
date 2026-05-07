@@ -162,6 +162,11 @@ export interface ApprovePasswordChangeRequestResponseDto {
   applied_password: string | null;
 }
 
+export interface AdminPasswordResetResponseDto {
+  message: string;
+  applied_password: string;
+}
+
 export interface LoginRequestDto {
   account: string;
   password: string;

@@ -572,12 +572,12 @@ watch(
         <ElRow :gutter="16">
           <ElCol :xs="24" :sm="12">
             <ElFormItem label="官方文档 / 官网">
-              <ElInput v-model="formState.officialUrl" placeholder="可选，例如 https://docs.openclaudecode.cn/#/" />
+              <ElInput v-model="formState.officialUrl" placeholder="可选，例如 https://www.micuapi.ai" />
             </ElFormItem>
           </ElCol>
           <ElCol :xs="24" :sm="12">
             <ElFormItem label="基础 URL" prop="baseUrl">
-              <ElInput v-model="formState.baseUrl" placeholder="例如 https://www.openclaudecode.cn" />
+              <ElInput v-model="formState.baseUrl" placeholder="例如 https://www.micuapi.ai" />
             </ElFormItem>
           </ElCol>
         </ElRow>

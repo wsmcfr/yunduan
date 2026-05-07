@@ -45,6 +45,7 @@ class AppSmokeTestCase(unittest.TestCase):
         self.assertIn("/api/v1/settings/users/me/password-request", route_paths)
         self.assertIn("/api/v1/settings/users/{user_id}/ai-permission", route_paths)
         self.assertIn("/api/v1/settings/users/{user_id}/status", route_paths)
+        self.assertIn("/api/v1/settings/users/{user_id}/password-reset", route_paths)
         self.assertIn("/api/v1/settings/users/{user_id}/password-request/approve", route_paths)
         self.assertIn("/api/v1/settings/users/{user_id}/password-request/reject", route_paths)
         self.assertIn("/api/v1/settings/users/{user_id}", route_paths)
