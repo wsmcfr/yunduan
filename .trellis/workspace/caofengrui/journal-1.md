@@ -725,3 +725,52 @@ Completed and published the combined server maintenance session covering invalid
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: 管理页分页、记录删除与刷新修复
+
+**Date**: 2026-05-08
+**Task**: 管理页分页、记录删除与刷新修复
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| 模块 | 本次完成内容 |
+|---|---|
+| 后端记录删除 | 新增公司管理员删除检测记录能力，删除流程先清理 COS 对象再删除记录聚合，并补充服务层与路由测试。 |
+| 前端记录页 | 管理员可逐条删除检测记录；删除、新增、手动刷新统一走组合刷新，确保分类/设备等派生资源立即更新。 |
+| 设备/零件页 | 补齐每页显示条数选择，支持 10/20/50/100，切换后回第一页并重新拉取列表。 |
+| 分页样式 | 修复深色界面下 Element Plus 分页页码可读性问题。 |
+| 质量保障 | 新增记录 API 测试、管理页分页与刷新契约测试、后端删除服务测试；后端 85 项测试、前端 45 项测试和前端构建均通过。 |
+| 线上部署 | 已部署到生产服务器，后端健康检查正常，前端入口为 index-BQCjBZ98.js。 |
+| 经验沉淀 | 更新 backend/frontend 多份 .trellis/spec 文档，记录删除契约、部署备份校验、管理列表分页和派生资源刷新规则，防止同类 bug 复发。 |
+
+**验证记录**
+- `python -m unittest discover -s backend\tests`：85 tests OK
+- `npm run test`：13 files / 45 tests passed
+- `npm run build`：vue-tsc 与 Vite 构建通过
+- `git diff --check`：通过，仅 CRLF 提示
+- 生产 `curl http://127.0.0.1:8000/health`：`{"status":"ok"}`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ee5c4d6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
