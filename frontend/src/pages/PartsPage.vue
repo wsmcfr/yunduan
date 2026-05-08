@@ -275,6 +275,22 @@ async function handlePageChange(page: number): Promise<void> {
   await loadParts();
 }
 
+/**
+ * 每页条数切换处理。
+ * 主要流程：
+ * 1. 更新零件列表的 page size；
+ * 2. 清空当前分类入口选择并回到第一页；
+ * 3. 重新读取后端数据，让分类卡片和明细表格来自同一批最新资源。
+ *
+ * @param nextPageSize Element Plus 分页组件传入的新每页条数。
+ */
+async function handlePageSizeChange(nextPageSize: number): Promise<void> {
+  pageSize.value = nextPageSize;
+  currentPage.value = 1;
+  activeCategoryKey.value = ALL_CATEGORY_KEY;
+  await loadParts();
+}
+
 onMounted(() => {
   void loadParts();
 });
@@ -441,10 +457,12 @@ onMounted(() => {
       <div class="table-section__footer">
         <ElPagination
           background
-          layout="prev, pager, next, total"
+          layout="sizes, prev, pager, next, total"
           :page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
           :total="total"
           :current-page="currentPage"
+          @size-change="handlePageSizeChange"
           @current-change="handlePageChange"
         />
       </div>

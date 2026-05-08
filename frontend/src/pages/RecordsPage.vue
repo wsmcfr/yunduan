@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 
 import PageHeader from "@/components/common/PageHeader.vue";
 import StatusTag from "@/components/common/StatusTag.vue";
@@ -15,13 +15,15 @@ import RecordCreateDialog from "@/features/records/RecordCreateDialog.vue";
 import { routeNames } from "@/router/routes";
 import { fetchDevices } from "@/services/api/devices";
 import { fetchParts } from "@/services/api/parts";
-import { createRecord } from "@/services/api/records";
+import { createRecord, deleteRecord } from "@/services/api/records";
 import { mapDeviceDto, mapPartDto } from "@/services/mappers/commonMappers";
+import { useAuthStore } from "@/stores/auth";
 import type { DetectionRecordCreateRequestDto } from "@/types/api";
-import type { DeviceModel, PartModel } from "@/types/models";
+import type { DetectionRecordModel, DeviceModel, PartModel } from "@/types/models";
 import { formatConfidence, formatDateTime } from "@/utils/format";
 
 const router = useRouter();
+const authStore = useAuthStore();
 const {
   loading,
   error,
@@ -31,6 +33,7 @@ const {
   currentPage,
   filters,
   handlePageChange,
+  handlePageSizeChange,
   refresh,
   applyFilters,
   resetFilters,
@@ -38,9 +41,15 @@ const {
 
 const optionsLoading = ref(false);
 const creating = ref(false);
+const deletingRecordId = ref<number | null>(null);
 const dialogVisible = ref(false);
 const parts = ref<PartModel[]>([]);
 const devices = ref<DeviceModel[]>([]);
+
+/**
+ * 检测记录删除是数据破坏性操作，只允许公司管理员在列表中看到入口。
+ */
+const isCompanyAdmin = computed(() => authStore.currentUser?.role === "admin");
 
 /**
  * 仅展示启用零件，避免录入到已下线的工件定义。
@@ -132,6 +141,19 @@ async function loadOptions(): Promise<void> {
 }
 
 /**
+ * 刷新检测记录视图的全部服务端资源。
+ * 主要流程：
+ * 1. 重新加载零件和设备选项，它们会生成分类入口卡片、记录数、图片数和最近上传信息；
+ * 2. 同时刷新当前记录列表，确保删除或新增后表格、分页总数和顶部分类资源一起更新；
+ * 3. 两个请求并行执行，避免用户手动刷新时多等一次网络往返。
+ *
+ * @returns 所有记录页资源刷新完成后的 Promise。
+ */
+async function refreshRecordsView(): Promise<void> {
+  await Promise.all([loadOptions(), refresh()]);
+}
+
+/**
  * 打开检测详情。
  */
 function openRecordDetail(recordId: number): void {
@@ -196,13 +218,58 @@ async function handleCreateRecord(payload: DetectionRecordCreateRequestDto): Pro
     const createdRecord = await createRecord(payload);
     dialogVisible.value = false;
     ElMessage.success("检测记录已创建，当前结果默认为 MP 初检结果");
-    await refresh();
+    await refreshRecordsView();
     openRecordDetail(createdRecord.id);
   } catch (caughtError) {
     const message = caughtError instanceof Error ? caughtError.message : "检测记录创建失败";
     ElMessage.error(message);
   } finally {
     creating.value = false;
+  }
+}
+
+/**
+ * 构建单条检测记录删除确认文案。
+ * 文案需要明确说明会删除文件和复核历史，避免管理员误以为只是从列表隐藏。
+ */
+function buildRecordDeleteConfirmMessage(record: DetectionRecordModel): string {
+  const fileCount = record.files?.length ?? 0;
+  const reviewCount = record.reviews?.length ?? 0;
+  const fileHint = fileCount > 0 ? `、${fileCount} 条图片元数据和对象存储文件` : "、关联图片元数据和对象存储文件";
+  const reviewHint = reviewCount > 0 ? `、${reviewCount} 条复核历史` : "、复核历史";
+  return `确认删除检测记录“${record.recordNo}”吗？该操作会同步清理${fileHint}${reviewHint}，删除后不可恢复。`;
+}
+
+/**
+ * 删除指定检测记录。
+ * 后端负责按公司边界校验权限，并在清理 COS 对象成功后再提交数据库删除。
+ */
+async function handleDeleteRecord(record: DetectionRecordModel): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      buildRecordDeleteConfirmMessage(record),
+      "删除检测记录",
+      {
+        type: "warning",
+        confirmButtonText: "删除",
+        cancelButtonText: "取消",
+        confirmButtonClass: "el-button--danger",
+      },
+    );
+  } catch {
+    return;
+  }
+
+  deletingRecordId.value = record.id;
+  try {
+    await deleteRecord(record.id);
+    ElMessage.success("检测记录已删除");
+    await refreshRecordsView();
+  } catch (caughtError) {
+    const message = caughtError instanceof Error ? caughtError.message : "检测记录删除失败";
+    ElMessage.error(message);
+  } finally {
+    deletingRecordId.value = null;
   }
 }
 
@@ -337,7 +404,7 @@ onMounted(() => {
         <div class="toolbar-actions">
           <ElButton @click="handleFilterReset">重置</ElButton>
           <ElButton @click="handleFilterSearch" :loading="loading">查询</ElButton>
-          <ElButton @click="refresh" :loading="loading">刷新记录</ElButton>
+          <ElButton @click="refreshRecordsView" :loading="loading || optionsLoading">刷新记录</ElButton>
           <ElButton type="primary" @click="openCreateDialog">新增检测记录</ElButton>
         </div>
       </div>
@@ -450,10 +517,19 @@ onMounted(() => {
             {{ formatDateTime(row.capturedAt) }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="操作" min-width="140">
+        <ElTableColumn label="操作" min-width="180" fixed="right">
           <template #default="{ row }">
             <ElButton text type="primary" @click="openRecordDetail(row.id)">
               {{ row.reviewStatus === "pending" ? "进入复核" : "查看详情" }}
+            </ElButton>
+            <ElButton
+              v-if="isCompanyAdmin"
+              text
+              type="danger"
+              :loading="deletingRecordId === row.id"
+              @click="handleDeleteRecord(row)"
+            >
+              删除
             </ElButton>
           </template>
         </ElTableColumn>
@@ -462,10 +538,12 @@ onMounted(() => {
       <div class="records-table__footer">
         <ElPagination
           background
-          layout="prev, pager, next, total"
+          layout="sizes, prev, pager, next, total"
           :page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
           :total="total"
           :current-page="currentPage"
+          @size-change="handlePageSizeChange"
           @current-change="handlePageChange"
         />
       </div>

@@ -8,7 +8,12 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from src.api.deps import get_current_ai_enabled_user, get_current_company_user, get_db
+from src.api.deps import (
+    get_current_ai_enabled_user,
+    get_current_company_admin_user,
+    get_current_company_user,
+    get_db,
+)
 from src.core.sse import build_sse_headers
 from src.db.models.enums import DetectionResult, ReviewStatus
 from src.db.models.user import User
@@ -18,6 +23,7 @@ from src.schemas.detection_record import (
     DetectionRecordListItem,
     DetectionRecordListResponse,
 )
+from src.schemas.common import ApiMessageResponse
 from src.schemas.review import AIChatRequest, AIChatResponse, AIReviewRequest, AIReviewResponse
 from src.schemas.upload import FileObjectCreateRequest, FileObjectResponse
 from src.services.record_service import RecordService
@@ -90,6 +96,21 @@ def get_record_detail(
         record_id=record_id,
     )
     return DetectionRecordDetailResponse.model_validate(record)
+
+
+@router.delete("/{record_id}", response_model=ApiMessageResponse)
+def delete_record(
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_company_admin_user),
+) -> ApiMessageResponse:
+    """删除单条检测记录及其关联文件、复核历史。"""
+
+    RecordService(db).delete_record(
+        company_id=current_user.company_id or 0,
+        record_id=record_id,
+    )
+    return ApiMessageResponse(message="检测记录已删除。")
 
 
 @router.post("/{record_id}/files", response_model=FileObjectResponse)

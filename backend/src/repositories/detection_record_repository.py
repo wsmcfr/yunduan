@@ -198,3 +198,17 @@ class DetectionRecordRepository:
         self.db.add(file_object)
         self.db.flush()
         return file_object
+
+    def delete(self, record: DetectionRecord) -> None:
+        """删除指定检测记录聚合并刷新会话状态。
+
+        参数:
+            record: 已经按公司边界查出的检测记录对象。
+
+        说明:
+            检测记录和文件、审核记录之间配置了 ORM 级联关系；这里仍保持仓储方法，
+            让服务层只表达“删除记录聚合”这个业务动作，不直接操作会话细节。
+        """
+
+        self.db.delete(record)
+        self.db.flush()

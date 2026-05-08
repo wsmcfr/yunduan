@@ -3,6 +3,7 @@ import type {
   AIChatResponseDto,
   AIReviewRequestDto,
   AIReviewResponseDto,
+  ApiMessageResponseDto,
   DetectionRecordCreateRequestDto,
   DetectionRecordDetailDto,
   DetectionRecordListResponseDto,
@@ -68,6 +69,16 @@ export function createRecord(
   return apiRequest<DetectionRecordDetailDto>("/api/v1/records", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * 删除指定检测记录。
+ * 该操作只面向管理员，后端会同步清理关联文件元数据、复核历史和对象存储文件。
+ */
+export function deleteRecord(recordId: number): Promise<ApiMessageResponseDto> {
+  return apiRequest<ApiMessageResponseDto>(`/api/v1/records/${recordId}`, {
+    method: "DELETE",
   });
 }
 

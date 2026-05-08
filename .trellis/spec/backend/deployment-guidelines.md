@@ -296,6 +296,13 @@ scp -r frontend/dist/* yunfuwu-prod:/opt/yunduan/frontend/dist/
 ```
 
 ```powershell
+npm run build
+ssh yunfuwu-prod 'sed -n "1,30p" /opt/yunduan/frontend/dist/index.html'
+ssh yunfuwu-prod 'curl -s http://127.0.0.1/ | grep -E "index-|vue-vendor"'
+ssh yunfuwu-prod 'curl -s -o /tmp/delete_probe.out -w "%{http_code}" -X DELETE http://127.0.0.1:8000/api/v1/records/00000000-0000-0000-0000-000000000000; head -c 300 /tmp/delete_probe.out'
+```
+
+```powershell
 (@'
 set -euo pipefail
 cd /opt/yunduan/backend
@@ -319,6 +326,9 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/statistics/export-pdf \
 | Multi-line remote scripts | Normalize CRLF before piping to SSH; otherwise the remote shell can receive hidden `\r` characters and break commands such as `curl` |
 | Backend file upload | When uploading a small set of backend files, target the final absolute remote file path instead of dumping files into `/opt/yunduan/backend/` and moving them later |
 | Backend restart command | Use the absolute executable path `/opt/yunduan/backend/.venv/bin/uvicorn` during remote restart commands |
+| Frontend build gate | Run `npm run build` immediately before a frontend upload when the local `dist` will be deployed |
+| Live frontend entry check | Verify both `/opt/yunduan/frontend/dist/index.html` and `curl http://127.0.0.1/` reference the expected bundle names |
+| Auth route smoke check | For a newly mounted protected route, an unauthenticated request returning `401 missing_token` proves routing and auth middleware reached the new endpoint |
 | Benchmark isolation | When measuring PDF renderer cost, set `include_ai_analysis=false` so AI latency does not pollute renderer timing |
 | Benchmark comparison | Compare `visual` and `lightweight` exports with the same statistics window and explicit image settings |
 
@@ -327,6 +337,8 @@ Additional rules:
 - prefer one-file-to-one-target `scp` commands for backend hotfixes
 - treat a benchmark result as invalid if AI generation or unrelated uploads are running at the same time
 - confirm the deployed frontend bundle by reading remote `dist/index.html`, not by trusting the local build output
+- for UI fixes, confirm the static file on disk and the HTML served through Nginx match; checking only one of them can hide an upload path or cache problem
+- for protected destructive routes, do not need a real delete target for the first smoke test; use an unauthenticated call against a fake id and expect the auth error before any mutation
 
 Operational reference on the current production host (`2 vCPU`, measured on `2026-04-20`):
 
@@ -343,6 +355,9 @@ Operational reference on the current production host (`2 vCPU`, measured on `202
 | Piped remote script keeps Windows CRLF line endings | Remote `curl` or shell commands can fail with malformed URL or syntax errors | Strip `\r` before piping the script into SSH |
 | `scp` uploads several backend files to `/opt/yunduan/backend/` | Files land in the backend root instead of `src/services/`, `src/schemas/`, or `tests/` | Upload directly to the final remote file path or move the files before restart |
 | Remote restart uses relative `.venv/bin/uvicorn` in a fragile shell context | `nohup` can fail to find the executable or use the wrong working directory | Restart with `/opt/yunduan/backend/.venv/bin/uvicorn` |
+| Local `dist` is old because build was skipped after a CSS or route change | Production receives stale UI even though upload succeeds | Run `npm run build`, then deploy the freshly generated `frontend/dist/*` |
+| Remote `dist/index.html` references the new bundle, but `curl http://127.0.0.1/` serves a different entry | Nginx is serving another directory or cached entry | Stop and diagnose Nginx/static root before telling the user to refresh |
+| Protected route smoke returns `404` instead of `401 missing_token` | The route was not mounted or the wrong path was deployed | Recheck uploaded backend files, router registration, and API prefix before restart is considered complete |
 | PDF benchmark keeps `include_ai_analysis=true` | Measured duration reflects model latency, not PDF generation | Disable AI analysis during renderer benchmarks |
 | Visual and lightweight modes use different windows or sample-image settings | Comparison is misleading | Benchmark both modes with the same date window and explicitly documented image flags |
 
@@ -352,7 +367,10 @@ Operational reference on the current production host (`2 vCPU`, measured on `202
 |---|---|
 | Good | Use exact remote target paths for backend files, strip CRLF for piped scripts, restart with absolute `uvicorn`, and benchmark both PDF modes with `include_ai_analysis=false` |
 | Base | Frontend-only deployment still reads remote `index.html` afterward to verify the active bundle name |
+| Good | A record-delete deployment uploads only the changed backend source files, gets `py_compile` success, restarts once, sees `/health`, then confirms `DELETE /api/v1/records/<fake-id>` returns `401 missing_token` instead of `404` |
+| Good | A pagination color fix rebuilds the frontend, uploads `dist/*`, confirms disk `index.html` and Nginx-served HTML both point at the same new JS/CSS bundle, then asks the user to hard-refresh |
 | Bad | Use a double-quoted SSH command with `$(date ...)`, upload backend files to the project root, restart with a fragile relative command, and then compare PDF timings with AI analysis still enabled |
+| Bad | Upload `frontend/dist/*` from a previous build and trust the browser screenshot request without verifying the served entry HTML |
 
 ### 6. Tests Required
 
@@ -360,12 +378,17 @@ Operational reference on the current production host (`2 vCPU`, measured on `202
 - remote `python3 -m py_compile` against uploaded backend files before restart
 - remote `/health` check after restart
 - remote `dist/index.html` inspection after frontend upload
+- local `npm run build` before deploying frontend assets produced from current source
+- remote `curl -s http://127.0.0.1/` entry inspection after UI deployments
+- protected-route smoke test expecting auth middleware behavior such as `401 missing_token` for new protected endpoints
 - PDF benchmark run for both `visual` and `lightweight` modes with explicit payload snapshots
 
 Assertion points:
 
 - backend files are uploaded to their final module paths, not left in `/opt/yunduan/backend/`
 - the restart command references `/opt/yunduan/backend/.venv/bin/uvicorn`
+- deployed frontend entry references the same expected bundle names on disk and through Nginx
+- new protected routes return an auth error rather than `404`, proving the route is mounted without performing a real mutation
 - benchmark payloads show `include_ai_analysis=false`
 - benchmark notes record whether sample images were enabled for `visual` mode
 
@@ -386,6 +409,18 @@ ssh yunfuwu-prod 'ts=$(date +%Y%m%d_%H%M%S); mkdir -p /opt/yunduan/deploy_backup
 scp backend/src/services/statistics_export_service.py yunfuwu-prod:/opt/yunduan/backend/src/services/statistics_export_service.py
 scp backend/src/schemas/statistics.py yunfuwu-prod:/opt/yunduan/backend/src/schemas/statistics.py
 ssh yunfuwu-prod 'cd /opt/yunduan/backend && python3 -m py_compile src/services/statistics_export_service.py src/schemas/statistics.py'
+```
+
+```powershell
+npm run build
+scp -r frontend/dist/* yunfuwu-prod:/opt/yunduan/frontend/dist/
+ssh yunfuwu-prod 'sed -n "1,30p" /opt/yunduan/frontend/dist/index.html'
+ssh yunfuwu-prod 'curl -s http://127.0.0.1/ | grep -E "index-|vue-vendor"'
+```
+
+```powershell
+ssh yunfuwu-prod 'curl -s -o /tmp/delete_probe.out -w "%{http_code}" -X DELETE http://127.0.0.1:8000/api/v1/records/00000000-0000-0000-0000-000000000000; head -c 300 /tmp/delete_probe.out'
+# Expected for a protected mounted route without credentials: 401 and code "missing_token".
 ```
 
 ```powershell

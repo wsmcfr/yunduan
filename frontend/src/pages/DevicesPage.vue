@@ -166,6 +166,21 @@ async function handlePageChange(page: number): Promise<void> {
   await loadDevices();
 }
 
+/**
+ * 每页条数切换处理。
+ * 主要流程：
+ * 1. 保存用户选择的新 page size；
+ * 2. 回到第一页，避免旧页码和新 limit 组合后跳到意外的数据窗口；
+ * 3. 重新从后端读取设备列表，让总数、检测记录数和图片数保持最新。
+ *
+ * @param nextPageSize Element Plus 分页组件传入的新每页条数。
+ */
+async function handlePageSizeChange(nextPageSize: number): Promise<void> {
+  pageSize.value = nextPageSize;
+  currentPage.value = 1;
+  await loadDevices();
+}
+
 onMounted(() => {
   void loadDevices();
 });
@@ -262,10 +277,12 @@ onMounted(() => {
       <div class="table-section__footer">
         <ElPagination
           background
-          layout="prev, pager, next, total"
+          layout="sizes, prev, pager, next, total"
           :page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
           :total="total"
           :current-page="currentPage"
+          @size-change="handlePageSizeChange"
           @current-change="handlePageChange"
         />
       </div>

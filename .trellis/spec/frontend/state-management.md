@@ -77,6 +77,157 @@ Current server-state domains:
 
 ---
 
+## Scenario: Management List Pagination and Derived Resource Refresh
+
+### 1. Scope / Trigger
+
+- Trigger: any change to a server-paginated management page such as `RecordsPage`, `PartsPage`, `DevicesPage`, system users, gateway/model lists, or other table pages that show resource summary cards derived from backend data.
+- Affected layers: page-local pagination state -> API query `skip/limit` -> table rows -> derived cards/options/summary resources -> destructive or create/update actions.
+
+### 2. Signatures
+
+```ts
+const pageSize = ref(10);
+const currentPage = ref(1);
+
+async function loadDevices(): Promise<void>;
+async function loadParts(): Promise<void>;
+async function refreshRecordsView(): Promise<void>;
+
+async function handlePageChange(page: number): Promise<void>;
+async function handlePageSizeChange(nextPageSize: number): Promise<void>;
+```
+
+```vue
+<ElPagination
+  background
+  layout="sizes, prev, pager, next, total"
+  :page-size="pageSize"
+  :page-sizes="[10, 20, 50, 100]"
+  :total="total"
+  :current-page="currentPage"
+  @size-change="handlePageSizeChange"
+  @current-change="handlePageChange"
+/>
+```
+
+```ts
+async function refreshRecordsView(): Promise<void> {
+  await Promise.all([loadOptions(), refresh()]);
+}
+```
+
+### 3. Contracts
+
+| Concern | Owner | Contract |
+|---|---|---|
+| Page-size UI | Every server-paginated management page | Expose `sizes` in `ElPagination`, with `[10, 20, 50, 100]` unless the backend route documents a smaller max |
+| Page-size state | Page or feature composable | `handlePageSizeChange(nextPageSize)` updates `pageSize`, resets `currentPage` to `1`, then reloads from the backend |
+| Page change state | Page or feature composable | `handlePageChange(page)` updates `currentPage`, then reloads from the backend |
+| Derived resource cards | Page-level server state | Cards such as category entry, record count, image count, latest upload, and source device must come from freshly loaded backend resource data |
+| Mutations that affect summaries | Mutation handler | After delete/create/update/toggle, refresh every server resource used by the visible page, not only the table rows |
+| Manual refresh button | Page-level action | Refresh both the main list and its derived resource options/cards when the page renders those resources together |
+
+Additional rules:
+
+- do not assume that a table reload refreshes category cards if those cards are computed from a separate `parts`, `devices`, `users`, or options request
+- do not locally subtract totals, record counts, image counts, or category counts after destructive actions; reload the server snapshot
+- if a page shows a "current page" category rail, changing page size should reset the selected category to the all/default entry unless the category is backed by a full independent resource list
+- if `loadOptions()` feeds both dropdowns and visual cards, manual refresh and destructive actions must call it too
+
+### 4. Validation & Error Matrix
+
+| Condition | Problem | Expected behavior |
+|---|---|---|
+| `pageSize` is sent as `limit`, but `ElPagination` omits `sizes` | The backend supports page-size changes, but users cannot control it | Add `layout="sizes, prev, pager, next, total"` and `@size-change` |
+| Page size changes while the old `currentPage` is kept | `skip` can jump to an unexpected window or an empty page | Reset `currentPage = 1` before reload |
+| Record delete only calls `refresh()` for the record table | Category cards based on `parts` still show stale record/image counts | Call a combined refresh such as `refreshRecordsView()` that reloads options/cards and table data |
+| Device delete removes records, but devices page is not reloaded | Record count and image metadata shown in the row stay stale | Reload the devices list after delete succeeds |
+| Part status toggle reloads the table but keeps an invalid selected category | Detail table and category card can point at different resource slices | Reset or validate the selected category after the backend reload |
+| Manual refresh only reloads table rows | User-visible cards continue to show stale resources | Wire refresh button to the same combined resource refresh used after mutations |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | `DevicesPage` exposes page-size selection, sets `pageSize`, resets page to `1`, and reloads devices with the new `limit` |
+| Good | `RecordsPage` deletes one record, then reloads both `fetchParts({ limit: 100 })` / `fetchDevices({ limit: 100 })` and the current records query so category cards and table rows agree |
+| Base | A simple list page with no derived cards still exposes page-size selection and refreshes the list after mutation |
+| Bad | `PartsPage` has `pageSize = ref(10)` and sends `limit`, but the footer only shows `prev, pager, next, total` so the user cannot change it |
+| Bad | A delete handler hides the row locally or refreshes only the table, leaving category entry cards with old counts and latest-upload timestamps |
+
+### 6. Tests Required
+
+- page/source regression test asserting every management page with server pagination includes `layout="sizes, prev, pager, next, total"`, `:page-sizes="[10, 20, 50, 100]"`, and `@size-change="handlePageSizeChange"`
+- page/source or composable test asserting `handlePageSizeChange()` sets the new `pageSize`, resets `currentPage` to `1`, and calls the backend loader
+- page/source or behavior test asserting record delete calls a combined resource refresh, not only the table refresh
+- page behavior test for any page with category cards asserting mutation refreshes the card source data and visible table data together
+
+Assertion points:
+
+- the backend `limit` has a visible page-size control in the UI
+- page-size changes never preserve an incompatible `skip` window
+- cards and tables converge on the same backend snapshot after create/delete/update/toggle
+- manual refresh uses the same broad refresh path as mutation success when derived resource cards are present
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```vue
+<ElPagination
+  background
+  layout="prev, pager, next, total"
+  :page-size="pageSize"
+  :total="total"
+  :current-page="currentPage"
+  @current-change="handlePageChange"
+/>
+```
+
+```ts
+async function handleDeleteRecord(record: DetectionRecordModel): Promise<void> {
+  await deleteRecord(record.id);
+  await refresh();
+}
+```
+
+#### Correct
+
+```vue
+<ElPagination
+  background
+  layout="sizes, prev, pager, next, total"
+  :page-size="pageSize"
+  :page-sizes="[10, 20, 50, 100]"
+  :total="total"
+  :current-page="currentPage"
+  @size-change="handlePageSizeChange"
+  @current-change="handlePageChange"
+/>
+```
+
+```ts
+async function handlePageSizeChange(nextPageSize: number): Promise<void> {
+  pageSize.value = nextPageSize;
+  currentPage.value = 1;
+  await loadDevices();
+}
+```
+
+```ts
+async function refreshRecordsView(): Promise<void> {
+  await Promise.all([loadOptions(), refresh()]);
+}
+
+async function handleDeleteRecord(record: DetectionRecordModel): Promise<void> {
+  await deleteRecord(record.id);
+  await refreshRecordsView();
+}
+```
+
+---
+
 ## Scenario: Records List Ownership and Review Workspace
 
 ### 1. Scope / Trigger
@@ -99,6 +250,7 @@ export function useRecordsList(): {
   handlePageChange: (page: number) => Promise<void>;
   applyFilters: () => Promise<void>;
   resetFilters: () => Promise<void>;
+  handlePageSizeChange: (pageSize: number) => Promise<void>;
 };
 ```
 
@@ -117,6 +269,7 @@ interface RecordsFilters {
 |---|---|---|
 | Auth session | Pinia | Cross-page only |
 | Records list filters and pagination | `useRecordsList` | Query ownership stays inside the feature composable |
+| Records list page-size selection | `useRecordsList.handlePageSizeChange(...)` | Update `pageSize`, reset `currentPage` to `1`, and reload from the backend |
 | Record detail data | `RecordDetailPage` | Detail request, reload, and display state stay local to the page |
 | Manual review form state | `ManualReviewFormCard` + `RecordDetailPage` | Form fields stay local, submit action is emitted upward |
 | AI review trigger | `RecordDetailPage` | Only available from record detail, not parts master pages |
@@ -125,6 +278,7 @@ interface RecordsFilters {
 Additional rules:
 
 - `applyFilters()` and `resetFilters()` must reset `currentPage` to `1`
+- `handlePageSizeChange()` must reset `currentPage` to `1` because the `skip` window changes when the page size changes
 - records pages act as screening and navigation pages
 - record detail pages act as the review workspace
 - a manual review success must be followed by detail reload so that `effectiveResult` and review history stay in sync
@@ -134,6 +288,7 @@ Additional rules:
 | Condition | Problem | Expected behavior |
 |---|---|---|
 | Filters change but page is not reset | Query can point past the valid result window | Reset to page `1` before refresh |
+| Page size changes but page is not reset | `skip` can jump into a surprising window or past the end of the result set | Set `currentPage = 1` before refreshing |
 | Route param changes while detail component is reused | User sees stale record data | Watch route param and refetch |
 | Review form state is moved into global store | Stale form data leaks between records | Keep form state local to the detail workflow |
 | Parts page adds review mutation buttons | Master-data page takes over workflow concerns | Navigate to record detail instead |
@@ -149,6 +304,7 @@ Additional rules:
 ### 6. Tests Required
 
 - composable test asserting `applyFilters()` resets the page to `1`
+- composable test asserting `handlePageSizeChange()` updates `pageSize`, resets the page to `1`, and refreshes
 - composable test asserting `resetFilters()` clears all filters and refreshes
 - page test asserting route param change reloads record detail
 - page test asserting manual review success reloads detail rather than mutating partial state locally

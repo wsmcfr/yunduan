@@ -226,6 +226,120 @@ self.db.commit()
 
 ---
 
+## Scenario: Detection Record Row Delete
+
+### 1. Scope / Trigger
+
+- Trigger: any change touching `DetectionRecord`, `RecordService.delete_record(...)`, `/api/v1/records/{record_id}`, file-object cleanup, or frontend record-row delete.
+- Affected layers: record ORM aggregate -> repository delete -> service COS cleanup -> admin route dependency -> frontend delete API and table refresh.
+
+### 2. Signatures
+
+```py
+def delete_record(self, *, company_id: int, record_id: int) -> None: ...
+
+def _delete_record_cos_objects(self, *, record: DetectionRecord) -> None: ...
+
+def delete(self, record: DetectionRecord) -> None: ...
+```
+
+```http
+DELETE /api/v1/records/{record_id}
+```
+
+```ts
+deleteRecord(recordId: number): Promise<ApiMessageResponseDto>;
+```
+
+### 3. Contracts
+
+| Boundary / field | Contract |
+|---|---|
+| `DELETE /records/{id}` auth | Requires `get_current_company_admin_user`; normal company users may list/detail records but cannot delete them |
+| Tenant boundary | `RecordService.delete_record(...)` must load the record by both `company_id` and `record_id` |
+| Related data | Deleting a record deletes its file metadata and review history through the record aggregate cascade |
+| Object storage | COS objects referenced by `record.files` must be deleted before DB commit |
+| Duplicate file references | Delete each unique `(bucket_name, region, object_key)` once even if duplicate metadata rows exist |
+| Master data | Deleting one record must not delete the referenced `Part` or `Device`; those remain master data |
+| AI dependency | Plain record delete must not instantiate or require AI runtime configuration; AI clients should be created only on AI paths |
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Record is missing or outside the current company | Raise `NotFoundError(code="record_not_found")` |
+| Current user is not a company admin | Route dependency returns `403 permission_denied` before service mutation |
+| Record has file objects | Delete referenced COS objects first, then delete DB metadata and the record |
+| COS object deletion fails | Propagate the integration error and do not commit DB deletion |
+| Record has review history | Review rows are removed with the record aggregate |
+| Record has duplicate file rows pointing to the same object | Only one remote delete call is issued for that object |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | Admin deletes one bad record; backend removes the COS image, file metadata, review rows, and the detection record, while the part and MP157 device remain |
+| Base | Admin deletes a record with no files or reviews; backend deletes only the detection record |
+| Bad | A service deletes DB rows before COS cleanup, then COS deletion fails and leaves orphaned storage objects |
+| Bad | A record-row delete path reuses device purge logic and removes the part or device master-data row |
+
+### 6. Tests Required
+
+- route smoke test asserting `DELETE /api/v1/records/{record_id}` is mounted
+- service test asserting single-record delete removes `DetectionRecord`, `FileObject`, `ReviewRecord`, and unique COS objects
+- service test asserting missing or cross-company record returns `record_not_found`
+- frontend build/typecheck after adding the `deleteRecord(...)` wrapper and record-table action
+
+Assertion points:
+
+- `RecordService.delete_record(...)` keeps the company boundary
+- COS cleanup happens before database commit
+- duplicate object keys produce one delete call
+- part/device rows survive record deletion
+- plain delete tests can run without AI runtime settings
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+# Deletes database metadata first; a later COS failure would orphan files.
+self.record_repository.delete(record)
+self.db.commit()
+self._delete_record_cos_objects(record=record)
+```
+
+```py
+# Pulls in AI/COS runtime settings even when the caller only wants list/create/delete behavior.
+self.ai_review_client = AIReviewClient()
+```
+
+#### Correct
+
+```py
+record = self.record_repository.get_by_id(
+    record_id,
+    company_id=company_id,
+    include_related=True,
+)
+if record is None:
+    raise NotFoundError(code="record_not_found", message="检测记录不存在。")
+
+self._delete_record_cos_objects(record=record)
+self.record_repository.delete(record)
+self.db.commit()
+```
+
+```py
+@property
+def ai_review_client(self) -> AIReviewClient:
+    if self._ai_review_client is None:
+        self._ai_review_client = AIReviewClient()
+    return self._ai_review_client
+```
+
+---
+
 ## Scenario: User Credential and Password Reset Storage
 
 ### 1. Scope / Trigger

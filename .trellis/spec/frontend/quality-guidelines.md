@@ -29,6 +29,8 @@ The web app should preserve those strengths.
 | Empty/error/loading states | Every data-driven page handles them deliberately |
 | Reuse | Shared labels, routes, statuses, and endpoint paths are not duplicated blindly |
 | Visual balance | The page looks intentional at common zoom levels, without broken symmetry, oversized blank zones, or mismatched card/action alignment |
+| Management pagination | Server-paginated management pages expose page-size selection whenever they send `limit` to the backend |
+| Mutation refresh scope | Create/delete/update actions refresh every visible server-derived resource, not just the table row list |
 
 ---
 
@@ -43,6 +45,8 @@ The web app should preserve those strengths.
 | Giant `DashboardPage` or `RecordsPage` files with all logic inline | Hard to maintain |
 | Letting authenticated console pages scroll through the browser document | Breaks the one-screen console model; route content must scroll inside `.page-grid` |
 | Fixing layout clipping by adding fixed stage heights or nested full-page scroll containers | Creates overlap, double scrollbars, and viewport-dependent hidden content |
+| Sending `limit` from a management page without rendering `sizes` in `ElPagination` | Users cannot choose how many rows to see even though the backend supports it |
+| Refreshing only table rows after a mutation while cards/options come from separate requests | Category cards, resource counts, image counts, and latest timestamps remain stale |
 
 ---
 
@@ -117,6 +121,7 @@ The web app should preserve those strengths.
 | Letting one sparse side panel stretch to the full height of a dense detail area without meaningful filler content | Creates a large empty block that users perceive as unfinished or visually broken |
 | Switching `body` back to `overflow-y: auto` to reveal clipped content | Fixes one screenshot by making the whole app a long page; use the internal `.page-grid` scroll contract instead |
 | Adding `height="100%"` to route-level tables inside compressed grid rows | The table can shrink into a tiny pane and make pagination or bottom rows look cut off |
+| Treating a table refresh as enough after delete/create/update on pages that also show category cards or resource summaries | The row list updates but the visible resource cards keep old counts and timestamps |
 
 ### Convention: Visual QA Is Part of Done
 

@@ -75,6 +75,16 @@ export function useRecordsList() {
   }
 
   /**
+   * 切换每页条数时回到第一页。
+   * 每页数量会改变 `skip` 的计算方式，如果保留旧页码，容易落到新结果集之外。
+   */
+  async function handlePageSizeChange(nextPageSize: number): Promise<void> {
+    pageSize.value = nextPageSize;
+    currentPage.value = 1;
+    await refresh();
+  }
+
+  /**
    * 应用筛选时回到第一页，避免当前页码超出新结果集范围。
    */
   async function applyFilters(): Promise<void> {
@@ -105,6 +115,7 @@ export function useRecordsList() {
     filters,
     refresh,
     handlePageChange,
+    handlePageSizeChange,
     applyFilters,
     resetFilters,
   };

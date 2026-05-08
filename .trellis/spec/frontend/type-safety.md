@@ -93,6 +93,8 @@ fetchRecords(params?: {
 
 fetchRecordDetail(recordId: number): Promise<DetectionRecordDetailDto>;
 
+deleteRecord(recordId: number): Promise<ApiMessageResponseDto>;
+
 createManualReview(
   recordId: number,
   payload: ManualReviewCreateRequestDto,
@@ -102,6 +104,7 @@ createManualReview(
 ```http
 GET /api/v1/records
 GET /api/v1/records/{id}
+DELETE /api/v1/records/{id}
 POST /api/v1/records/{id}/manual-review
 ```
 
@@ -131,6 +134,8 @@ POST /api/v1/records/{id}/manual-review
 | `storage_last_modified` | COS last-modified time returned by storage metadata when available |
 | DTO fields | Stay snake_case and match backend payloads exactly |
 | View models | Stay camelCase and only expose mapped fields |
+| Record delete response | Uses the shared `{ message: string }` response shape; no record DTO is returned after delete |
+| Record delete caller | `frontend/src/services/api/records.ts::deleteRecord(recordId)` is the only frontend API wrapper for `DELETE /api/v1/records/{id}` |
 | Review forms | Submit `null` for empty optional fields, not empty strings |
 | Datetime form payloads | Convert Element Plus local `YYYY-MM-DDTHH:mm:ss` values to timezone-aware ISO strings before submit |
 
@@ -138,6 +143,7 @@ Additional boundary rules:
 
 - records tables may show both `result` and `effectiveResult`, but summary badges and final decision displays must use `effectiveResult`
 - detail pages must keep both values visible for auditability
+- records table delete actions are admin-only destructive actions; after delete, refresh the current list from the backend instead of locally filtering `items`
 - components must never reach into raw DTOs such as `dto.effective_result`
 - form helpers such as `normalizeOptionalDateTime()` own the local-datetime -> ISO conversion; pages and components must not hand-roll this logic
 
@@ -147,6 +153,8 @@ Additional boundary rules:
 |---|---|---|
 | Route param is not a finite number | page layer | Stop the request and surface a page-level error |
 | Manual-review path is wrong | API service boundary | Request fails with `404`; fix the service path, not the component |
+| Delete path uses a non-mounted URL | API service boundary | Request fails with `404`; use `/api/v1/records/{id}`, not `/api/v1/reviews/...` or a list-only endpoint |
+| Non-admin user attempts delete | auth/API boundary | Backend returns `403`; UI should normally hide the destructive action for non-admin sessions |
 | Backend omits a required record field | type boundary | Fail compilation or mapper contract review; do not patch with `any` |
 | Optional review text/time is empty | form boundary | Normalize to `null` before submit |
 | Datetime input is local time without timezone | form boundary | Convert to `Date(...).toISOString()` before sending the request |
@@ -157,13 +165,17 @@ Additional boundary rules:
 | Case | Example |
 |---|---|
 | Good | Records table shows `result` as MP initial result and `effectiveResult` as final status, then detail page reloads after manual review |
+| Good | Admin confirms a row delete, `deleteRecord(id)` calls `DELETE /api/v1/records/{id}`, and the records list refreshes from server state |
 | Base | No review exists, so `effective_result === result` |
 | Bad | Component edits `result` after manual review or treats `effective_result` as an optional cosmetic field |
+| Bad | Component hides a deleted row locally without reloading, leaving `total`, pagination, and category counts stale |
 
 ### 6. Tests Required
 
 - mapper tests for `DetectionRecordDto -> DetectionRecordModel`, including `effective_result`, review history, and timestamp fields
 - API contract test for `POST /api/v1/records/{id}/manual-review`
+- API contract test or route smoke test for `DELETE /api/v1/records/{id}`
+- page/composable test asserting record delete refreshes the list and keeps pagination state consistent
 - page test asserting record detail reload after manual review success
 - formatting test for `null` timestamps and missing optional review fields
 - form utility test asserting local datetime input is normalized to timezone-aware ISO before submit
@@ -172,6 +184,7 @@ Assertion points:
 
 - `result` is preserved after manual review
 - `effectiveResult` changes after the latest review changes
+- destructive delete actions stay behind admin role checks in the UI and backend dependency
 - empty `comment`, `defect_type`, and `reviewed_at` are normalized to `null`
 - local datetime strings such as `2026-04-20T10:00:00` are converted before crossing the frontend/backend boundary
 - components consume mapped camelCase fields only
@@ -194,6 +207,11 @@ apiRequest(`/api/v1/reviews/records/${recordId}/manual-review`, {
 });
 ```
 
+```ts
+// Wrong: local row filtering leaves pagination totals and category summaries stale.
+items.value = items.value.filter((item) => item.id !== recordId);
+```
+
 #### Correct
 
 ```ts
@@ -207,6 +225,11 @@ apiRequest(`/api/v1/records/${recordId}/manual-review`, {
   method: "POST",
   body: JSON.stringify(payload),
 });
+```
+
+```ts
+await deleteRecord(recordId);
+await refresh();
 ```
 
 ```ts

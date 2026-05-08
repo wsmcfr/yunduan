@@ -129,6 +129,48 @@ Why:
 
 - a full `element-plus` chunk cancels the main benefit of on-demand component loading
 
+### Convention: Element Plus Dark Pagination Readability
+
+Element Plus pagination controls must stay readable in the authenticated dark console, including unselected page numbers and the page-size selector.
+
+Implementation contract:
+
+- keep shared Element Plus pagination theme overrides in `src/styles/base.css`, not inside one route page
+- override the background pagination mode because Element Plus async chunk styles can arrive after page CSS
+- cover normal, hover, active, and disabled states for `.el-pagination.is-background`
+- use enough contrast for unselected page buttons; dark text on dark page-number backgrounds is forbidden
+- include the page-size selector in records-style tables when users need to scan more or fewer rows per page
+- if a page uses `layout="total, sizes, prev, pager, next, jumper"`, verify the `sizes` dropdown text and selected value remain readable in the dark theme
+- when chunk CSS wins unexpectedly, use narrowly scoped `!important` rules in `base.css` for Element Plus library overrides instead of scattering higher-specificity selectors across route styles
+
+Example:
+
+```css
+.el-pagination.is-background .el-pager li:not(.is-active) {
+  color: var(--text-primary) !important;
+  background-color: rgba(15, 23, 42, 0.92) !important;
+  border: 1px solid var(--border-subtle) !important;
+}
+
+.el-pagination.is-background .el-pager li.is-active {
+  color: #ffffff !important;
+  background-color: var(--color-primary) !important;
+}
+```
+
+Review points:
+
+- open every page that uses Element Plus pagination, not just the page that triggered the complaint
+- verify unselected page numbers, active page numbers, disabled arrows, page-size select text, and jumper input
+- verify at least one authenticated table page with enough data to show multiple pages
+- inspect the built Vite output or run a browser probe because Element Plus pagination CSS is emitted as an async chunk
+
+Why:
+
+- pagination often sits at the bottom of dense data pages, so low contrast is easy to miss in a quick top-of-page check
+- route-local fixes can leave other paginated pages unreadable
+- async component-library CSS can override ordinary page styles after navigation, so the shared base layer must own these dark-theme corrections
+
 ### Convention: Radio Button Values
 
 When using `ElRadioButton`, bind the selected value through `value`, not through `label`.

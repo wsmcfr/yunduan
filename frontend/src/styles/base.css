@@ -316,6 +316,12 @@ a {
   color: var(--app-text-secondary);
 }
 
+.el-pagination__total,
+.el-pagination__jump,
+.el-pagination__sizes {
+  color: var(--app-text-secondary);
+}
+
 .el-pager li,
 .el-pagination button {
   border: 1px solid rgba(149, 184, 223, 0.14);
@@ -323,10 +329,43 @@ a {
   color: var(--app-text-secondary);
 }
 
+.el-pagination.is-background .btn-prev,
+.el-pagination.is-background .btn-next,
+.el-pagination.is-background .el-pager li {
+  min-width: 32px;
+  border: 1px solid rgba(149, 184, 223, 0.2);
+  background: rgba(9, 18, 28, 0.78) !important;
+  color: var(--app-text) !important;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+
+.el-pagination.is-background .btn-prev:disabled,
+.el-pagination.is-background .btn-next:disabled,
+.el-pagination.is-background .el-pager li.is-disabled {
+  border-color: rgba(149, 184, 223, 0.08);
+  background: rgba(9, 18, 28, 0.38) !important;
+  color: rgba(174, 185, 197, 0.45) !important;
+  box-shadow: none;
+}
+
+.el-pagination.is-background .btn-prev:not(:disabled):hover,
+.el-pagination.is-background .btn-next:not(:disabled):hover,
+.el-pagination.is-background .el-pager li:not(.is-active):hover {
+  border-color: rgba(255, 138, 31, 0.42);
+  background: rgba(255, 138, 31, 0.14) !important;
+  color: var(--app-text) !important;
+}
+
 .el-pager li.is-active {
   color: #1b1208;
   background: linear-gradient(135deg, var(--app-primary), var(--app-copper));
   border-color: transparent;
+}
+
+.el-pagination.is-background .el-pager li.is-active {
+  color: #1b1208 !important;
+  background: linear-gradient(135deg, var(--app-primary), var(--app-copper)) !important;
+  border-color: rgba(255, 183, 77, 0.88);
 }
 
 .el-tabs__item {

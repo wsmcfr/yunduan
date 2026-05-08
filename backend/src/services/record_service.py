@@ -35,15 +35,39 @@ class RecordService:
         FileKind.THUMBNAIL: 2,
     }
 
-    def __init__(self, db: Session) -> None:
-        """初始化检测记录服务依赖。"""
+    def __init__(
+        self,
+        db: Session,
+        cos_client: CosClient | None = None,
+        ai_review_client: AIReviewClient | None = None,
+    ) -> None:
+        """初始化检测记录服务依赖。
+
+        参数:
+            db: 当前请求生命周期内的数据库会话。
+            cos_client: 可选对象存储客户端；单元测试会注入假客户端，避免触发真实云端删除。
+            ai_review_client: 可选 AI 复核客户端；仅 AI 路径需要，普通记录管理不应被其配置依赖阻塞。
+        """
 
         self.db = db
         self.record_repository = DetectionRecordRepository(db)
         self.part_repository = PartRepository(db)
         self.device_repository = DeviceRepository(db)
-        self.ai_review_client = AIReviewClient()
-        self.cos_client = CosClient()
+        self.cos_client = cos_client or CosClient()
+        self._ai_review_client = ai_review_client
+
+    @property
+    def ai_review_client(self) -> AIReviewClient:
+        """按需创建 AI 复核客户端。
+
+        记录列表、创建、删除等普通管理流程不需要 AI 复核能力；如果初始化服务时就强制创建
+        AI 客户端，会让这些流程也依赖 AI/COS 运行时配置。这里延迟到真正进入 AI 路径时再创建，
+        既保持接口调用方式不变，也让非 AI 单元测试更专注。
+        """
+
+        if self._ai_review_client is None:
+            self._ai_review_client = AIReviewClient()
+        return self._ai_review_client
 
     def _generate_record_no(self) -> str:
         """生成默认检测记录编号。"""
@@ -172,6 +196,32 @@ class RecordService:
             region=file_object.region,
             object_key=file_object.object_key,
         )
+
+    def _delete_record_cos_objects(self, *, record: DetectionRecord) -> None:
+        """删除单条检测记录关联的 COS 对象。
+
+        参数:
+            record: 已按公司边界加载、并包含文件对象集合的检测记录。
+
+        主要流程:
+            1. 从记录文件元数据中收集唯一的 bucket、region、object_key 三元组。
+            2. 逐个调用对象存储删除接口。
+            3. 如果任一远端删除失败，异常会向外抛出，阻止后续数据库提交。
+
+        这样做是为了避免数据库记录先被删掉，而 COS 图片对象仍残留且失去追溯入口。
+        """
+
+        unique_files = {
+            (item.bucket_name, item.region, item.object_key)
+            for item in record.files
+            if item.bucket_name and item.region and item.object_key
+        }
+        for bucket_name, region, object_key in unique_files:
+            self.cos_client.delete_object(
+                bucket_name=bucket_name,
+                region=region,
+                object_key=object_key,
+            )
 
     def _select_ai_reference_files(self, *, record: DetectionRecord) -> list[FileObject]:
         """为 AI 对话挑选最有代表性的文件对象。"""
@@ -304,6 +354,42 @@ class RecordService:
         # 新建文件对象后立即补上预览地址，保证单条文件登记接口与详情接口的返回结构一致。
         file_object.preview_url = self._build_file_preview_url(file_object=file_object)
         return file_object
+
+    def delete_record(self, *, company_id: int, record_id: int) -> None:
+        """删除单条检测记录及其文件、审核子记录。
+
+        参数:
+            company_id: 当前管理员所属公司，用于保证只能删除本公司记录。
+            record_id: 需要删除的检测记录 ID。
+
+        主要流程:
+            1. 按公司边界加载检测记录和关联文件、审核记录。
+            2. 先删除 COS 对象，远端失败时不提交数据库删除。
+            3. 再删除检测记录聚合，让 ORM 级联清理文件元数据和复核历史。
+            4. 提交事务，并写入审计日志。
+
+        返回值:
+            无返回值；接口层只需要返回简单成功消息。
+        """
+
+        record = self.record_repository.get_by_id(
+            record_id,
+            company_id=company_id,
+            include_related=True,
+        )
+        if record is None:
+            raise NotFoundError(code="record_not_found", message="检测记录不存在。")
+
+        record_no = record.record_no
+        self._delete_record_cos_objects(record=record)
+        self.record_repository.delete(record)
+        self.db.commit()
+        logger.info(
+            "record.deleted event=record.deleted record_id=%s record_no=%s company_id=%s",
+            record_id,
+            record_no,
+            company_id,
+        )
 
     def request_ai_review(self, *, company_id: int, record_id: int, payload: AIReviewRequest) -> dict:
         """触发 AI 复核接口。"""
