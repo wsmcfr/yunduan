@@ -541,7 +541,10 @@ Fixed the authenticated frontend shell so the browser document stays locked to o
 
 ### Main Changes
 
-(Add details)
+- Created and pushed `docs/stm32mp157-cloud-upload-data-contract.md` updates for STM32MP157 cloud upload payloads.
+- Added verified F4-side hardware data blocks for TI LDC1614 eddy/current inductive sensing, HX711 weighing, and conveyor motor control.
+- Updated conveyor motor fields to match the user's Zhangdatou `Emm42_V5.0` industrial package with UART serial control instead of STEP/DIR or PWM control.
+- Preserved cloud endpoint `http://119.91.65.122/` and kept F4 data under `sensor_context` without changing backend APIs.
 
 ### Git Commits
 
@@ -551,7 +554,9 @@ Fixed the authenticated frontend shell so the browser document stays locked to o
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Parsed the complete JSON request example from the Markdown document with PowerShell `ConvertFrom-Json`.
+- [OK] Searched the document for obsolete fields including `f4_sensor_values`, `eddy_value`, `pwm_duty_percent`, `step_dir`, and pulse-control placeholders; no stale upload fields remained.
+- [OK] Confirmed local `HEAD` and `origin/main` both point to commit `aa5947c`.
 
 ### Status
 
@@ -762,6 +767,39 @@ Completed and published the combined server maintenance session covering invalid
 | Hash | Message |
 |------|---------|
 | `ee5c4d6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 17: STM32MP157 cloud upload data contract hardware details
+
+**Date**: 2026-05-16
+**Task**: STM32MP157 cloud upload data contract hardware details
+**Branch**: `main`
+
+### Summary
+
+Updated STM32MP157 cloud upload contract with verified F4-side hardware fields for LDC1614 eddy current sensing, HX711 weighing, and Zhangdatou Emm42_V5.0 industrial-package closed-loop stepper motor using UART serial control; validated sample JSON and pushed docs to origin/main.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `aa5947c` | (see git log) |
 
 ### Testing
 

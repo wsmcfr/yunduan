@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
-- **Last Active**: 2026-05-08
+- **Total Sessions**: 17
+- **Last Active**: 2026-05-16
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~776 | Active |
+| `journal-1.md` | ~809 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-05-16 | STM32MP157 cloud upload data contract hardware details | `aa5947c` | `main` |
 | 16 | 2026-05-08 | 管理页分页、记录删除与刷新修复 | `ee5c4d6` | `main` |
 | 15 | 2026-05-07 | Clean parts, admin reset, and Micu API gateway update | `9442d6d` | `main` |
 | 14 | 2026-05-07 | 记录设备删除遗漏孤立零件清理复盘 | - | `main` |
