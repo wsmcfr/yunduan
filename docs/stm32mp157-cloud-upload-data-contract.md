@@ -15,6 +15,14 @@
 | 对象存储方式 | 后端生成腾讯云 COS 预签名 PUT URL，MP157 直传图片到 COS |
 | 云端设备口径 | 只登记 STM32MP157 主控设备，STM32F4 不作为独立云端设备 |
 
+本次硬件字段按联网资料与用户实物说明核对后整理：
+
+| 硬件 | 文档采用的关键口径 | 资料依据 |
+|---|---|---|
+| LDC1614 涡流/电感检测模块 | TI LDC1614，4 通道，28 位，I2C，2.7V 到 3.6V，传感器频率 1kHz 到 10MHz | [TI LDC1614 产品页](https://www.ti.com/product/LDC1614) |
+| HX711 称重模块 | 24 位称重 ADC，通过 `DOUT` 与 `PD_SCK` 串行读数，不按 I2C/SPI 处理 | [HX711 数据手册索引](https://www.digikey.com/en/htmldatasheets/production/1836471/0/0/1/hx711) |
+| Emm42_V5.0 传送带电机 | 张大头 Emm42_V5.0 闭环 42 步进电机，用户购买工业套餐，本项目采用串口控制 | [张大头 Emm_V5.0 步进闭环驱动说明](https://blog.csdn.net/zhangdatou666/article/details/132644047) |
+
 ## 2. 总体上传链路
 
 ```text
@@ -45,6 +53,17 @@ STM32MP157 采集图片
 | `network_interface` | 建议 | `ppp0` | EC20 PPP 网卡名称，curl 可使用 `--interface ppp0` |
 | `f4_uart_device` | 建议 | `/dev/ttySTM1` | MP157 与 STM32F4 通信串口 |
 | `f4_baudrate` | 建议 | `115200` | F4 串口波特率 |
+| `ldc1614_i2c_bus` | 建议 | `I2C1` | F4 连接 LDC1614 涡流/电感检测模块的 I2C 外设 |
+| `ldc1614_i2c_address` | 建议 | `0x2A` | LDC1614 7 位 I2C 地址，按模块 ADDR 引脚配置填写 |
+| `hx711_dout_gpio` | 建议 | `PB12` | HX711 数据输出引脚，接 F4 普通 GPIO 输入 |
+| `hx711_sck_gpio` | 建议 | `PB13` | HX711 时钟引脚，接 F4 普通 GPIO 输出 |
+| `hx711_gain` | 建议 | `128` | HX711 通道 A 常用增益，可按实际接线调整 |
+| `conveyor_stepper_driver` | 建议 | `Emm42_V5.0` | 传送带使用的闭环 42 步进电机驱动模块 |
+| `conveyor_stepper_package` | 建议 | `industrial` | 用户购买的张大头 Emm42_V5.0 工业套餐，文档按该套餐记录 |
+| `conveyor_stepper_control_mode` | 强烈建议 | `uart_serial` | 本项目按串口控制，不按 STEP/DIR 脉冲控制记录 |
+| `conveyor_stepper_uart_device` | 强烈建议 | `USART3` | F4 连接 Emm42_V5.0 的串口外设或软件串口名称 |
+| `conveyor_stepper_uart_baudrate` | 强烈建议 | `115200` | Emm42_V5.0 串口波特率，按驱动器实际配置填写 |
+| `conveyor_stepper_slave_address` | 建议 | `1` | 串口协议中的电机地址，单电机通常固定为 1 |
 | `edge_software_version` | 建议 | `edge-1.0.0` | MP157 上传程序版本 |
 | `model_bundle_version` | 建议 | `unet-mbv3-20260516` | 本次部署的模型包版本 |
 
@@ -233,14 +252,118 @@ curl --interface ppp0 \
       "last_frame_crc_ok": true,
       "last_frame_at": "2026-05-16T14:30:11.900+08:00"
     },
-    "f4_sensor_values": {
-      "photoelectric_triggered": true,
-      "eddy_value": 0.42,
+    "ldc1614_eddy_current": {
+      "module_name": "LDC1614电感检测模块",
+      "chip_vendor": "TI",
+      "chip_model": "LDC1614",
+      "interface": "I2C",
+      "i2c_bus": "I2C1",
+      "i2c_address": "0x2A",
+      "channel_count": 4,
+      "resolution_bits": 28,
+      "supply_voltage_v": 3.3,
+      "sensor_excitation_frequency_hz": 1000000,
+      "rp_parallel_ohm": 10000,
+      "coil_diameter_mm": 18.0,
+      "recommended_range_mm": 36.0,
+      "channels": [
+        {
+          "channel": 0,
+          "enabled": true,
+          "coil_name": "outer_coil_ch0",
+          "raw_code": 84231520,
+          "baseline_raw_code": 84210000,
+          "delta_raw_code": 21520,
+          "delta_ratio": 0.0002555,
+          "frequency_hz": 1185000,
+          "inductance_uh": 12.84,
+          "quality": "ok",
+          "decision": "metal_detected"
+        },
+        {
+          "channel": 1,
+          "enabled": true,
+          "coil_name": "outer_coil_ch1",
+          "raw_code": 84208000,
+          "baseline_raw_code": 84207000,
+          "delta_raw_code": 1000,
+          "delta_ratio": 0.0000119,
+          "frequency_hz": 1186200,
+          "inductance_uh": 12.79,
+          "quality": "ok",
+          "decision": "normal"
+        }
+      ],
+      "overall_decision": "metal_detected"
+    },
+    "weighing": {
+      "module_type": "hx711",
+      "module_name": "HX711称重传感器实验套装",
+      "dout_gpio": "PB12",
+      "sck_gpio": "PB13",
+      "gain": 128,
+      "sample_rate_hz": 10,
+      "raw_adc": 8342210,
+      "tare_raw_adc": 8210000,
+      "filtered_raw_adc": 8339820,
+      "gross_weight_g": 126.2,
+      "net_weight_g": 124.8,
+      "stable": true,
+      "sample_count": 10,
+      "stable_window_g": 0.2,
+      "calibration_factor": 1024.5,
+      "zero_offset": 8210000,
+      "capacity_g": 5000,
       "temperature_c": 36.5,
-      "conveyor_speed_mm_s": 120.0
+      "overload": false,
+      "decision": "pass"
+    },
+    "conveyor_motor": {
+      "motor_type": "closed_loop_stepper",
+      "driver_model": "Emm42_V5.0",
+      "motor_frame": "42",
+      "package_variant": "industrial",
+      "control_mode": "uart_serial",
+      "uart_device": "USART3",
+      "uart_tx_gpio": "PB10",
+      "uart_rx_gpio": "PB11",
+      "uart_baudrate": 115200,
+      "slave_address": 1,
+      "command_mode": "speed",
+      "running": true,
+      "direction": "forward",
+      "enabled": true,
+      "microstep": 16,
+      "steps_per_rev": 200,
+      "target_rpm": 180.0,
+      "actual_rpm": 177.8,
+      "target_speed_mm_s": 120.0,
+      "actual_speed_mm_s": 118.5,
+      "target_position_steps": 25600,
+      "actual_position_steps": 25480,
+      "target_position_mm": 420.5,
+      "actual_position_mm": 418.6,
+      "encoder_count": 15360,
+      "position_error_steps": 120,
+      "last_command_hex": "01 F6 01 00 B4 00 10 6B",
+      "last_response_hex": "01 F6 02 6B",
+      "last_response_ok": true,
+      "stall_detected": false,
+      "over_current": false,
+      "over_temperature": false,
+      "jam_detected": false,
+      "driver_fault": false,
+      "fault_code": null,
+      "last_action": "move_to_camera"
+    },
+    "f4_io": {
+      "photoelectric_triggered": true,
+      "limit_switch_in": false,
+      "limit_switch_out": false,
+      "emergency_stop": false
     },
     "f4_control_state": {
-      "motor_running": false,
+      "last_command": "capture_and_measure",
       "rejector_action": "none",
       "last_command_seq": 128,
       "alarm_code": null
@@ -376,7 +499,17 @@ curl --interface ppp0 \
 
 ## 9. `sensor_context` 传感器与 STM32F4 字段
 
-`sensor_context` 用于放 EC20 网络状态、F4 串口帧、传感器数值和执行器状态。它不要求云端预先建 F4 设备。
+`sensor_context` 用于放 EC20 网络状态、F4 串口帧、LDC1614 涡流/电感检测、称重采样、传送带电机控制和普通 IO 状态。它不要求云端预先建 F4 设备。
+
+F4 在本系统里的职责建议固定为三类：
+
+| F4 职责 | 建议 JSON 块 | 说明 |
+|---|---|---|
+| 涡流/电感检测 | `ldc1614_eddy_current` | 记录 TI LDC1614 4 通道电感检测模块的配置、原始码、基线、差值和通道判定 |
+| 称重检测 | `weighing` | 记录称重 ADC 原始值、去皮值、毛重、净重、稳定状态和称重判定 |
+| 传送带控制 | `conveyor_motor` / `f4_control_state` | 记录 Emm42_V5.0 工业套餐闭环 42 步进电机的串口配置、运行速度、位置、编码器、卡滞、驱动故障和最近控制命令 |
+
+### 9.1 EC20 与 F4 串口基础字段
 
 | JSON 路径 | 类型 | 上报要求 | 示例 | 说明 |
 |---|---|---:|---|---|
@@ -391,11 +524,113 @@ curl --interface ppp0 \
 | `f4_uart.last_frame_seq` | integer | 建议 | `128` | 最近一帧序号 |
 | `f4_uart.last_frame_crc_ok` | boolean | 建议 | `true` | 最近一帧 CRC 是否正确 |
 | `f4_uart.last_frame_at` | ISO datetime | 建议 | `2026-05-16T14:30:11.900+08:00` | 最近收到 F4 数据的时间 |
-| `f4_sensor_values.photoelectric_triggered` | boolean | 建议 | `true` | 光电触发状态 |
-| `f4_sensor_values.eddy_value` | number | 可选 | `0.42` | 涡流传感器值 |
-| `f4_sensor_values.temperature_c` | number | 可选 | `36.5` | 温度 |
-| `f4_sensor_values.conveyor_speed_mm_s` | number | 可选 | `120.0` | 输送速度 |
-| `f4_control_state.motor_running` | boolean | 建议 | `false` | 电机状态 |
+
+### 9.2 LDC1614 涡流/电感检测字段
+
+图中涡流模块可按 `TI LDC1614` 记录：4 通道、最高 28 位分辨率、I2C 接口、2.7V 到 3.6V 供电、传感器激励频率 1kHz 到 10MHz。图中建议的感应范围是大于线圈直径的 2 倍，因此文档里同时记录 `coil_diameter_mm` 和 `recommended_range_mm`，方便后续排查检测距离是否合理。
+
+| JSON 路径 | 类型 | 上报要求 | 示例 | 说明 |
+|---|---|---:|---|---|
+| `ldc1614_eddy_current.module_name` | string | 建议 | `LDC1614电感检测模块` | 模块名称 |
+| `ldc1614_eddy_current.chip_vendor` | string | 建议 | `TI` | 芯片品牌 |
+| `ldc1614_eddy_current.chip_model` | string | 强烈建议 | `LDC1614` | 芯片型号 |
+| `ldc1614_eddy_current.interface` | string | 强烈建议 | `I2C` | 模块通信接口 |
+| `ldc1614_eddy_current.i2c_bus` | string | 建议 | `I2C1` | F4 使用的 I2C 外设 |
+| `ldc1614_eddy_current.i2c_address` | string | 建议 | `0x2A` | LDC1614 7 位地址，按实际 ADDR 引脚配置填写 |
+| `ldc1614_eddy_current.channel_count` | integer | 强烈建议 | `4` | LDC1614 通道数量 |
+| `ldc1614_eddy_current.resolution_bits` | integer | 强烈建议 | `28` | 转换分辨率 |
+| `ldc1614_eddy_current.supply_voltage_v` | number | 建议 | `3.3` | 模块供电电压，允许范围 2.7V 到 3.6V |
+| `ldc1614_eddy_current.sensor_excitation_frequency_hz` | integer | 建议 | `1000000` | LC 传感器激励频率，图中范围 1kHz 到 10MHz |
+| `ldc1614_eddy_current.rp_parallel_ohm` | number | 可选 | `10000` | Rp 等效并联电阻，图中参考范围 1KΩ 到 100KΩ |
+| `ldc1614_eddy_current.coil_diameter_mm` | number | 建议 | `18.0` | 外接检测线圈直径 |
+| `ldc1614_eddy_current.recommended_range_mm` | number | 建议 | `36.0` | 建议感应范围，按大于线圈直径 2 倍记录 |
+| `ldc1614_eddy_current.channels[].channel` | integer | 强烈建议 | `0` | LDC1614 通道号，0 到 3 |
+| `ldc1614_eddy_current.channels[].enabled` | boolean | 建议 | `true` | 该通道是否启用 |
+| `ldc1614_eddy_current.channels[].coil_name` | string | 建议 | `outer_coil_ch0` | 线圈或安装位置名称 |
+| `ldc1614_eddy_current.channels[].raw_code` | integer | 强烈建议 | `84231520` | 28 位原始转换值或拼接后的原始码 |
+| `ldc1614_eddy_current.channels[].baseline_raw_code` | integer | 强烈建议 | `84210000` | 空载或标准件基线原始码 |
+| `ldc1614_eddy_current.channels[].delta_raw_code` | integer | 强烈建议 | `21520` | 当前值与基线差值 |
+| `ldc1614_eddy_current.channels[].delta_ratio` | number | 建议 | `0.0002555` | 差值比例，便于跨设备比较 |
+| `ldc1614_eddy_current.channels[].frequency_hz` | number | 建议 | `1185000` | 换算后的谐振频率 |
+| `ldc1614_eddy_current.channels[].inductance_uh` | number | 可选 | `12.84` | 按 LC 参数换算出的电感量 |
+| `ldc1614_eddy_current.channels[].quality` | string | 建议 | `ok` | `ok` / `saturated` / `open_coil` / `noise_high` |
+| `ldc1614_eddy_current.channels[].decision` | string | 建议 | `metal_detected` | 单通道判定，例如 `normal` / `metal_detected` / `abnormal` |
+| `ldc1614_eddy_current.overall_decision` | string | 强烈建议 | `metal_detected` | 涡流模块综合判定 |
+
+### 9.3 HX711 称重模块字段
+
+你当前称重模块使用的是 HX711 称重传感器实验套装。HX711 通常不是 I2C 或 SPI，而是由 F4 使用 `DOUT` 和 `SCK` 两根 GPIO 读取 24 位称重 ADC 数据；上报时既要记录换算后的重量，也要保留原始码、去皮基线、滤波值和标定系数，便于后续追溯称重偏差。
+
+| JSON 路径 | 类型 | 上报要求 | 示例 | 说明 |
+|---|---|---:|---|---|
+| `weighing.module_type` | string | 强烈建议 | `hx711` | 固定标识当前称重模块类型 |
+| `weighing.module_name` | string | 建议 | `HX711称重传感器实验套装` | 模块名称，便于现场确认硬件 |
+| `weighing.dout_gpio` | string | 强烈建议 | `PB12` | HX711 `DOUT` 数据输出脚连接到 F4 的 GPIO |
+| `weighing.sck_gpio` | string | 强烈建议 | `PB13` | HX711 `SCK` 时钟脚连接到 F4 的 GPIO |
+| `weighing.gain` | integer | 强烈建议 | `128` | HX711 增益，常见值为 128、64 或 32 |
+| `weighing.sample_rate_hz` | integer | 建议 | `10` | HX711 输出速率，常见 10Hz 或 80Hz |
+| `weighing.raw_adc` | integer | 强烈建议 | `8342210` | 当前 HX711 24 位原始读数，按符号扩展后的整数记录 |
+| `weighing.tare_raw_adc` | integer | 强烈建议 | `8210000` | 去皮基线原始值 |
+| `weighing.filtered_raw_adc` | integer | 建议 | `8339820` | 均值、中值或低通滤波后的原始值 |
+| `weighing.gross_weight_g` | number | 建议 | `126.2` | 毛重，单位 g |
+| `weighing.net_weight_g` | number | 强烈建议 | `124.8` | 净重，单位 g |
+| `weighing.stable` | boolean | 强烈建议 | `true` | 称重是否稳定 |
+| `weighing.sample_count` | integer | 建议 | `10` | 本次均值或滤波使用的采样数量 |
+| `weighing.stable_window_g` | number | 建议 | `0.2` | 判定稳定时允许的重量波动窗口 |
+| `weighing.calibration_factor` | number | 建议 | `1024.5` | 标定系数，便于追溯称重换算 |
+| `weighing.zero_offset` | integer | 建议 | `8210000` | 零点偏移值，可与 `tare_raw_adc` 一致 |
+| `weighing.capacity_g` | number | 建议 | `5000` | 称重传感器量程，单位 g |
+| `weighing.temperature_c` | number | 可选 | `36.5` | 称重模块或环境温度 |
+| `weighing.overload` | boolean | 建议 | `false` | 是否超过称重范围 |
+| `weighing.decision` | string | 建议 | `pass` | 称重判定，例如 `pass` / `underweight` / `overweight` / `unstable` |
+
+### 9.4 传送带电机与 F4 控制字段
+
+你当前传送带电机使用的是张大头 `Emm42_V5.0` 闭环 42 步进电机工业套餐，并且采用串口控制。因此 MP157 不需要把它描述成普通占空比电机，也不要只上传一个占空比数值；F4 应把串口配置、控制模式、目标/实际速度、目标/实际位置、编码器反馈、跟随误差、串口命令响应和故障状态一起放进 `conveyor_motor`。
+
+| JSON 路径 | 类型 | 上报要求 | 示例 | 说明 |
+|---|---|---:|---|---|
+| `conveyor_motor.motor_type` | string | 强烈建议 | `closed_loop_stepper` | 固定标识为闭环步进电机 |
+| `conveyor_motor.driver_model` | string | 强烈建议 | `Emm42_V5.0` | 张大头闭环步进驱动型号 |
+| `conveyor_motor.motor_frame` | string | 建议 | `42` | 42 系列步进电机 |
+| `conveyor_motor.package_variant` | string | 强烈建议 | `industrial` | 用户购买的是工业套餐 |
+| `conveyor_motor.control_mode` | string | 强烈建议 | `uart_serial` | 本项目采用串口控制 |
+| `conveyor_motor.uart_device` | string | 强烈建议 | `USART3` | F4 连接驱动器的串口外设 |
+| `conveyor_motor.uart_tx_gpio` | string | 建议 | `PB10` | F4 串口 TX 引脚，按实际接线填写 |
+| `conveyor_motor.uart_rx_gpio` | string | 建议 | `PB11` | F4 串口 RX 引脚，按实际接线填写 |
+| `conveyor_motor.uart_baudrate` | integer | 强烈建议 | `115200` | 串口波特率，必须与驱动器配置一致 |
+| `conveyor_motor.slave_address` | integer | 建议 | `1` | 串口协议中的电机地址 |
+| `conveyor_motor.command_mode` | string | 建议 | `speed` | 最近使用的控制模式，例如 `speed` / `position` / `stop` / `home` |
+| `conveyor_motor.running` | boolean | 强烈建议 | `true` | 传送带电机是否正在运行 |
+| `conveyor_motor.direction` | string | 建议 | `forward` | 运行方向，例如 `forward` / `reverse` / `stop` |
+| `conveyor_motor.enabled` | boolean | 强烈建议 | `true` | 驱动器是否处于使能状态 |
+| `conveyor_motor.microstep` | integer | 建议 | `16` | 当前细分设置，按驱动器参数填写 |
+| `conveyor_motor.steps_per_rev` | integer | 建议 | `200` | 电机一圈基础步数，1.8 度步进电机通常为 200 |
+| `conveyor_motor.target_rpm` | number | 建议 | `180.0` | 串口下发的目标转速 |
+| `conveyor_motor.actual_rpm` | number | 建议 | `177.8` | 驱动器反馈或 F4 估算的实际转速 |
+| `conveyor_motor.target_speed_mm_s` | number | 建议 | `120.0` | 目标线速度 |
+| `conveyor_motor.actual_speed_mm_s` | number | 建议 | `118.5` | 实测或估算线速度 |
+| `conveyor_motor.target_position_steps` | integer | 建议 | `25600` | 位置模式下的目标步数，速度模式也可记录最近目标位置 |
+| `conveyor_motor.actual_position_steps` | integer | 建议 | `25480` | 闭环反馈或 F4 估算的实际步数 |
+| `conveyor_motor.target_position_mm` | number | 建议 | `420.5` | 目标输送位置 |
+| `conveyor_motor.actual_position_mm` | number | 建议 | `418.6` | 实际输送位置 |
+| `conveyor_motor.encoder_count` | integer | 建议 | `15360` | 编码器累计计数或驱动器反馈位置计数 |
+| `conveyor_motor.position_error_steps` | integer | 强烈建议 | `120` | 目标位置与实际位置的跟随误差 |
+| `conveyor_motor.last_command_hex` | string | 建议 | `01 F6 01 00 B4 00 10 6B` | F4 最近一次发给驱动器的串口命令帧，便于排查协议问题 |
+| `conveyor_motor.last_response_hex` | string | 建议 | `01 F6 02 6B` | 驱动器最近一次串口响应帧 |
+| `conveyor_motor.last_response_ok` | boolean | 强烈建议 | `true` | 最近一次串口响应是否正确 |
+| `conveyor_motor.stall_detected` | boolean | 强烈建议 | `false` | 是否检测到堵转或失步 |
+| `conveyor_motor.over_current` | boolean | 建议 | `false` | 驱动器是否过流 |
+| `conveyor_motor.over_temperature` | boolean | 建议 | `false` | 驱动器是否过温 |
+| `conveyor_motor.jam_detected` | boolean | 强烈建议 | `false` | 是否检测到卡滞 |
+| `conveyor_motor.driver_fault` | boolean | 强烈建议 | `false` | 电机驱动器是否报错 |
+| `conveyor_motor.fault_code` | string 或 null | 建议 | `null` | 驱动器故障码，没有故障传 `null` |
+| `conveyor_motor.last_action` | string | 建议 | `move_to_camera` | 最近动作，例如 `feed_in`、`move_to_camera`、`move_to_weighing`、`reject` |
+| `f4_io.photoelectric_triggered` | boolean | 建议 | `true` | 光电开关触发状态 |
+| `f4_io.limit_switch_in` | boolean | 可选 | `false` | 入口限位状态 |
+| `f4_io.limit_switch_out` | boolean | 可选 | `false` | 出口限位状态 |
+| `f4_io.emergency_stop` | boolean | 强烈建议 | `false` | 急停状态 |
+| `f4_control_state.last_command` | string | 建议 | `capture_and_measure` | MP157 最近下发给 F4 的业务命令 |
 | `f4_control_state.rejector_action` | string | 建议 | `none` | 剔除动作：`none` / `reject` / `pass` |
 | `f4_control_state.last_command_seq` | integer | 建议 | `128` | MP157 下发给 F4 的最近命令序号 |
 | `f4_control_state.alarm_code` | string 或 null | 建议 | `null` | F4 报警码，没有报警传 `null` |
@@ -931,7 +1166,10 @@ curl --interface ppp0 \
 | 时间带时区 | 必须 | 所有 datetime 都类似 `2026-05-16T14:30:12.000+08:00` |
 | 模型输出完整 | 强烈建议 | `vision_context.unet` 与 `vision_context.mobilenetv3_small` 均有版本、阈值、关键结果 |
 | 判定规则可解释 | 强烈建议 | `decision_context` 写明阈值、耗时和判定原因 |
-| F4 状态入上下文 | 建议 | F4 串口和传感器状态在 `sensor_context` 中可见 |
+| LDC1614 涡流字段完整 | 强烈建议 | `sensor_context.ldc1614_eddy_current` 有芯片型号、I2C 信息、4 通道原始码、基线、差值和综合判定 |
+| HX711 称重字段完整 | 强烈建议 | `sensor_context.weighing` 有 `hx711` 类型、DOUT/SCK 引脚、增益、原始码、去皮值、净重、稳定状态和标定系数 |
+| 传送带控制字段完整 | 强烈建议 | `sensor_context.conveyor_motor` 有 Emm42_V5.0 驱动型号、工业套餐、串口控制模式、串口参数、电机地址、命令模式、目标/实际转速、目标/实际位置、编码器、跟随误差、串口命令响应、卡滞、驱动故障和最近动作 |
+| F4 状态入上下文 | 建议 | F4 串口、普通 IO、报警码和最近控制命令在 `sensor_context` 中可见 |
 | 图片走 COS | 必须 | 不把图片二进制塞进 `/records` 请求 |
 | 文件登记补偿 | 必须 | PUT 成功但登记失败时，本地能保存 object_key 后续补登记 |
 | Cookie 续期 | 必须 | 401 后能重新登录 |
