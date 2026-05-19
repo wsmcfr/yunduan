@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
-- **Last Active**: 2026-05-16
+- **Total Sessions**: 18
+- **Last Active**: 2026-05-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~809 | Active |
+| `journal-1.md` | ~862 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-05-20 | Cloud review board sync and reverse tunnel deployment | `a59fee1` | `main` |
 | 17 | 2026-05-16 | STM32MP157 cloud upload data contract hardware details | `aa5947c` | `main` |
 | 16 | 2026-05-08 | 管理页分页、记录删除与刷新修复 | `ee5c4d6` | `main` |
 | 15 | 2026-05-07 | Clean parts, admin reset, and Micu API gateway update | `9442d6d` | `main` |

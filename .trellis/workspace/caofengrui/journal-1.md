@@ -812,3 +812,51 @@ Updated STM32MP157 cloud upload contract with verified F4-side hardware fields f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: Cloud review board sync and reverse tunnel deployment
+
+**Date**: 2026-05-20
+**Task**: Cloud review board sync and reverse tunnel deployment
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| Area | Summary |
+|------|---------|
+| Board review sync | Implemented and deployed cloud manual-review writeback to STM32MP157 board history through `POST /api/v1/records/{record_id}/sync-board-review`. |
+| Backend contract | Added device `board_review_url` / `board_review_token`, detection-record board sync status fields, board payload mapping, and `uncertain -> review` conversion. |
+| Frontend flow | Added device configuration for board writeback URL/token and a record-detail `修正板端结果` workflow with cloud reason input and sync status display. |
+| Production deployment | Deployed backend and frontend to `yunfuwu-prod`, installed `httpx`, ran Alembic migration `20260519_0011`, restarted `uvicorn`, and verified health/new route/frontend bundle. |
+| Reverse tunnel decision | Captured the production route where the board initiates an SSH reverse tunnel and cloud backend calls `http://127.0.0.1:18081/api/v1/review-result` instead of an unreachable board private IP. |
+| Production smoke | Verified device `MP157-DIANPIAN-20260420185013`, record `91 / MP157-20260519-211550`, `review_id=5`, and `board_sync_status=success` with `board_sync_error=null`. |
+| Code-spec memory | Added `board-review-sync.md`, indexed it, updated cross-layer thinking guidance, and left deployment guidelines pointing to the board-review sync contract. |
+| Verification | Fresh checks: backend `python -m pytest tests -q` -> 92 passed; frontend `npm run test` -> 45 passed; frontend `npm run build` passed. |
+
+**Notes**:
+- Routine production commands should continue using SSH alias `yunfuwu-prod`.
+- `devices.board_review_url` is the active sync target; `devices.ip_address` is only metadata for the reverse-tunnel marker.
+- End-to-end proof requires both cloud `board_sync_status=success` and board local history showing the cloud review result.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a59fee1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
