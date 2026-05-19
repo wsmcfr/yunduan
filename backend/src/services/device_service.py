@@ -103,6 +103,8 @@ class DeviceService:
             firmware_version=payload.firmware_version,
             ip_address=payload.ip_address,
             last_seen_at=payload.last_seen_at,
+            board_review_url=payload.board_review_url,
+            board_review_token=payload.board_review_token,
         )
         self.device_repository.create(device)
         self.db.commit()
@@ -136,6 +138,10 @@ class DeviceService:
             device.ip_address = payload.ip_address
         if "last_seen_at" in payload.model_fields_set:
             device.last_seen_at = payload.last_seen_at
+        if "board_review_url" in payload.model_fields_set:
+            device.board_review_url = payload.board_review_url
+        if "board_review_token" in payload.model_fields_set:
+            device.board_review_token = payload.board_review_token
 
         self.device_repository.save(device)
         self.db.commit()

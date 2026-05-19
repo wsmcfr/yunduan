@@ -340,6 +340,170 @@ def ai_review_client(self) -> AIReviewClient:
 
 ---
 
+## Scenario: Cloud Review Result Sync To MP157 Board
+
+### 1. Scope / Trigger
+
+- Trigger: any change touching cloud manual review synchronization to STM32MP157 board history, `ReviewService.sync_board_review(...)`, `POST /api/v1/records/{record_id}/sync-board-review`, board-review device fields, or detection-record board sync status fields.
+- Affected layers: device ORM/config -> detection-record ORM status -> review service -> outbound board HTTP client -> review route schemas -> frontend detail/device screens.
+
+### 2. Signatures
+
+```py
+class Device(Base):
+    board_review_url: str | None
+    board_review_token: str | None
+
+    @property
+    def has_board_review_token(self) -> bool: ...
+
+class DetectionRecord(Base):
+    board_sync_status: str | None
+    board_sync_time: datetime | None
+    board_sync_error: str | None
+    board_last_synced_review_id: int | None
+
+class BoardReviewSyncRequest(BaseModel):
+    decision: DetectionResult
+    cloud_reason: str
+    defect_type: str | None
+    reviewed_at: datetime | None
+
+class BoardReviewSyncResponse(BaseModel):
+    review: ReviewRecordResponse
+    board_sync_status: str
+    board_sync_time: datetime | None
+    board_sync_error: str | None
+
+def map_cloud_result_to_board(decision: DetectionResult) -> str: ...
+
+def sync_board_review(
+    *,
+    company_id: int,
+    record_id: int,
+    reviewer_id: int,
+    reviewer_name: str,
+    payload: BoardReviewSyncRequest,
+) -> BoardReviewSyncResponse: ...
+```
+
+```http
+POST /api/v1/records/{record_id}/sync-board-review
+POST {device.board_review_url}
+X-Board-Token: <device.board_review_token>
+```
+
+Board payload:
+
+```json
+{
+  "record_id": "123",
+  "record_no": "MP157-VIS-01-20260519-143012-0001",
+  "cloud_result": "bad",
+  "cloud_reason": "Cloud review reason.",
+  "operator": "admin",
+  "review_time": "2026-05-19 14:03:10",
+  "source": "cloud"
+}
+```
+
+### 3. Contracts
+
+| Boundary / field | Contract |
+|---|---|
+| Cloud source of truth | Cloud manual review must be saved even when board synchronization fails. Do not roll back the review only because the board is offline or misconfigured. |
+| `cloud_reason` | Required after `.strip()`. Blank text must reject before creating `ReviewRecord` or calling the board. |
+| `DetectionResult.UNCERTAIN` | Must map to board payload `cloud_result="review"`; `good` and `bad` pass through unchanged. |
+| `Device.board_review_token` | May be stored in `devices` for MVP, but must not be returned in normal device list/detail responses. Return `has_board_review_token` instead. |
+| `Device.board_review_url` | Returned to management UI so admins can verify endpoint configuration. |
+| Board HTTP client | Uses backend-side `httpx.post(...)` with a short timeout; the browser must not call the board directly. |
+| `board_sync_status` | Stable values are `success` and `failed` for the MVP response path. `pending` and `not_required` may exist for future workflows. |
+| `board_sync_time` | Latest successful board synchronization time, not the time of every failed retry. |
+| `board_sync_error` | Latest readable failure summary. Never include the board token. |
+| Tenant boundary | Load the detection record by both `company_id` and `record_id` before creating a review or reading device config. |
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| Record missing or outside company | Raise `NotFoundError(code="record_not_found")`; do not create review. |
+| `cloud_reason.strip()` is empty | Raise `BadRequestError(code="board_review_reason_required")`; do not create review and do not call board. |
+| Device has no `board_review_url` | Save cloud review, set `board_sync_status="failed"` and `board_sync_error="当前设备未配置板端回写地址。"` |
+| Device has no `board_review_token` | Save cloud review, set `board_sync_status="failed"` and `board_sync_error="当前设备未配置板端回写密钥。"` |
+| Board returns `401` | Keep cloud review and save readable token error, without logging token. |
+| Board returns `404` | Keep cloud review and save a record-id/record-no mismatch hint. |
+| Board timeout or request error | Keep cloud review and save a retryable connection error. |
+| Board returns non-JSON or `{ ok: false }` | Keep cloud review and save the board-provided message or a stable fallback. |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | User submits a bad cloud decision with a reason; service creates `ReviewRecord`, posts `cloud_result="bad"` to board, and marks `board_sync_status="success"`. |
+| Base | Board URL is not configured yet; user still gets a saved cloud review plus `failed` sync state that the device admin can fix and retry. |
+| Base | User submits `decision=uncertain`; board receives `cloud_result="review"` so local history displays pending review instead of an unsupported enum. |
+| Bad | Route writes only to the board and does not create a cloud review, so `DetectionRecord.effective_result` remains stale. |
+| Bad | Frontend sends token to the browser or calls `http://192.168.../api/v1/review-result` directly, causing CORS, network reachability, and credential exposure problems. |
+
+### 6. Tests Required
+
+- service test asserting success creates one `ReviewRecord`, marks `review_status=reviewed`, posts the exact board payload, and stores `success`
+- service test asserting blank reason raises `board_review_reason_required` and makes zero board calls
+- service test asserting missing board URL saves failed state while preserving the review
+- service test asserting missing token saves failed state and makes zero board calls
+- service test asserting board error preserves the review and stores `board_sync_error`
+- service test asserting `uncertain -> review` mapping
+- device service test asserting create/update persist board review URL/token while response schemas expose only safe token presence
+
+Assertion points:
+
+- cloud review and board sync status are independent persistence concerns
+- board token never appears in response DTOs, logs, or frontend models
+- all queries stay within `company_id`
+- board payload includes both `record_id` and `record_no`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+response = httpx.post(record.device.board_review_url, json=payload)
+if response.status_code >= 400:
+    self.db.rollback()
+    raise IntegrationError(code="board_sync_failed", message="同步板端失败。")
+```
+
+#### Correct
+
+```py
+review = self._create_sync_review(...)
+self.db.commit()
+
+ok, error = self.board_review_client.post_review(...)
+if ok:
+    self._mark_board_sync_success(record=record, review=review)
+else:
+    self._mark_board_sync_failed(record=record, error=error or "板端返回失败。")
+self.db.commit()
+```
+
+#### Wrong
+
+```py
+class DeviceResponse(ORMBaseModel):
+    board_review_token: str | None
+```
+
+#### Correct
+
+```py
+class DeviceResponse(ORMBaseModel):
+    board_review_url: str | None
+    has_board_review_token: bool = False
+```
+
+---
+
 ## Scenario: User Credential and Password Reset Storage
 
 ### 1. Scope / Trigger

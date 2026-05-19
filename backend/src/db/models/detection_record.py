@@ -70,6 +70,14 @@ class DetectionRecord(Base, IdMixin, TimestampMixin):
     detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     storage_last_modified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 云端人工复核同步回板端的最近状态；失败不影响云端最终判定，只用于排障和重试。
+    board_sync_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # 最近一次成功同步到板端的时间。
+    board_sync_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 最近一次同步失败的可读错误摘要，前端可直接展示给操作员。
+    board_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 最近成功同步到板端的复核记录 ID，用于追溯是哪次云端复核被下发。
+    board_last_synced_review_id: Mapped[int | None] = mapped_column(nullable=True)
 
     # 检测记录与零件、设备、文件、审核均形成聚合关系。
     company: Mapped["Company"] = relationship("Company", back_populates="detection_records")

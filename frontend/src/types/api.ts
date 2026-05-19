@@ -7,6 +7,7 @@ export type DeviceStatus = "online" | "offline" | "fault";
 export type DetectionResult = "good" | "bad" | "uncertain";
 export type ReviewStatus = "pending" | "reviewed" | "ai_reserved";
 export type ReviewSource = "manual" | "ai_reserved";
+export type BoardSyncStatus = "not_required" | "pending" | "success" | "failed";
 export type FileKind = "source" | "annotated" | "thumbnail";
 export type StorageProvider = "cos";
 export type AIChatRole = "user" | "assistant";
@@ -480,6 +481,8 @@ export interface DeviceDto {
   firmware_version: string | null;
   ip_address: string | null;
   last_seen_at: string | null;
+  board_review_url: string | null;
+  has_board_review_token: boolean;
   record_count: number;
   image_count: number;
   created_at: string;
@@ -565,6 +568,10 @@ export interface DetectionRecordDto {
   detected_at: string | null;
   uploaded_at: string | null;
   storage_last_modified: string | null;
+  board_sync_status: BoardSyncStatus | null;
+  board_sync_time: string | null;
+  board_sync_error: string | null;
+  board_last_synced_review_id: number | null;
   created_at: string;
   updated_at: string;
   part: PartBriefDto;
@@ -607,6 +614,8 @@ export interface DeviceCreateRequestDto {
   firmware_version: string | null;
   ip_address: string | null;
   last_seen_at: string | null;
+  board_review_url: string | null;
+  board_review_token: string | null;
 }
 
 export interface DeviceUpdateRequestDto {
@@ -617,6 +626,8 @@ export interface DeviceUpdateRequestDto {
   firmware_version?: string | null;
   ip_address?: string | null;
   last_seen_at?: string | null;
+  board_review_url?: string | null;
+  board_review_token?: string | null;
 }
 
 export interface DetectionRecordCreateRequestDto {
@@ -646,6 +657,20 @@ export interface ManualReviewCreateRequestDto {
   defect_type: string | null;
   comment: string | null;
   reviewed_at: string | null;
+}
+
+export interface BoardReviewSyncRequestDto {
+  decision: DetectionResult;
+  cloud_reason: string;
+  defect_type: string | null;
+  reviewed_at: string | null;
+}
+
+export interface BoardReviewSyncResponseDto {
+  review: ReviewRecordDto;
+  board_sync_status: BoardSyncStatus;
+  board_sync_time: string | null;
+  board_sync_error: string | null;
 }
 
 export interface AIReviewRequestDto {

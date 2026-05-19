@@ -79,6 +79,10 @@ describe("ai review utilities", () => {
       detectedAt: "2026-04-20T02:00:02.000Z",
       uploadedAt: "2026-04-20T02:00:03.000Z",
       storageLastModified: null,
+      boardSyncStatus: null,
+      boardSyncTime: null,
+      boardSyncError: null,
+      boardLastSyncedReviewId: null,
       createdAt: "2026-04-20T02:00:03.000Z",
       updatedAt: "2026-04-20T02:00:03.000Z",
       part: {

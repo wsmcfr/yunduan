@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session
 
 from src.api.deps import get_current_company_user, get_db
 from src.db.models.user import User
-from src.schemas.review import ManualReviewCreateRequest, ReviewListResponse, ReviewRecordResponse
+from src.schemas.review import (
+    BoardReviewSyncRequest,
+    BoardReviewSyncResponse,
+    ManualReviewCreateRequest,
+    ReviewListResponse,
+    ReviewRecordResponse,
+)
 from src.services.review_service import ReviewService
 
 router = APIRouter()
@@ -29,6 +35,24 @@ def create_manual_review(
         payload=payload,
     )
     return ReviewRecordResponse.model_validate(review)
+
+
+@router.post("/records/{record_id}/sync-board-review", response_model=BoardReviewSyncResponse)
+def sync_board_review(
+    record_id: int,
+    payload: BoardReviewSyncRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_company_user),
+) -> BoardReviewSyncResponse:
+    """提交云端复核结果，并代理同步到 STM32MP157 板端历史。"""
+
+    return ReviewService(db).sync_board_review(
+        company_id=current_user.company_id or 0,
+        record_id=record_id,
+        reviewer_id=current_user.id,
+        reviewer_name=current_user.display_name or current_user.username,
+        payload=payload,
+    )
 
 
 @router.get("/records/{record_id}/reviews", response_model=ReviewListResponse)

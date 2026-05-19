@@ -16,6 +16,8 @@ interface DeviceFormValue {
   firmwareVersion: string;
   ipAddress: string;
   lastSeenAt: string;
+  boardReviewUrl: string;
+  boardReviewToken: string;
 }
 
 const props = withDefaults(
@@ -83,6 +85,8 @@ function createEmptyForm(): DeviceFormValue {
     firmwareVersion: "",
     ipAddress: "",
     lastSeenAt: "",
+    boardReviewUrl: "",
+    boardReviewToken: "",
   };
 }
 
@@ -98,6 +102,8 @@ function createFormFromModel(model: DeviceModel): DeviceFormValue {
     firmwareVersion: model.firmwareVersion ?? "",
     ipAddress: model.ipAddress ?? "",
     lastSeenAt: formatDateTimeInputValue(model.lastSeenAt),
+    boardReviewUrl: model.boardReviewUrl ?? "",
+    boardReviewToken: "",
   };
 }
 
@@ -135,6 +141,8 @@ async function submitForm(): Promise<void> {
     firmware_version: normalizeOptionalText(formState.firmwareVersion),
     ip_address: normalizeOptionalText(formState.ipAddress),
     last_seen_at: normalizeOptionalDateTime(formState.lastSeenAt),
+    board_review_url: normalizeOptionalText(formState.boardReviewUrl),
+    board_review_token: normalizeOptionalText(formState.boardReviewToken),
   };
 
   if (mode.value === "create") {
@@ -143,7 +151,14 @@ async function submitForm(): Promise<void> {
     return;
   }
 
-  const updatePayload: DeviceUpdateRequestDto = payloadBase;
+  /**
+   * 编辑设备时，密钥输入框留空表示保留后端已有密钥。
+   * 这样管理员只修改名称、IP 或回写地址时，不会误把已配置的板端 token 清空。
+   */
+  const updatePayload: DeviceUpdateRequestDto = {
+    ...payloadBase,
+    board_review_token: normalizeOptionalText(formState.boardReviewToken) ?? undefined,
+  };
   emit("submit", updatePayload);
 }
 
@@ -238,6 +253,22 @@ watch(
           format="YYYY-MM-DD HH:mm:ss"
           placeholder="可选，留空表示暂未记录"
           style="width: 100%"
+        />
+      </ElFormItem>
+
+      <ElFormItem label="板端回写地址">
+        <ElInput
+          v-model="formState.boardReviewUrl"
+          placeholder="例如 http://192.168.1.250:18080/api/v1/review-result"
+        />
+      </ElFormItem>
+
+      <ElFormItem label="板端回写密钥">
+        <ElInput
+          v-model="formState.boardReviewToken"
+          type="password"
+          show-password
+          :placeholder="mode === 'create' ? '与开发板 BOARD_REVIEW_TOKEN 保持一致' : '留空表示不修改已有密钥'"
         />
       </ElFormItem>
     </ElForm>

@@ -162,6 +162,20 @@ exit 1
 
 ---
 
+## Scenario: STM32MP157 Board Review Reverse SSH Tunnel Reference
+
+The detailed executable contract for cloud review writeback, device `board_review_url` / `board_review_token`, and the production reverse-tunnel route lives in [Board Review Sync](./board-review-sync.md).
+
+Deployment-specific reminders:
+
+- use `yunfuwu-prod` for all production checks
+- verify the cloud loopback listener with `ssh yunfuwu-prod 'ss -ltnp | grep ":18081"'`
+- `devices.board_review_url` must point to the endpoint reachable from the cloud backend process, for example `http://127.0.0.1:18081/api/v1/review-result`
+- changing only SSH tunnel authorization or device DB config does not require restarting `uvicorn`
+- full end-to-end verification requires both cloud `board_sync_status='success'` and board local history showing the cloud review result
+
+---
+
 ## Scenario: Production COS Delete Authorization Diagnosis
 
 ### 1. Scope / Trigger

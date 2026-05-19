@@ -254,6 +254,26 @@ onMounted(() => {
             {{ row.imageCount }}
           </template>
         </ElTableColumn>
+        <ElTableColumn label="板端回写" min-width="180">
+          <template #default="{ row }">
+            <div class="board-sync-cell">
+              <ElTag
+                :type="row.boardReviewUrl ? 'success' : 'info'"
+                effect="dark"
+                round
+              >
+                {{ row.boardReviewUrl ? "地址已配置" : "未配置地址" }}
+              </ElTag>
+              <ElTag
+                :type="row.hasBoardReviewToken ? 'success' : 'info'"
+                effect="dark"
+                round
+              >
+                {{ row.hasBoardReviewToken ? "密钥已配置" : "未配置密钥" }}
+              </ElTag>
+            </div>
+          </template>
+        </ElTableColumn>
         <ElTableColumn label="最近心跳" min-width="180">
           <template #default="{ row }">
             {{ formatDateTime(row.lastSeenAt) }}
@@ -321,11 +341,18 @@ onMounted(() => {
 
 .toolbar-actions,
 .table-section__header,
-.table-section__footer {
+.table-section__footer,
+.board-sync-cell {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
+}
+
+.board-sync-cell {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .table-section__meta {

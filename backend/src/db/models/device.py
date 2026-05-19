@@ -44,6 +44,10 @@ class Device(Base, IdMixin, TimestampMixin):
     firmware_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 板端复核结果回写接口的完整 URL，由云端后端调用，浏览器端不直接访问开发板。
+    board_review_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 板端接口鉴权密钥只允许后端读取和写入，普通响应不得返回明文。
+    board_review_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     company: Mapped["Company"] = relationship("Company", back_populates="devices")
     # 一个设备可以产生多条检测记录。
@@ -51,3 +55,9 @@ class Device(Base, IdMixin, TimestampMixin):
         "DetectionRecord",
         back_populates="device",
     )
+
+    @property
+    def has_board_review_token(self) -> bool:
+        """返回当前设备是否已配置板端回写密钥。"""
+
+        return bool(self.board_review_token)

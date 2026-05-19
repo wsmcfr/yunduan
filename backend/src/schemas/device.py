@@ -20,6 +20,8 @@ class DeviceCreateRequest(BaseModel):
     firmware_version: str | None = Field(default=None, max_length=64)
     ip_address: str | None = Field(default=None, max_length=64)
     last_seen_at: datetime | None = None
+    board_review_url: str | None = Field(default=None, max_length=255)
+    board_review_token: str | None = Field(default=None, max_length=255)
 
 
 class DeviceUpdateRequest(BaseModel):
@@ -32,6 +34,8 @@ class DeviceUpdateRequest(BaseModel):
     firmware_version: str | None = Field(default=None, max_length=64)
     ip_address: str | None = Field(default=None, max_length=64)
     last_seen_at: datetime | None = None
+    board_review_url: str | None = Field(default=None, max_length=255)
+    board_review_token: str | None = Field(default=None, max_length=255)
 
 
 class DeviceBrief(ORMBaseModel):
@@ -53,6 +57,8 @@ class DeviceResponse(ORMBaseModel):
     firmware_version: str | None
     ip_address: str | None
     last_seen_at: datetime | None
+    board_review_url: str | None
+    has_board_review_token: bool = False
     record_count: int = 0
     image_count: int = 0
     created_at: datetime

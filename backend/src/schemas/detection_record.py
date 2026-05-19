@@ -63,6 +63,10 @@ class DetectionRecordListItem(ORMBaseModel):
     detected_at: datetime | None
     uploaded_at: datetime | None
     storage_last_modified: datetime | None
+    board_sync_status: str | None
+    board_sync_time: datetime | None
+    board_sync_error: str | None
+    board_last_synced_review_id: int | None
     created_at: datetime
     updated_at: datetime
     part: PartBrief

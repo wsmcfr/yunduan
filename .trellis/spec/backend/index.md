@@ -27,6 +27,7 @@ Read these files before changing backend code:
 - [Logging Guidelines](./logging-guidelines.md): when adding observability or background tasks
 - [Database Guidelines](./database-guidelines.md): when touching models, queries, or migrations
 - [Deployment Guidelines](./deployment-guidelines.md): when touching production update flow, server paths, restart procedure, or runtime deployment assumptions
+- [Board Review Sync](./board-review-sync.md): when touching device board-review URL/token fields, `sync-board-review`, board writeback client errors, or reverse-tunnel production assumptions
 
 If a change also affects frontend payloads or storage contracts, read:
 
@@ -45,6 +46,7 @@ If a change also affects frontend payloads or storage contracts, read:
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | Bootstrap filled |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | Bootstrap filled |
 | [Deployment Guidelines](./deployment-guidelines.md) | Production server alias, paths, update steps, restart and verification contract | Bootstrap filled |
+| [Board Review Sync](./board-review-sync.md) | Cloud review correction writeback to STM32MP157 board history, device URL/token fields, errors, and NAT-safe reverse tunnel contract | Filled |
 
 ---
 

@@ -20,6 +20,15 @@ class ManualReviewCreateRequest(BaseModel):
     reviewed_at: datetime | None = None
 
 
+class BoardReviewSyncRequest(BaseModel):
+    """云端复核结果同步板端请求体。"""
+
+    decision: DetectionResult
+    cloud_reason: str = Field(min_length=1, max_length=2000)
+    defect_type: str | None = Field(default=None, max_length=128)
+    reviewed_at: datetime | None = None
+
+
 class ReviewRecordResponse(ORMBaseModel):
     """审核记录响应体。"""
 
@@ -39,6 +48,15 @@ class ReviewListResponse(BaseModel):
     """审核记录列表响应体。"""
 
     items: list[ReviewRecordResponse]
+
+
+class BoardReviewSyncResponse(BaseModel):
+    """云端复核结果同步板端响应体。"""
+
+    review: ReviewRecordResponse
+    board_sync_status: str
+    board_sync_time: datetime | None
+    board_sync_error: str | None
 
 
 class AIReviewRequest(BaseModel):

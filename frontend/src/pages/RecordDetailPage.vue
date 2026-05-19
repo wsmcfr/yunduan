@@ -9,10 +9,10 @@ import AiReviewChatDialog from "@/features/review/AiReviewChatDialog.vue";
 import ManualReviewFormCard from "@/features/review/ManualReviewFormCard.vue";
 import { flattenStructuredContext } from "@/features/review/recordContext";
 import { fetchRecordDetail } from "@/services/api/records";
-import { createManualReview } from "@/services/api/reviews";
+import { createManualReview, syncBoardReview } from "@/services/api/reviews";
 import { mapDetectionRecordDetailDto } from "@/services/mappers/commonMappers";
 import { useAuthStore } from "@/stores/auth";
-import type { ManualReviewCreateRequestDto } from "@/types/api";
+import type { BoardSyncStatus, DetectionResult, ManualReviewCreateRequestDto } from "@/types/api";
 import type { DetectionRecordModel } from "@/types/models";
 import { buildAiPreviewUrl, getAiFileKindLabel, sortAiDisplayFiles } from "@/utils/aiReview";
 import { formatConfidence, formatDateTime } from "@/utils/format";
@@ -37,6 +37,10 @@ const route = useRoute();
 const authStore = useAuthStore();
 const loading = ref(false);
 const reviewSubmitting = ref(false);
+const boardSyncSubmitting = ref(false);
+const boardSyncDialogVisible = ref(false);
+const boardSyncDecision = ref<DetectionResult>("bad");
+const boardSyncReason = ref("");
 const error = ref("");
 const record = ref<DetectionRecordModel | null>(null);
 const aiDialogVisible = ref(false);
@@ -57,6 +61,30 @@ const shouldReview = computed(
  * 当前登录账号是否允许发起 AI 分析。
  */
 const canUseAiAnalysis = computed(() => authStore.currentUser?.canUseAiAnalysis ?? false);
+
+/**
+ * 板端同步状态展示配置。
+ */
+const boardSyncDisplay = computed(() => {
+  const status = record.value?.boardSyncStatus;
+  const displayMap: Record<BoardSyncStatus, { label: string; type: "success" | "warning" | "danger" | "info" }> = {
+    not_required: { label: "无需同步", type: "info" },
+    pending: { label: "待同步", type: "warning" },
+    success: { label: "同步成功", type: "success" },
+    failed: { label: "同步失败", type: "danger" },
+  };
+  return status ? displayMap[status] : { label: "未同步", type: "info" as const };
+});
+
+/**
+ * 只有云端最终结果与 MP 初检结果不一致时，才突出提示需要修正板端。
+ */
+const shouldShowBoardCorrectionHint = computed(() => {
+  if (!record.value) {
+    return false;
+  }
+  return record.value.effectiveResult !== record.value.result;
+});
 
 /**
  * 当前记录中可直接预览的图片对象。
@@ -155,6 +183,57 @@ async function handleManualReviewSubmit(payload: ManualReviewCreateRequestDto): 
 }
 
 /**
+ * 打开板端修正弹窗。
+ */
+function openBoardSyncDialog(): void {
+  if (!record.value) {
+    return;
+  }
+
+  boardSyncDecision.value = record.value.effectiveResult;
+  boardSyncReason.value = "";
+  boardSyncDialogVisible.value = true;
+}
+
+/**
+ * 提交云端复核并同步板端结果。
+ */
+async function submitBoardSync(): Promise<void> {
+  if (!record.value) {
+    return;
+  }
+
+  const reason = boardSyncReason.value.trim();
+  if (!reason) {
+    ElMessage.error("请填写修正原因");
+    return;
+  }
+
+  boardSyncSubmitting.value = true;
+
+  try {
+    const response = await syncBoardReview(record.value.id, {
+      decision: boardSyncDecision.value,
+      cloud_reason: reason,
+      defect_type: record.value.defectType,
+      reviewed_at: new Date().toISOString(),
+    });
+    if (response.board_sync_status === "success") {
+      ElMessage.success("已同步板端结果");
+    } else {
+      ElMessage.warning(response.board_sync_error ?? "云端复核已保存，但板端同步失败");
+    }
+    boardSyncDialogVisible.value = false;
+    await loadRecordDetail();
+  } catch (caughtError) {
+    const message = caughtError instanceof Error ? caughtError.message : "同步板端失败";
+    ElMessage.error(message);
+  } finally {
+    boardSyncSubmitting.value = false;
+  }
+}
+
+/**
  * 打开 AI 对话弹窗。
  */
 function openAiDialog(): void {
@@ -247,6 +326,19 @@ watch(
           </ElDescriptionsItem>
           <ElDescriptionsItem label="对象最后修改">
             {{ formatDateTime(record.storageLastModified) }}
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="板端同步状态">
+            <div class="board-sync-status">
+              <ElTag :type="boardSyncDisplay.type" effect="dark" round>
+                {{ boardSyncDisplay.label }}
+              </ElTag>
+              <span v-if="record.boardSyncTime" class="muted-text">
+                {{ formatDateTime(record.boardSyncTime) }}
+              </span>
+            </div>
+          </ElDescriptionsItem>
+          <ElDescriptionsItem label="板端同步错误">
+            {{ record.boardSyncError ?? "无" }}
           </ElDescriptionsItem>
         </ElDescriptions>
 
@@ -430,8 +522,34 @@ watch(
               >
                 打开 AI 对话分析
               </ElButton>
+              <ElButton
+                type="warning"
+                plain
+                :loading="boardSyncSubmitting"
+                @click="openBoardSyncDialog"
+              >
+                修正板端结果
+              </ElButton>
               <ElButton @click="loadRecordDetail" :loading="loading">刷新详情</ElButton>
             </div>
+
+            <ElAlert
+              v-if="shouldShowBoardCorrectionHint"
+              type="warning"
+              show-icon
+              :closable="false"
+              title="云端最终结论与 MP 初检结果不一致"
+              description="如需让开发板历史记录显示云端最终结论，请使用“修正板端结果”并填写原因。"
+            />
+
+            <ElAlert
+              v-if="record.boardSyncStatus === 'failed' && record.boardSyncError"
+              type="error"
+              show-icon
+              :closable="false"
+              title="最近一次板端同步失败"
+              :description="record.boardSyncError"
+            />
           </div>
 
           <ManualReviewFormCard
@@ -496,6 +614,43 @@ watch(
       v-model="aiDialogVisible"
       :record="record"
     />
+
+    <ElDialog
+      v-model="boardSyncDialogVisible"
+      title="修正板端结果"
+      width="520px"
+      destroy-on-close
+    >
+      <ElForm label-position="top">
+        <ElFormItem label="云端最终结论">
+          <ElRadioGroup v-model="boardSyncDecision">
+            <ElRadioButton value="good">良品</ElRadioButton>
+            <ElRadioButton value="bad">坏品</ElRadioButton>
+            <ElRadioButton value="uncertain">待复核</ElRadioButton>
+          </ElRadioGroup>
+        </ElFormItem>
+
+        <ElFormItem label="修正原因" required>
+          <ElInput
+            v-model="boardSyncReason"
+            type="textarea"
+            :rows="5"
+            maxlength="2000"
+            show-word-limit
+            placeholder="例如：云端复核发现边缘划痕，板端原判良品需要修正。"
+          />
+        </ElFormItem>
+      </ElForm>
+
+      <template #footer>
+        <div class="detail-dialog-footer">
+          <ElButton @click="boardSyncDialogVisible = false">取消</ElButton>
+          <ElButton type="primary" :loading="boardSyncSubmitting" @click="submitBoardSync">
+            确认同步
+          </ElButton>
+        </div>
+      </template>
+    </ElDialog>
   </div>
 </template>
 
@@ -519,7 +674,9 @@ watch(
 .detail-section__header,
 .detail-section__header-tags,
 .detail-preview__meta-head,
-.detail-review-workspace__assistant-actions {
+.detail-review-workspace__assistant-actions,
+.board-sync-status,
+.detail-dialog-footer {
   display: flex;
   gap: 14px;
 }
@@ -531,7 +688,8 @@ watch(
 }
 
 .detail-section__header-tags,
-.detail-review-workspace__assistant-tags {
+.detail-review-workspace__assistant-tags,
+.board-sync-status {
   flex-wrap: wrap;
 }
 
@@ -636,6 +794,14 @@ watch(
   line-height: 1.8;
 }
 
+.board-sync-status {
+  align-items: center;
+}
+
+.detail-dialog-footer {
+  justify-content: flex-end;
+}
+
 .detail-preview__print-list {
   display: none;
 }
@@ -659,7 +825,8 @@ watch(
 @media (max-width: 900px) {
   .detail-section__header,
   .detail-preview__meta-head,
-  .detail-review-workspace__assistant-actions {
+  .detail-review-workspace__assistant-actions,
+  .detail-dialog-footer {
     flex-direction: column;
     align-items: stretch;
   }

@@ -71,6 +71,19 @@ For each boundary:
 
 **Good**: Each layer only knows its neighbors
 
+### Mistake 4: Treating Board LAN Addresses As Cloud-Reachable Callback URLs
+
+**Bad**: Setting a device writeback URL to `http://192.168.1.250:18080/...` because the browser or developer VM can reach the board.
+
+**Good**: Validate reachability from the actual caller process. For `sync-board-review`, the caller is the cloud backend, so the URL must be reachable from the production cloud host. When the board is behind LAN NAT or 4G carrier NAT, use a board-initiated reverse tunnel, VPN, or other cloud-reachable route.
+
+Required thinking:
+
+- who initiates the HTTP callback: browser, backend, VM, or board?
+- what does `127.0.0.1` mean at that layer?
+- can the public cloud route to the board IP, or is it private/carrier-NAT?
+- did validation run from the production cloud server itself?
+
 ---
 
 ## Checklist for Cross-Layer Features
@@ -83,6 +96,8 @@ Before implementation:
 - [ ] Decided where validation happens
 - [ ] Verified the final mounted backend path after all router prefixes are applied
 - [ ] Verified each event timestamp means a different lifecycle step, not the same moment with different names
+- [ ] For device callback/writeback URLs, verified the URL is reachable from the cloud backend process, not only from the browser or board LAN
+- [ ] For NAT/4G boards, verified the reverse tunnel/VPN/public route exists before saving the device callback URL
 
 After implementation:
 
@@ -92,6 +107,7 @@ After implementation:
 - [ ] For browser -> backend -> COS flows, verified whether the failure came from browser CORS or backend-side COS SDK authorization before changing console settings
 - [ ] Verified the first SSE frame can be serialized before the browser waits on streaming UI initialization
 - [ ] Verified approval-flow features allow only one pending snapshot per entity and clear encrypted pending secrets on terminal states such as approve/reject
+- [ ] For board writeback, verified a cloud-server-local request reaches the board service and the board-side history changes
 
 ---
 

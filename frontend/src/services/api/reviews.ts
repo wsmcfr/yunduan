@@ -1,4 +1,9 @@
-import type { ManualReviewCreateRequestDto, ReviewRecordDto } from "@/types/api";
+import type {
+  BoardReviewSyncRequestDto,
+  BoardReviewSyncResponseDto,
+  ManualReviewCreateRequestDto,
+  ReviewRecordDto,
+} from "@/types/api";
 
 import { apiRequest } from "./client";
 
@@ -14,4 +19,20 @@ export function createManualReview(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+/**
+ * 提交云端复核结果，并由后端代理同步到 STM32MP157 板端历史。
+ */
+export function syncBoardReview(
+  recordId: number,
+  payload: BoardReviewSyncRequestDto,
+): Promise<BoardReviewSyncResponseDto> {
+  return apiRequest<BoardReviewSyncResponseDto>(
+    `/api/v1/records/${recordId}/sync-board-review`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }

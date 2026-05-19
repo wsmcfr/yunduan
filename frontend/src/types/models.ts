@@ -9,6 +9,7 @@ import type {
   DeviceStatus,
   DeviceType,
   FileKind,
+  BoardSyncStatus,
   PasswordChangeRequestStatus,
   PasswordChangeRequestType,
   ReviewSource,
@@ -299,6 +300,8 @@ export interface DeviceModel {
   firmwareVersion: string | null;
   ipAddress: string | null;
   lastSeenAt: string | null;
+  boardReviewUrl: string | null;
+  hasBoardReviewToken: boolean;
   recordCount: number;
   imageCount: number;
   createdAt: string;
@@ -471,6 +474,10 @@ export interface DetectionRecordModel {
   detectedAt: string | null;
   uploadedAt: string | null;
   storageLastModified: string | null;
+  boardSyncStatus: BoardSyncStatus | null;
+  boardSyncTime: string | null;
+  boardSyncError: string | null;
+  boardLastSyncedReviewId: number | null;
   createdAt: string;
   updatedAt: string;
   part: {

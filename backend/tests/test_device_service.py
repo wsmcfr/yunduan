@@ -326,6 +326,41 @@ class DeviceServiceTestCase(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, "device_type_must_be_mp157")
 
+    def test_create_and_update_device_persists_board_review_config(self) -> None:
+        """设备创建和更新时，应保存板端复核回写地址和密钥配置。"""
+
+        create_payload = DeviceCreateRequest(
+            device_code="MP157-BOARD-CONFIG-01",
+            name="板端回写配置主控",
+            device_type=DeviceType.MP157,
+            status=DeviceStatus.ONLINE,
+            firmware_version=None,
+            ip_address="192.168.1.250",
+            last_seen_at=None,
+            board_review_url="http://192.168.1.250:18080/api/v1/review-result",
+            board_review_token="initial-token",
+        )
+
+        device = self.service.create_device(company_id=self.company.id, payload=create_payload)
+
+        self.assertEqual(device.board_review_url, "http://192.168.1.250:18080/api/v1/review-result")
+        self.assertEqual(device.board_review_token, "initial-token")
+        self.assertTrue(device.has_board_review_token)
+
+        update_payload = DeviceUpdateRequest(
+            board_review_url="http://192.168.1.251:18080/api/v1/review-result",
+            board_review_token="updated-token",
+        )
+        updated_device = self.service.update_device(
+            company_id=self.company.id,
+            device_id=device.id,
+            payload=update_payload,
+        )
+
+        self.assertEqual(updated_device.board_review_url, "http://192.168.1.251:18080/api/v1/review-result")
+        self.assertEqual(updated_device.board_review_token, "updated-token")
+        self.assertTrue(updated_device.has_board_review_token)
+
     def test_update_device_rejects_non_mp157_type(self) -> None:
         """编辑设备时也不能把 MP157 主控改成 F4、网关或其他类型。"""
 
