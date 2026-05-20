@@ -12,3 +12,5 @@ frontend/components.d.ts
 .trellis/tasks/
 output/
 ziliao/
+.playwright-cli/
+.tmp/
