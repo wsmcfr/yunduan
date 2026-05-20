@@ -437,8 +437,8 @@ currentUser.value = mapUserProfileDto(response.user);
 
 ### 1. Scope / Trigger
 
-- Trigger: any change to `AiReviewChatDialog`, streamed AI chat state, placeholder assistant messages, or SSE delta application logic
-- Affected layers: dialog local state -> SSE event handlers -> rendered message list
+- Trigger: any change to `AiReviewChatDialog`, streamed AI chat state, runtime model selection state, placeholder assistant messages, or SSE delta application logic
+- Affected layers: dialog local state -> runtime model selector -> SSE event handlers -> rendered message list
 
 ### 2. Signatures
 
@@ -456,6 +456,8 @@ function createChatMessage(
   role: AIChatMessage["role"],
   content: string,
 ): AIChatMessage;
+
+async function sendQuestion(): Promise<void>;
 ```
 
 ### 3. Contracts
@@ -467,12 +469,15 @@ function createChatMessage(
 | Placeholder assistant message | Must be inserted before the request starts so deltas always have a stable write target |
 | Active streaming marker | Must track the assistant message by `localId`, not by array index or timestamp |
 | History sent to backend | Must strip frontend-only fields and only send `role` + `content` |
+| Runtime model gate | The dialog must require one enabled runtime model before `sendQuestion()` starts the SSE request |
 
 Additional rules:
 
 - the dialog may create a user message and an assistant placeholder in the same millisecond
 - because of that, `createdAt` is not unique enough for stream patching
 - `onDelta` and `onDone` must only mutate the assistant placeholder that belongs to the active request
+- the user can open the dialog before the model options finish loading, but the send action must stay disabled until a concrete model id is selected
+- record detail chat and statistics AI must use the same model-selection rule; a reserved/no-model answer is not a valid replacement for an operator-triggered AI request
 
 ### 4. Validation & Error Matrix
 
@@ -482,14 +487,17 @@ Additional rules:
 | User switches record or closes the dialog mid-stream | Old deltas keep writing into a stale dialog | Abort the active stream and clear the active assistant message id |
 | Message list is keyed by array index only | Re-rendering can patch or animate the wrong row | Key rendered rows by `localId` |
 | Frontend-only `localId` leaks into API history payload | Backend receives unsupported fields | Send only the API contract fields |
+| No runtime model is selected | User can trigger an AI request that falls back to a reserved/no-model response or an unexpected provider | Block the send action, show the existing model-selection warning, and do not call the SSE API |
 
 ### 5. Good / Base / Bad Cases
 
 | Case | Example |
 |---|---|
 | Good | The user sends a question, the assistant placeholder is created with its own `localId`, and every delta appends only to that assistant bubble |
+| Good | The user has selected an enabled runtime model, so `sendQuestion()` includes the selected model profile id and starts the streamed `/ai-chat/stream` request |
 | Base | The stream is aborted because the dialog closes; the active message id is cleared and no stale delta is applied later |
 | Bad | `createdAt` is reused as the message key, two messages collide in the same millisecond, and the AI answer is appended into the user question bubble |
+| Bad | The dialog lets the user send a question with `selectedModelId === null`; the backend returns a reserved answer or picks an implicit model, making AI behavior differ from the statistics page |
 
 ### 6. Tests Required
 
@@ -497,12 +505,15 @@ Additional rules:
 - dialog test asserting same-millisecond user and assistant timestamps do not corrupt each other
 - dialog test asserting abort clears the active stream marker
 - API payload test asserting history sent to the backend contains `role` and `content` only
+- dialog/composable test asserting no SSE request is made when no enabled runtime model is selected
+- dialog/composable test asserting the selected runtime model id is included in the AI chat request payload
 
 Assertion points:
 
 - rendered row keys are stable across streaming updates
 - assistant placeholder ownership survives rapid sends
 - frontend-only message metadata never crosses the API boundary
+- model selection is a precondition for starting record-detail AI chat, matching the statistics AI workspace
 
 ### 7. Wrong vs Correct
 
@@ -526,14 +537,39 @@ messages.value = messages.value.map((item) =>
 );
 ```
 
+#### Wrong
+
+```ts
+await streamAiChat(record.id, {
+  question,
+  history,
+  model_profile_id: selectedModelId.value,
+});
+```
+
+#### Correct
+
+```ts
+if (selectedModelId.value === null) {
+  aiError.value = "请先选择一个已启用的模型配置。";
+  return;
+}
+
+await streamAiChat(record.id, {
+  question,
+  history,
+  model_profile_id: selectedModelId.value,
+});
+```
+
 ---
 
 ## Scenario: Statistics AI Workspace Message Ownership
 
 ### 1. Scope / Trigger
 
-- Trigger: any change to `useStatisticsOverview`, the statistics AI analysis panel in `StatisticsPage.vue`, follow-up question rendering, or statistics PDF export snapshot building
-- Affected layers: statistics composable state -> statistics page analysis body / follow-up conversation panels -> export payload mapping
+- Trigger: any change to `useStatisticsOverview`, the statistics AI analysis panel in `StatisticsPage.vue`, runtime model selection state, follow-up question rendering, or statistics PDF export snapshot building
+- Affected layers: statistics composable state -> runtime model selector -> statistics page analysis body / follow-up conversation panels -> export payload mapping
 
 ### 2. Signatures
 
@@ -553,6 +589,7 @@ const visibleAiMessages = computed<AIChatMessage[]>(() => {
 ```ts
 async function runAiAnalysis(): Promise<void>;
 async function submitAiQuestion(): Promise<void>;
+function ensureRuntimeModelSelected(): boolean;
 function resolveExportConversationMessages(): AIChatMessage[];
 function buildExportConversationSnapshot(): StatisticsExportConversationMessageDto[];
 ```
@@ -565,6 +602,7 @@ function buildExportConversationSnapshot(): StatisticsExportConversationMessageD
 | Full statistics AI timeline | `aiMessages` | Keeps the full message history for the current statistics window, including the assistant placeholder created by `runAiAnalysis()` before any follow-up question exists |
 | Rendered follow-up conversation | `visibleAiMessages` | Starts from the first user message only, so the standalone batch analysis text is not rendered again inside the follow-up area |
 | Follow-up streaming placeholder | `visibleAiMessages` + `aiMessages` | After the first follow-up question exists, empty assistant placeholder rows must stay visible so the UI can show "思考中" / streaming states |
+| Runtime model gate | `selectedModelId` + `ensureRuntimeModelSelected()` | `runAiAnalysis()` and `submitAiQuestion()` must require one enabled runtime model before starting any SSE request |
 | Export conversation payload | `resolveExportConversationMessages()` / `buildExportConversationSnapshot()` | Exported follow-up history must start from the first user message; the standalone batch analysis answer is exported separately via cached AI analysis fields |
 
 Additional rules:
@@ -573,6 +611,8 @@ Additional rules:
 - statistics follow-up UI must bind to `visibleAiMessages`, not directly to `aiMessages`
 - `aiAnalysis.answer` must not be copied into `visibleAiMessages`, otherwise the first analysis body will appear twice on the page
 - statistics PDF export may include both `cached_ai_answer` and `cached_ai_conversation`, but they serve different purposes and must not be merged into one display list
+- a null `selectedModelId` means no enabled runtime model has been chosen; the analysis and follow-up buttons must stay disabled and the composable must not call `streamStatisticsAiAnalysis(...)` or `streamStatisticsAiChat(...)`
+- statistics AI and record-detail AI must share the same user-visible rule: no selected model, no AI request
 
 ### 4. Validation & Error Matrix
 
@@ -583,14 +623,17 @@ Additional rules:
 | Export uses the full `aiMessages` array | PDF duplicates the first analysis body inside the follow-up transcript | Export conversation starts from the first user message, while cached analysis answer is passed separately |
 | First follow-up is sent and the assistant placeholder is still empty | User cannot see that the follow-up request is running | Keep the assistant placeholder in `visibleAiMessages` so the UI can show the streaming state |
 | Only follow-up messages exist as stable AI content during export | PDF loses all AI content because there is no final `aiAnalysis.answer` snapshot | Fallback export logic may promote the first assistant follow-up reply into the cached AI snapshot, while conversation payload still follows the first-user-message rule |
+| `selectedModelId === null` and the user clicks analysis or follow-up | The page calls the backend without an explicit model and may receive a reserved answer instead of real AI output | Stop in `ensureRuntimeModelSelected()`, set the model-selection error text, and assert the SSE function is not called |
 
 ### 5. Good / Base / Bad Cases
 
 | Case | Example |
 |---|---|
 | Good | `StatisticsPage.vue` shows `aiAnalysis.answer` in the analysis body and renders only `visibleAiMessages` inside the follow-up transcript |
+| Good | The analysis and follow-up actions are enabled only after `selectedModelId` points to an enabled runtime model, and every request payload includes that model profile id |
 | Base | The user generates a batch analysis but never asks a follow-up question, so the follow-up panel stays in a compact empty state |
 | Bad | The first assistant analysis reply is inserted directly into the follow-up transcript, causing the page to show AI analysis text before any user follow-up exists |
+| Bad | Statistics AI allows `selectedModelId === null`, calls the stream API, and receives a no-model placeholder while record detail blocks the same action |
 
 ### 6. Tests Required
 
@@ -598,12 +641,16 @@ Additional rules:
 - composable test asserting `visibleAiMessages` keeps the empty assistant placeholder after the first follow-up user message is added
 - composable/export test asserting `buildExportConversationSnapshot()` excludes assistant-only prelude messages and starts at the first user question
 - page test asserting the statistics analysis body and the follow-up transcript render independently
+- composable test asserting `runAiAnalysis()` does not call `streamStatisticsAiAnalysis(...)` when no model is selected
+- composable test asserting `submitAiQuestion()` does not call `streamStatisticsAiChat(...)` when no model is selected
+- page test or state assertion that the analysis and follow-up controls are disabled while `selectedModelId === null`
 
 Assertion points:
 
 - first-round analysis and follow-up conversation have separate ownership
 - the UI keeps follow-up streaming affordances without leaking the main analysis body into the transcript
 - PDF/export payload uses separate fields for summary analysis and follow-up history
+- both statistics AI entry points and record-detail chat enforce explicit model selection before calling a streaming endpoint
 
 ### 7. Wrong vs Correct
 
@@ -623,6 +670,28 @@ const visibleAiMessages = computed<AIChatMessage[]>(() => {
   }
 
   return aiMessages.value.slice(firstUserMessageIndex);
+});
+```
+
+#### Wrong
+
+```ts
+await streamStatisticsAiAnalysis({
+  ...buildAiScopePayload(),
+  model_profile_id: selectedModelId.value,
+});
+```
+
+#### Correct
+
+```ts
+if (!ensureRuntimeModelSelected()) {
+  return;
+}
+
+await streamStatisticsAiAnalysis({
+  ...buildAiScopePayload(),
+  model_profile_id: selectedModelId.value,
 });
 ```
 

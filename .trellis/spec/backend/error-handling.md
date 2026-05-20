@@ -101,6 +101,7 @@ def build_sse_error_payload(error: AppError) -> dict[str, Any]: ...
 ```http
 POST /api/v1/records/{record_id}/ai-chat/stream
 POST /api/v1/statistics/ai-analysis/stream
+POST /api/v1/statistics/ai-chat/stream
 ```
 
 ```text
@@ -125,6 +126,7 @@ data: {"status_code":500,"code":"...","message":"...","details":{...}}
 | `delta` event | Must carry incremental assistant text only |
 | `done` event | Must carry the final assembled answer and any final metadata snapshot |
 | `error` event | Must be emitted for both mapped domain errors and unhandled generator failures |
+| Upstream AI streaming | When the selected runtime model supports streaming, the integration layer must send the provider request with `stream=True`; do not convert a streamed UI endpoint into a full upstream completion followed by backend chunking |
 | SSE payload encoding | Every payload must be JSON-serializable before `yield` |
 | Datetime fields in payloads | Must be converted through `jsonable_encoder(...)` or an equivalent serializer before `json.dumps(...)` |
 
@@ -133,6 +135,7 @@ Additional rules:
 - never assume a Python `datetime`, enum, or ORM-derived object can be passed directly to `json.dumps(...)`
 - a failure while producing the first `meta` frame is still a user-visible streaming failure and must not fail silently
 - unhandled exceptions inside the generator must be converted into a final `error` event whenever possible
+- backend slicing with `_iter_text_chunks(...)` is only a compatibility fallback for providers that return full JSON even after a `stream=True` request, not a substitute for sending `stream=True`
 
 ### 4. Validation & Error Matrix
 
@@ -142,14 +145,16 @@ Additional rules:
 | AI provider raises a mapped `AppError` mid-stream | Frontend gets an abruptly terminated stream | Emit `event: error` with stable `code`, `message`, and `status_code` |
 | Unexpected exception happens inside the generator | Browser sees a `200` response with no usable body | Log the exception and emit `stream_internal_error` if the connection is still writable |
 | Service emits raw ORM objects or non-JSON values | SSE helper crashes unpredictably | Convert to plain dict / list / primitive payloads before calling the encoder |
+| Record chat metadata path needs `provider_response_id` | A special metadata path may accidentally call the non-streaming Responses helper, causing the browser to wait until the model finishes thinking | Keep `request_openai_responses_stream_metadata(...)` on the same `stream=True` provider path and extract metadata from `response.completed` |
 
 ### 5. Good / Base / Bad Cases
 
 | Case | Example |
 |---|---|
-| Good | `meta` includes record context with datetime fields, but `format_sse_event()` encodes it safely and the browser receives `meta -> delta -> done` |
-| Base | No runtime model is selected, so the service still emits `meta`, text chunks, and `done` from the reserved or fallback path |
+| Good | `meta` includes record context with datetime fields, `format_sse_event()` encodes it safely, the provider request uses `stream=True`, and the browser receives `meta -> delta* -> done` while the model is generating |
+| Base | A provider ignores streaming and returns full JSON after a `stream=True` request; the backend may slice that completed text so the frontend contract still receives `delta` frames |
 | Bad | The generator yields `meta` with raw datetimes, the connection returns `200`, and the frontend shows no answer because the stream died before the first usable event |
+| Bad | The record detail metadata branch calls a non-streaming Responses request to obtain `provider_response_id`, then chunks the full answer after completion; the UI appears non-streaming even though the browser endpoint is SSE |
 
 ### 6. Tests Required
 
@@ -157,12 +162,14 @@ Additional rules:
 - service test asserting record chat stream emits `meta` before any `delta`
 - service test asserting statistics stream emits `error` when an unhandled exception occurs
 - integration test asserting the frontend-observed event order is `meta -> delta* -> done` on success
+- AI client test asserting `request_openai_responses_stream_metadata(...)` builds a `stream=True` Responses payload, does not send `previous_response_id` for OpenClaudeCode/Micu, and yields upstream `delta` items before final metadata
 
 Assertion points:
 
 - `meta` remains readable by the frontend when context includes timestamps
 - `AppError` is mapped through `build_sse_error_payload(...)`
 - unexpected exceptions surface as `code="stream_internal_error"` instead of silent disconnects
+- record detail chat and statistics AI use the same upstream streaming rule when the selected model supports streaming
 
 ### 7. Wrong vs Correct
 
@@ -181,6 +188,27 @@ from fastapi.encoders import jsonable_encoder
 def format_sse_event(*, event: str, payload: dict[str, Any]) -> str:
     serialized_payload = json.dumps(jsonable_encoder(payload), ensure_ascii=False)
     return f"event: {event}\ndata: {serialized_payload}\n\n"
+```
+
+#### Wrong
+
+```py
+completion_result = self._request_openai_responses_text(...)
+yield {"type": "metadata", "provider_response_id": completion_result.provider_response_id}
+for text_chunk in self._iter_text_chunks(text=completion_result.text):
+    yield {"type": "delta", "text": text_chunk}
+```
+
+#### Correct
+
+```py
+endpoint_url, headers, payload = self._build_openai_responses_request(..., stream=True)
+for event_name, event_data in self._post_stream_events(url=endpoint_url, headers=headers, payload=payload):
+    delta_text = self._extract_openai_responses_stream_delta(event_data=event_data)
+    if delta_text:
+        yield {"type": "delta", "text": delta_text}
+    if event_data.get("type") == "response.completed":
+        yield {"type": "metadata", "provider_response_id": self._extract_provider_response_id(response_data=event_data["response"])}
 ```
 
 ---
@@ -232,6 +260,7 @@ class AIReviewClient:
 | OpenClaudeCode/Micu + `openai_responses` input shape | `payload["input"]` must contain exactly one current `user` item; do not send prior turns as independent Responses `input` items |
 | Multi-turn memory | Prior user/assistant turns must be compacted into the current user prompt block, using explicit markers such as `压缩后的同一弹窗历史` or `统计页历史对话` |
 | `previous_response_id` | Do not send this field to OpenClaudeCode/Micu HTTP Responses; it may be returned to the frontend only as diagnostic metadata |
+| Record chat metadata stream | `request_openai_responses_stream_metadata(...)` must use the same `stream=True` `/v1/responses` path as statistics streaming; metadata extraction must not force a non-streaming upstream request |
 | Image policy for record chat | First visual turn must include record images; normal text follow-ups must not resend images; explicit requests to re-check images must resend images |
 | Image context after follow-up | When images are not resent, the current prompt must still preserve image purpose, object key / preview URL references, and the previous visual conclusion summary |
 | Provider history for compact prompt | For OpenClaudeCode/Micu, upstream provider history is empty and local compact history is embedded in the current prompt; other compatible providers may keep their own provider-history behavior |
@@ -253,6 +282,7 @@ Additional rules:
 |---|---|---|
 | OpenClaudeCode/Micu follow-up sends prior turns as independent `input` items | Micu gateway may return Cloudflare `502 origin_bad_gateway`; frontend sees HTTP `200` plus SSE `event:error` | Compact history into the current user prompt and send a single `user` input item |
 | OpenClaudeCode/Micu follow-up sends `previous_response_id` | HTTP Responses/WebSocket compatibility differs from Codex CLI assumptions and may fail on Micu | `_should_send_responses_previous_response_id(...)` returns `False` for OpenClaudeCode/Micu |
+| OpenClaudeCode/Micu record chat needs response metadata | A non-streaming helper can make record detail output appear all at once while statistics remains real-time | Keep `stream=True`, emit `delta` as soon as upstream events arrive, and emit `provider_response_id` from `response.completed` |
 | Follow-up omits history entirely | The assistant answers like a fresh session and loses the previous visual conclusion | Prompt includes compact local history and prior visual summary |
 | First real user message is preceded by frontend assistant greeting history | Provider receives an assistant message with no preceding real user turn and may misclassify the request | Normalize history by dropping messages before the first real user turn |
 | First visual turn has zero images | The assistant may make unsupported quality judgments | Treat as an image-loading failure or return a clear inability to visually judge; do not pretend images were reviewed |
@@ -265,6 +295,7 @@ Additional rules:
 | Case | Example |
 |---|---|
 | Good | First question sends four images and receives `meta -> delta -> done`; second question sends no images, embeds compact history in the current user prompt, and also receives `meta -> delta -> done` |
+| Good | Record detail chat obtains `provider_response_id` from `response.completed` while still passing upstream `response.output_text.delta` events through immediately |
 | Good | User asks “重新看图再判断一次”, the follow-up resends images and the provider log shows `input_image_count>0` |
 | Base | Non-Micu provider supports independent Responses history, so only that provider path keeps its compatible history behavior |
 | Bad | Record follow-up builds `input=[old_user, old_assistant, current_user]` for Micu; the provider returns `502`, and the frontend reports an AI error on the second question |
@@ -278,6 +309,7 @@ Additional rules:
   - the prompt contains `压缩后的同一弹窗历史`
   - no `previous_response_id` is sent
   - no `input_image` is sent on a normal follow-up
+- unit test for OpenClaudeCode/Micu record metadata streaming asserting `payload["stream"] is True`, provider deltas are yielded before completed metadata, and `provider_response_id` is extracted from the final response
 - unit test for first visual record question asserting image content is present and `input_image_count` is greater than zero
 - unit test for explicit “re-check image” follow-up asserting image content is present again
 - unit test for OpenClaudeCode/Micu statistics follow-up asserting:

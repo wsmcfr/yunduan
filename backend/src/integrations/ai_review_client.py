@@ -2284,26 +2284,11 @@ class AIReviewClient:
         """按 Responses 流式请求产出文本片段和最终响应 ID。
 
         记录页 AI 对话需要在 `done` 事件里把供应商响应 ID 返回给前端，便于调试追踪。
-        米醋 / OpenClaudeCode 的 HTTP Responses 不使用该 ID 承接上下文；实际上下文由
-        前端传入历史和后端压缩摘要承接，和 CLI / opencode 的本地会话策略一致。
+        这里必须保持上游 `stream=True`，否则浏览器虽然收到 SSE，却会等供应商整段回答
+        完成后才看到后端切片。米醋 / OpenClaudeCode 的 HTTP Responses 不使用该 ID 承接
+        上下文；实际上下文由前端传入历史和后端压缩摘要承接，和 CLI / opencode 的本地会话
+        策略一致。
         """
-
-        if self._is_openclaudecode_gateway(model_context=model_context):
-            completion_result = self._request_openai_responses_text(
-                model_context=model_context,
-                system_instruction=system_instruction,
-                history=history,
-                user_prompt=user_prompt,
-                image_assets=image_assets,
-                previous_response_id=None,
-            )
-            yield {
-                "type": "metadata",
-                "provider_response_id": completion_result.provider_response_id,
-            }
-            for text_chunk in self._iter_text_chunks(text=completion_result.text):
-                yield {"type": "delta", "text": text_chunk}
-            return
 
         endpoint_url, headers, payload = self._build_openai_responses_request(
             model_context=model_context,

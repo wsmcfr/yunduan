@@ -1357,7 +1357,7 @@ function handleTrendMouseLeave(): void {
                 <ElButton
                   type="primary"
                   :loading="aiLoading"
-                  :disabled="!canUseAiAnalysis || !hasOverview || isAiStreaming"
+                  :disabled="!canUseAiAnalysis || !hasOverview || selectedModelId === null || isAiStreaming"
                   @click="handleRunAiAnalysis"
                 >
                   生成 AI 分析
@@ -1368,7 +1368,7 @@ function handleTrendMouseLeave(): void {
                       ? "当前账号未开通 AI 分析权限。"
                       : activeRuntimeModel
                       ? `当前模型：${activeRuntimeModel.displayName} / ${activeRuntimeModel.gatewayName}`
-                      : "未选择模型时，后端只会返回预留提示。"
+                      : "请先选择一个已启用的模型配置。"
                   }}
                 </span>
               </div>
@@ -1531,7 +1531,7 @@ function handleTrendMouseLeave(): void {
                       ? "当前账号未开通 AI 分析权限。"
                       : activeRuntimeModel
                       ? `当前追问模型：${activeRuntimeModel.displayName} / ${activeRuntimeModel.gatewayName}`
-                      : "未选择模型时，后端只会返回预留提示。"
+                      : "请先选择一个已启用的模型配置。"
                   }}
                 </span>
               </div>
@@ -1540,7 +1540,7 @@ function handleTrendMouseLeave(): void {
                 <ElButton
                   type="primary"
                   :loading="chatSending"
-                  :disabled="!canUseAiAnalysis || !aiQuestion.trim() || isAiStreaming"
+                  :disabled="!canUseAiAnalysis || selectedModelId === null || !aiQuestion.trim() || isAiStreaming"
                   @click="handleSubmitAiQuestion"
                 >
                   发送追问

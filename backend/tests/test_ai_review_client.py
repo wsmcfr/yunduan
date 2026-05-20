@@ -938,7 +938,7 @@ class AIReviewClientTestCase(unittest.TestCase):
         self.assertIn("detections/demo/source/raw.png", current_prompt)
 
     def test_openclaudecode_stream_metadata_uses_http_responses_with_local_history(self) -> None:
-        """验证米醋记录页流式链路按 CLI/opencode 策略使用本地历史，而不是 previous_response_id。"""
+        """验证米醋记录页 metadata 链路使用真流式请求，并继续依靠本地历史承接上下文。"""
 
         client = StubAIReviewClient()
         client.next_response = {
@@ -979,6 +979,7 @@ class AIReviewClientTestCase(unittest.TestCase):
         )
 
         self.assertEqual(client.captured_url, "https://www.micuapi.ai/v1/responses")
+        self.assertTrue(client.captured_payload["stream"])  # type: ignore[index]
         self.assertNotIn("previous_response_id", client.captured_payload)  # type: ignore[operator]
         self.assertEqual(len(client.captured_payload["input"]), 1)  # type: ignore[arg-type]
         self.assertEqual(client.captured_payload["input"][0]["role"], "user")  # type: ignore[index]
@@ -987,7 +988,7 @@ class AIReviewClientTestCase(unittest.TestCase):
         self.assertEqual("".join(str(item.get("text") or "") for item in items), "已用压缩历史承接上下文。")
 
     def test_openclaudecode_streaming_responses_metadata_returns_http_response_id(self) -> None:
-        """验证记录页流式 meta/done 链路可以拿到 HTTP Responses 返回的响应 ID。"""
+        """验证记录页真流式 meta/done 链路可以拿到 HTTP Responses 返回的响应 ID。"""
 
         client = StubAIReviewClient()
         client.next_response = {
@@ -1025,7 +1026,65 @@ class AIReviewClientTestCase(unittest.TestCase):
 
         self.assertEqual(items[0], {"type": "metadata", "provider_response_id": "resp_first_http"})
         self.assertEqual("".join(str(item.get("text") or "") for item in items), "首轮回答。")
+        self.assertTrue(client.captured_payload["stream"])  # type: ignore[index]
         self.assertIn("input_image", str(client.captured_payload))
+
+    def test_openclaudecode_streaming_responses_metadata_emits_deltas_before_completed_metadata(self) -> None:
+        """验证米醋记录页 metadata 链路会透传上游 delta，而不是等整段响应后再切片。"""
+
+        client = StreamingStubAIReviewClient()
+        client.stream_events = [
+            (None, {"type": "response.output_text.delta", "delta": "第一段"}),
+            (None, {"type": "response.output_text.delta", "delta": "第二段"}),
+            (
+                None,
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "id": "resp_stream_done",
+                        "output": [
+                            {
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [{"type": "output_text", "text": "第一段第二段"}],
+                            }
+                        ],
+                    },
+                },
+            ),
+        ]
+
+        items = list(
+            client.request_openai_responses_stream_metadata(
+                model_context={
+                    "display_name": "OpenClaudeCode Codex",
+                    "model_identifier": "gpt-5.4",
+                    "protocol_type": "openai_responses",
+                    "auth_mode": "authorization_bearer",
+                    "base_url": "https://www.micuapi.ai/v1",
+                    "user_agent": "codex_cli_rs/0.132.0",
+                    "supports_vision": True,
+                    "supports_stream": True,
+                    "gateway_name": "OpenClaudeCode",
+                    "gateway_vendor": "openclaudecode",
+                    "api_key": "sk-demo-codex",
+                },
+                system_instruction="系统提示",
+                history=[],
+                user_prompt="用户问题",
+                image_assets=[],
+            )
+        )
+
+        self.assertEqual(
+            items,
+            [
+                {"type": "delta", "text": "第一段"},
+                {"type": "delta", "text": "第二段"},
+                {"type": "metadata", "provider_response_id": "resp_stream_done"},
+            ],
+        )
+        self.assertTrue(client.captured_payload["stream"])  # type: ignore[index]
 
     def test_chat_about_record_builds_anthropic_messages_request_for_claude(self) -> None:
         """验证 Claude / Anthropic Messages 模式会带上 x-api-key 与 anthropic-version。"""

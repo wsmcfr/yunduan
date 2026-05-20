@@ -236,6 +236,25 @@ export function useStatisticsOverview() {
   }
 
   /**
+   * 统计 AI 发起前的模型选择守卫。
+   *
+   * 主要流程:
+   * 1. 统计页不再走后端“未选择模型时返回预留回答”的分支。
+   * 2. 只要当前没有选中的模型配置，就直接在前端拦截，保持和检测详情 AI 提问一致。
+   *
+   * 返回值:
+   * 返回 `true` 表示当前可以继续发起统计 AI 请求；返回 `false` 表示已提示用户并阻止请求。
+   */
+  function ensureRuntimeModelSelected(): boolean {
+    if (selectedModelId.value !== null) {
+      return true;
+    }
+
+    ElMessage.warning("请选择一个已启用的 AI 模型配置后再发起统计 AI 分析或追问。");
+    return false;
+  }
+
+  /**
    * 提取统计 AI 工作台里真正需要导出的多轮追问消息。
    * 主分析正文已经单独走 `cached_ai_answer`，这里从第一条用户消息开始截取，
    * 避免把“主分析 assistant 首条消息”在 PDF/图片里重复渲染两遍。
@@ -462,6 +481,10 @@ export function useStatisticsOverview() {
       return;
     }
 
+    if (!ensureRuntimeModelSelected()) {
+      return;
+    }
+
     abortAiAnalysisStream();
     aiLoading.value = true;
     aiError.value = "";
@@ -541,6 +564,10 @@ export function useStatisticsOverview() {
 
     if (!canUseAiAnalysis.value) {
       ElMessage.warning("当前账号尚未开通 AI 分析权限。");
+      return;
+    }
+
+    if (!ensureRuntimeModelSelected()) {
       return;
     }
 
