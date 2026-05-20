@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 19
+- **Total Sessions**: 20
 - **Last Active**: 2026-05-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~911 | Active |
+| `journal-1.md` | ~952 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 20 | 2026-05-20 | 记录 MP157 检测信息完整显示与零件身份归一化 | `4b0f7f2` | `main` |
 | 19 | 2026-05-20 | Cloud records auto-create MP157 parts | `3afce1b` | `main` |
 | 18 | 2026-05-20 | Cloud review board sync and reverse tunnel deployment | `a59fee1` | `main` |
 | 17 | 2026-05-16 | STM32MP157 cloud upload data contract hardware details | `aa5947c` | `main` |

@@ -909,3 +909,44 @@ Updated STM32MP157 cloud upload contract with verified F4-side hardware fields f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: 记录 MP157 检测信息完整显示与零件身份归一化
+
+**Date**: 2026-05-20
+**Task**: 记录 MP157 检测信息完整显示与零件身份归一化
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| 事项 | 记录 |
+|---|---|
+| 本次主题 | MP157 检测记录身份归一化、检测信息完整显示方案、板端云端同步文档补齐。 |
+| 后端修改 | 新增 `backend/src/services/part_identity.py`，在零件和检测记录服务里统一处理板端上传的零件身份；兼容训练命名不准确的 `gasket`，把它作为波形垫圈这类真实零件身份处理，避免在云端继续显示为泛化垫片。 |
+| 前端修改 | 更新零件分类、管理页面和通用 mapper，让平垫圈、波形垫圈、垫片等按零件维度展示，不再把检测出的单个零件强行混到错误分类里。 |
+| 文档沉淀 | 更新云端 README、数据库规范、板端同步适配文档和上传数据契约，记录 MP157 上传字段、零件身份归一化规则、云端与板端同步边界。 |
+| 验证结果 | 后端执行 `./.venv/Scripts/python.exe -m pytest tests/test_part_service.py tests/test_record_service.py tests/test_detection_record_model.py -q`，实际收集全后端测试，结果 `100 passed`；前端执行 `npm test -- partCategories managementPages`，结果 `2 files / 9 tests passed`。 |
+| 关联提交 | 业务提交 `4b0f7f2 feat(mp157): normalize part identity and board sync docs` 已推送到 `wsmcfr/yunduan` 的 `main` 分支。 |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4b0f7f2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
