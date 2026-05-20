@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 # OpenClaudeCode 本地文档明确要求不同外接类型携带不同 UA。
 OPENCLAUDECODE_CLAUDE_UA = "claude-cli/2.0.76 (external, cli)"
-OPENCLAUDECODE_CODEX_UA = "codex_cli_rs/0.77.0 (Windows 10.0.26100; x86_64) WindowsTerminal"
+OPENCLAUDECODE_CODEX_UA = "codex_cli_rs/0.132.0 (Windows 10.0.26100; x86_64) WindowsTerminal"
 OPENCLAUDECODE_BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0"
 )

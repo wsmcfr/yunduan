@@ -61,4 +61,25 @@ describe("ai request error utilities", () => {
       "AI 供应商已触发限流或配额限制，建议至少等待 30 秒后再重试：Rate limit exceeded for requests per minute.",
     );
   });
+
+  it("会把 Cloudflare 502 翻译成上游临时失败提示", () => {
+    const error = new ApiClientError(502, {
+      code: "ai_provider_http_error",
+      message: "AI 供应商调用失败，HTTP 502。",
+      details: {
+        status_code: 502,
+        retry_after: "60",
+        response: JSON.stringify({
+          status: 502,
+          title: "Error 502: Bad gateway",
+          error_name: "origin_bad_gateway",
+          error: "Origin server returned an invalid or incomplete response to Cloudflare.",
+        }),
+      },
+    });
+
+    expect(getAiProviderErrorMessage(error, "AI 对话调用失败")).toBe(
+      "AI 供应商上游网关临时失败，建议至少等待 60 秒后再重试；如果连续失败，请切换到其它模型或稍后再试。",
+    );
+  });
 });

@@ -11,8 +11,8 @@ from src.core.errors import BadRequestError, ConflictError, NotFoundError
 from src.core.secret_cipher import SecretCipher
 from src.db.models.ai_gateway import AIGateway
 from src.db.models.ai_model_profile import AIModelProfile
-from src.db.models.enums import AIGatewayVendor, AIProtocolType
-from src.integrations.ai_model_discovery_client import AIModelDiscoveryClient
+from src.db.models.enums import AIGatewayVendor, AIModelVendor, AIProtocolType
+from src.integrations.ai_model_discovery_client import AIModelDiscoveryClient, OPENCLAUDECODE_CODEX_UA
 from src.repositories.ai_gateway_repository import AIGatewayRepository
 from src.repositories.ai_model_profile_repository import AIModelProfileRepository
 from src.schemas.ai_gateway import (
@@ -160,6 +160,64 @@ class AIGatewayService:
 
         return normalized_base_url
 
+    def _is_openclaudecode_responses_model(self, *, model: AIModelProfile) -> bool:
+        """判断 OpenClaudeCode/Micu API 模型是否必须走 Responses 协议。
+
+        主要流程：
+        1. 只处理 OpenClaudeCode/Micu API 网关，避免影响 DeepSeek、Moonshot 等普通
+           OpenAI-compatible 网关。
+        2. 根据模型标识和上游品牌识别 Codex/GPT 系列模型。
+        3. 排除 Grok，因为当前项目里 Grok 已明确走 Anthropic Messages 路径。
+
+        参数:
+            model: 数据库中保存的 AI 模型配置，必须已经带出 gateway 关系。
+
+        返回:
+            返回 True 时，运行期会把协议纠偏为 `openai_responses`，请求路径最终为
+            `/v1/responses`。
+        """
+
+        if model.gateway.vendor != AIGatewayVendor.OPENCLAUDECODE:
+            return False
+
+        normalized_identifier = model.model_identifier.strip().lower()
+        if "grok" in normalized_identifier:
+            return False
+
+        return (
+            model.upstream_vendor == AIModelVendor.CODEX
+            or normalized_identifier.startswith("gpt-")
+            or normalized_identifier.startswith(("o1", "o3", "o4", "o5"))
+            or "codex" in normalized_identifier
+        )
+
+    def _resolve_runtime_protocol_type(self, *, model: AIModelProfile) -> AIProtocolType:
+        """返回真实运行时协议，并修正历史或误配置的 Codex/GPT 模型。
+
+        这个函数不直接修改数据库，只修正本次运行时上下文。这样生产库里即使还存在
+        旧的 `openai_compatible` 配置，AI 请求也不会继续错发到
+        `/v1/chat/completions`。
+        """
+
+        if self._is_openclaudecode_responses_model(model=model):
+            return AIProtocolType.OPENAI_RESPONSES
+        return model.protocol_type
+
+    def _resolve_runtime_user_agent(self, *, model: AIModelProfile, protocol_type: AIProtocolType) -> str | None:
+        """返回真实运行时 User-Agent。
+
+        OpenClaudeCode/Micu API 的 Codex/GPT 外接链路要求使用 Codex CLI UA。
+        如果历史配置来自“国产模型”模板，数据库中可能保存的是浏览器 UA；这里在运行时
+        强制纠偏，避免协议已经走 Responses 但 UA 仍然不匹配。
+        """
+
+        if (
+            protocol_type == AIProtocolType.OPENAI_RESPONSES
+            and self._is_openclaudecode_responses_model(model=model)
+        ):
+            return OPENCLAUDECODE_CODEX_UA
+        return model.user_agent
+
     def build_runtime_model_context(
         self,
         *,
@@ -169,20 +227,25 @@ class AIGatewayService:
         """把模型配置转换成运行时可直接消费的上下文摘要。"""
 
         model = self.get_model_for_runtime(company_id=company_id, model_id=model_id)
+        runtime_protocol_type = self._resolve_runtime_protocol_type(model=model)
         runtime_base_url = self._normalize_runtime_base_url(
             base_url=model.base_url_override or model.gateway.base_url,
-            protocol_type=model.protocol_type,
+            protocol_type=runtime_protocol_type,
             gateway_vendor=model.gateway.vendor,
+        )
+        runtime_user_agent = self._resolve_runtime_user_agent(
+            model=model,
+            protocol_type=runtime_protocol_type,
         )
         return {
             "model_profile_id": model.id,
             "display_name": model.display_name,
             "model_identifier": model.model_identifier,
             "upstream_vendor": model.upstream_vendor.value,
-            "protocol_type": model.protocol_type.value,
+            "protocol_type": runtime_protocol_type.value,
             "auth_mode": model.auth_mode.value,
             "base_url": runtime_base_url,
-            "user_agent": model.user_agent,
+            "user_agent": runtime_user_agent,
             "supports_vision": model.supports_vision,
             "supports_stream": model.supports_stream,
             "gateway_id": model.gateway.id,

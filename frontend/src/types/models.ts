@@ -330,6 +330,7 @@ export interface AIContextFile {
   objectKey: string;
   uploadedAt: string | null;
   previewUrl: string | null;
+  analysisPurpose: string | null;
 }
 
 export interface AIRecordContext {
@@ -366,6 +367,7 @@ export interface AIChatResponse {
   answer: string;
   recordId: number;
   providerHint: string | null;
+  providerResponseId: string | null;
   context: AIRecordContext;
   referencedFiles: AIContextFile[];
   suggestedQuestions: string[];

@@ -132,6 +132,7 @@ const speechBaseQuestion = ref("");
 const speechFinalText = ref("");
 const activeChatAbortController = ref<AbortController | null>(null);
 const streamingAssistantMessageId = ref<string | null>(null);
+const lastProviderResponseId = ref<string | null>(null);
 
 /**
  * 后端返回的推荐追问。
@@ -256,6 +257,35 @@ const activePreviewPageText = computed(() => {
 });
 
 /**
+ * 生成参考文件的短标签。
+ *
+ * 主要流程:
+ * 1. 取 COS 路径最后一段文件名，避免长目录直接撑开弹窗。
+ * 2. 保留文件类型标签，让操作员能快速区分标注图、源图和缩略图。
+ *
+ * 返回值:
+ * 返回适合在 ElTag 内显示的短文本；完整路径仍放在 tooltip 中。
+ */
+function buildReferenceFileLabel(file: AIContextFile): string {
+  const fileName = file.objectKey.split("/").filter(Boolean).at(-1) ?? file.objectKey;
+  return `${getAiFileKindLabel(file.fileKind)} / ${fileName}`;
+}
+
+/**
+ * 生成参考文件的悬浮说明。
+ *
+ * 参数:
+ * file: 后端返回的 AI 参考文件上下文。
+ *
+ * 返回值:
+ * 返回包含模型产物用途和完整 COS 路径的说明，既避免界面溢出，也不丢失排查信息。
+ */
+function buildReferenceFileTooltip(file: AIContextFile): string {
+  const purpose = file.analysisPurpose?.trim() || "后端未登记该文件的模型用途说明。";
+  return `${purpose}\n完整路径：${file.objectKey}`;
+}
+
+/**
  * 当前选中的运行时模型配置。
  */
 const activeRuntimeModel = computed<AIRuntimeModelOption | null>(() => {
@@ -344,6 +374,7 @@ function resetDialogState(): void {
   abortActiveChatStream();
   question.value = "";
   referencedFiles.value = [];
+  lastProviderResponseId.value = null;
   chatErrorMessage.value = "";
   runtimeModelsError.value = "";
   cleanupVoiceInput();
@@ -657,6 +688,7 @@ async function submitQuestion(): Promise<void> {
       question: normalizedQuestion,
       model_profile_id: selectedModelId.value,
       provider_hint: activeRuntimeModel.value?.displayName ?? null,
+      previous_response_id: lastProviderResponseId.value,
       /**
        * 当前问题已经走 `question` 字段，历史里只保留上一轮及更早上下文。
        * 同时统一裁剪长消息，避免历史内容过长导致 422。
@@ -686,6 +718,7 @@ async function submitQuestion(): Promise<void> {
         const response = mapAIChatResponseDto(responseDto);
         referencedFiles.value = response.referencedFiles;
         suggestedQuestions.value = response.suggestedQuestions;
+        lastProviderResponseId.value = response.providerResponseId;
         messages.value = messages.value.map((item) =>
           item.role === "assistant" && item.localId === assistantMessage.localId
             ? {
@@ -703,13 +736,12 @@ async function submitQuestion(): Promise<void> {
 
     const errorMessage = getAiChatRequestErrorMessage(caughtError);
     chatErrorMessage.value = errorMessage;
-    messages.value = [
-      ...nextMessages,
-      createChatMessage(
-        "assistant",
-        "当前这轮 AI 对话没有成功返回。你可以稍后重试，或继续使用人工复核表单完成当前记录的判断。",
-      ),
-    ];
+    /**
+     * 流式请求失败时不要把失败说明伪装成一条 AI 回复。
+     * 红色错误框已经会展示真实供应商错误；消息区只保留用户刚才的问题，
+     * 这样用户重试时仍能看到上下文，但不会误以为模型已经给出了一轮有效回答。
+     */
+    messages.value = nextMessages;
   } finally {
     if (activeChatAbortController.value === abortController) {
       activeChatAbortController.value = null;
@@ -1026,15 +1058,22 @@ onBeforeUnmount(() => {
 
             <div v-if="referencedFiles.length > 0" class="ai-chat__reference-list">
               <span class="muted-text">本轮参考文件：</span>
-              <ElTag
+              <ElTooltip
                 v-for="file in referencedFiles"
                 :key="`${file.fileKind}-${file.id}`"
-                type="info"
+                placement="top"
                 effect="dark"
-                round
+                :content="buildReferenceFileTooltip(file)"
               >
-                {{ getAiFileKindLabel(file.fileKind) }} / {{ file.objectKey }}
-              </ElTag>
+                <ElTag
+                  type="info"
+                  effect="dark"
+                  round
+                  class="ai-chat__reference-tag"
+                >
+                  {{ buildReferenceFileLabel(file) }}
+                </ElTag>
+              </ElTooltip>
             </div>
 
             <div class="ai-chat__question-bank">
@@ -1195,6 +1234,22 @@ onBeforeUnmount(() => {
 
 .ai-chat__inline-alert {
   margin-top: 2px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ai-chat__inline-alert :deep(.el-alert__content),
+.ai-chat__inline-alert :deep(.el-alert__description),
+.ai-chat__inline-alert :deep(.el-alert__title) {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .ai-chat__submit-meta {
@@ -1352,6 +1407,9 @@ onBeforeUnmount(() => {
 
 .ai-chat__reference-list {
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .ai-chat__submit-bar {
@@ -1369,11 +1427,12 @@ onBeforeUnmount(() => {
   margin-left: 0;
 }
 
-:deep(.ai-chat__reference-list .el-tag) {
+.ai-chat__reference-tag {
   max-width: 100%;
+  min-width: 0;
 }
 
-:deep(.ai-chat__reference-list .el-tag__content) {
+.ai-chat__reference-tag :deep(.el-tag__content) {
   display: block;
   max-width: 100%;
   overflow: hidden;

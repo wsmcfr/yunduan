@@ -14,5 +14,6 @@ describe("ai settings catalog", () => {
     const template = aiModelTemplates.find((item) => item.id === "openclaudecode-codex");
 
     expect(template?.payload.base_url_override).toBe("https://www.micuapi.ai/v1");
+    expect(template?.payload.user_agent).toContain("codex_cli_rs/0.132.0");
   });
 });

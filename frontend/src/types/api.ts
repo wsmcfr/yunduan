@@ -698,6 +698,7 @@ export interface AIContextFileDto {
   object_key: string;
   uploaded_at: string | null;
   preview_url: string | null;
+  analysis_purpose: string | null;
 }
 
 export interface AIRecordContextDto {
@@ -733,6 +734,7 @@ export interface AIChatRequestDto {
   question: string;
   model_profile_id: number | null;
   provider_hint: string | null;
+  previous_response_id: string | null;
   history: AIChatHistoryMessageDto[];
 }
 
@@ -741,6 +743,7 @@ export interface AIChatResponseDto {
   answer: string;
   record_id: number;
   provider_hint: string | null;
+  provider_response_id: string | null;
   context: AIRecordContextDto;
   referenced_files: AIContextFileDto[];
   suggested_questions: string[];

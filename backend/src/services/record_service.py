@@ -31,6 +31,8 @@ logger = get_logger(__name__)
 class RecordService:
     """封装检测记录创建、查询、文件登记和 AI 预留流程。"""
 
+    _ai_reference_file_limit = 4
+
     _ai_file_priority = {
         FileKind.ANNOTATED: 0,
         FileKind.SOURCE: 1,
@@ -309,17 +311,91 @@ class RecordService:
                 object_key=object_key,
             )
 
+    def _resolve_ai_file_artifact_priority(self, *, file_object: FileObject) -> int:
+        """识别模型产物图在 AI 多模态上下文中的优先级。
+
+        参数:
+            file_object: 当前检测记录下的单个文件对象。
+
+        返回:
+            返回越小表示越应该优先传给 AI。这里优先让 UNet mask、UNet overlay、
+            MobileNetV3-Small 分类结果图和原始图一起出现，避免四张互补证据被截断成三张。
+        """
+
+        object_key = file_object.object_key.lower()
+        file_name = object_key.rsplit("/", 1)[-1]
+
+        if "_mask" in file_name or file_name.endswith("mask.png"):
+            return 0
+        if "_overlay" in file_name or file_name.endswith("overlay.jpg") or file_name.endswith("overlay.png"):
+            return 1
+        if any(marker in file_name for marker in ["mobilenet", "classification", "classify", "classifier"]):
+            return 2
+        if "_raw" in file_name or file_name.endswith("raw.jpg") or file_object.file_kind == FileKind.SOURCE:
+            return 3
+        if file_object.file_kind == FileKind.ANNOTATED:
+            return 4
+        if file_object.file_kind == FileKind.THUMBNAIL:
+            return 8
+        return 9
+
+    def _resolve_ai_file_analysis_purpose(self, *, file_object: FileObject) -> str:
+        """说明单张图片在 AI 质检分析中的用途。
+
+        参数:
+            file_object: 当前检测记录下的单个文件对象。
+
+        返回:
+            返回给前端和模型共同使用的中文说明。模型会据此理解 raw、mask、overlay、
+            MobileNetV3-Small 分类结果图分别代表什么，而不是只看到一串 COS 路径。
+        """
+
+        object_key = file_object.object_key.lower()
+        file_name = object_key.rsplit("/", 1)[-1]
+
+        if "_mask" in file_name or file_name.endswith("mask.png"):
+            return (
+                "UNet 分割 mask：只显示模型认为疑似缺陷的像素区域；"
+                "非背景区域越集中，越需要结合原图确认是否为真实划伤、缺口、毛刺或污渍。"
+            )
+        if "_overlay" in file_name or file_name.endswith("overlay.jpg") or file_name.endswith("overlay.png"):
+            return (
+                "UNet 分割叠加图：把 mask 覆盖到原始采集图上，"
+                "用于定位疑似缺陷在零件外轮廓、内孔边缘或表面的具体位置。"
+            )
+        if any(marker in file_name for marker in ["mobilenet", "classification", "classify", "classifier"]):
+            return (
+                "MobileNetV3-Small 分类结果图：用于核对整图分类输出、零件类别和 good/bad 标签；"
+                "它给出良坏倾向，但仍需与原图和 UNet 可视化交叉验证。"
+            )
+        if "_raw" in file_name or file_name.endswith("raw.jpg") or file_object.file_kind == FileKind.SOURCE:
+            return (
+                "原始采集图：未叠加模型颜色的真实外观证据，"
+                "用于判断零件边缘、孔位、表面纹理和疑似缺陷是否真的可见。"
+            )
+        if file_object.file_kind == FileKind.THUMBNAIL:
+            return "缩略图：用于快速预览整体画面，不应单独作为良品或不良结论的主要依据。"
+        return "模型结果图或补充证据图：需要结合文件名、记录字段和其它图像共同判断。"
+
     def _select_ai_reference_files(self, *, record: DetectionRecord) -> list[FileObject]:
-        """为 AI 对话挑选最有代表性的文件对象。"""
+        """为 AI 对话挑选最有代表性的文件对象。
+
+        主要流程:
+            1. 先按模型产物用途排序，优先保留 UNet mask、UNet overlay、MobileNetV3-Small
+               分类结果图和原始采集图。
+            2. 同一用途内再按文件类型、上传时间和 id 排序，保证输出稳定。
+            3. 最多返回四张图，让 AI 能拿到用户所说的“四张模型产物图”。
+        """
 
         return sorted(
             record.files,
             key=lambda item: (
+                self._resolve_ai_file_artifact_priority(file_object=item),
                 self._ai_file_priority.get(item.file_kind, 99),
                 -(item.uploaded_at or item.created_at or datetime.min.replace(tzinfo=timezone.utc)).timestamp(),
                 -item.id,
             ),
-        )[:3]
+        )[: self._ai_reference_file_limit]
 
     def _build_ai_chat_context(self, *, record: DetectionRecord) -> dict:
         """将检测记录转换成 AI 对话接口可直接消费的上下文字典。"""
@@ -372,6 +448,7 @@ class RecordService:
                     "object_key": file_object.object_key,
                     "uploaded_at": file_object.uploaded_at,
                     "preview_url": self._build_file_preview_url(file_object=file_object),
+                    "analysis_purpose": self._resolve_ai_file_analysis_purpose(file_object=file_object),
                 }
             )
 
@@ -527,6 +604,7 @@ class RecordService:
             context=context,
             referenced_files=referenced_files,
             model_context=model_context,
+            previous_response_id=payload.previous_response_id,
         )
 
     def stream_ai_chat(
@@ -591,6 +669,15 @@ class RecordService:
                     return
 
                 answer_chunks: list[str] = []
+                provider_response_id: str | None = None
+
+                def remember_provider_response_id(next_response_id: str | None) -> None:
+                    """记录本轮 Responses 返回的响应 ID，供前端下一轮继续承接上下文。"""
+
+                    nonlocal provider_response_id
+                    if next_response_id:
+                        provider_response_id = next_response_id
+
                 for text_chunk in self.ai_review_client.stream_chat_about_record(
                     record_id=record_id,
                     provider_hint=provider_hint,
@@ -599,6 +686,8 @@ class RecordService:
                     context=context,
                     referenced_files=referenced_files,
                     model_context=model_context,
+                    previous_response_id=payload.previous_response_id,
+                    metadata_callback=remember_provider_response_id,
                 ):
                     answer_chunks.append(text_chunk)
                     yield format_sse_event(event="delta", payload={"text": text_chunk})
@@ -610,6 +699,7 @@ class RecordService:
                         "answer": "".join(answer_chunks),
                         "record_id": record_id,
                         "provider_hint": provider_hint,
+                        "provider_response_id": provider_response_id,
                         "context": context,
                         "referenced_files": referenced_files,
                         "suggested_questions": suggested_questions,

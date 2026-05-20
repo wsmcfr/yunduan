@@ -6,7 +6,7 @@ import base64
 import json
 import mimetypes
 from datetime import datetime
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
@@ -16,6 +16,23 @@ from src.core.logging import get_logger
 from src.integrations.cos_client import CosClient
 
 logger = get_logger(__name__)
+
+
+class AICompletionResult:
+    """封装一次供应商回答文本及供应商响应编号。
+
+    字段说明：
+    - `text`：模型返回给用户看的中文答案。
+    - `provider_response_id`：OpenAI Responses 兼容接口返回的响应 ID；前端可保存用于
+      调试和供应商追踪。米醋 / OpenClaudeCode 实测不能在 HTTP Responses 上用它
+      承接上下文，因此上下文仍由本地历史和压缩摘要负责。
+    """
+
+    def __init__(self, *, text: str, provider_response_id: str | None = None) -> None:
+        """初始化供应商回答结果。"""
+
+        self.text = text
+        self.provider_response_id = provider_response_id
 
 
 class AIReviewClient:
@@ -110,9 +127,13 @@ class AIReviewClient:
         if not referenced_files:
             return ["当前记录尚未登记源图、标注图或缩略图，因此我只能基于检测结果和文本上下文回答。"]
 
-        file_kind_summary = "、".join(
-            [f"{item['file_kind']}:{item['object_key']}" for item in referenced_files]
-        )
+        file_kind_summary = "、".join([
+            (
+                f"{item['file_kind']}:{item['object_key']}"
+                f"（{item.get('analysis_purpose') or '未登记用途说明'}）"
+            )
+            for item in referenced_files
+        ])
         return [
             f"当前会话已带入 {len(referenced_files)} 个图像对象上下文，优先参考：{file_kind_summary}。",
             "如果你继续追问缺陷位置、疑似误检原因或人工复核建议，我会继续围绕这些图像对象和检测结果回答。",
@@ -183,6 +204,21 @@ class AIReviewClient:
             "回答对象是一线质检员和普通管理人员，语言要专业但通俗，少用英文缩写、算法黑话和空泛套话；如果必须提专业术语，要先解释它在当前记录里的实际含义。",
         ]
 
+    def _build_board_correction_prompt_lines(self) -> list[str]:
+        """返回 AI 结论与 MP157 初检冲突时的板端修正填写规则。
+
+        这里把修正弹窗的字段名固定写入提示词，避免模型只说“建议人工改判”，
+        却没有告诉现场人员在 `修正板端结果` 弹窗中具体应该填什么。
+        """
+
+        return [
+            "当你给出的质量建议与 MP157 初检结果（record_context.result）不一致时，必须追加一个小节：修正板端结果填写建议。",
+            "该小节要明确说明：当前 MP157 初检结果（record_context.result）是什么、你的建议结论是什么、为什么需要修正板端历史结果。",
+            "如果 MP157 初检结果（record_context.result）为 good，但你根据图像和字段更倾向不良，修正板端结果填写建议必须写：decision 填 bad；defect_type 填你判断出的缺陷类型；cloud_reason 填一句可直接复制到修正原因框的中文说明，例如“云端复核发现边缘划痕，板端原判良品需要修正。”",
+            "如果 MP157 初检结果（record_context.result）为 bad，但你根据图像和字段更倾向良品，修正板端结果填写建议必须写：decision 填 good；defect_type 填 null 或“无明显缺陷”；cloud_reason 填一句可直接复制到修正原因框的中文说明，例如“云端复核认为当前证据更支持良品，板端原判坏品需要修正。”",
+            "如果你认为证据不足或需要继续人工复判，并且这个判断与 MP157 初检结果不一致，修正板端结果填写建议必须写：decision 填 uncertain；defect_type 填可疑缺陷类型或 null；cloud_reason 说明当前证据不足、需要人工复判的具体原因。",
+        ]
+
     def _build_suggested_questions(self, *, context: dict[str, Any]) -> list[str]:
         """为前端返回下一轮推荐追问。"""
 
@@ -240,12 +276,501 @@ class AIReviewClient:
                 continue
             normalized_history.append({"role": role, "content": content})
 
+        # 前端弹窗会先放一条本地 assistant 开场白，用于说明“已进入当前记录上下文”。
+        # 这类消息不是模型真实回答，不能作为上游多轮历史发送；否则首个用户问题会变成
+        # “assistant 历史 + 4 张图片”的组合，米醋 Responses 容易返回 Cloudflare 502。
+        while normalized_history and normalized_history[0]["role"] != "user":
+            normalized_history.pop(0)
+
         if normalized_history:
             last_item = normalized_history[-1]
             if last_item["role"] == "user" and last_item["content"] == normalized_question:
                 return normalized_history[:-1]
 
         return normalized_history
+
+    def _build_history_context_block(self, *, history: list[dict[str, str]], question: str) -> str | None:
+        """把最近几轮对话整理成可直接放进当前提示词的历史上下文。
+
+        标准的多消息 `history` 仍会继续传给供应商；这里额外把历史写入当前
+        user prompt，是为了兼容部分中转网关或协议回退路径对消息数组处理不稳定的情况。
+
+        参数:
+            history: 经过清洗且已去掉当前问题重复项的历史消息。
+            question: 当前用户问题，用于识别“可以”“继续”等短确认追问。
+
+        返回:
+            有可用历史时返回历史块；没有历史时返回 None。
+        """
+
+        if not history:
+            return None
+
+        normalized_question = question.strip()
+        short_confirmation_words = {
+            "可以",
+            "好",
+            "好的",
+            "行",
+            "嗯",
+            "继续",
+            "对",
+            "是的",
+            "写",
+            "帮我写",
+        }
+        role_labels = {
+            "user": "用户",
+            "assistant": "AI",
+        }
+        history_lines = [
+            "同一弹窗历史对话：",
+            "以下内容是用户在当前检测记录弹窗里的上一轮问答。你必须承接这些历史理解用户追问里的指代，例如“这个位置”“刚才说的风险”“为什么这样判断”。",
+            "如果当前用户问题是“可以”“好的”“继续”“写”等短确认词，必须先查看上一轮 AI 是否提出了可继续执行的动作；如果上一轮 AI 说“可以帮你写复核备注/判定说明/修正板端填写内容”，本轮就要直接生成对应内容，不要重新从头判断良品或坏品。",
+            "如果历史过长或部分内容被省略，必须先根据历史里的最近结论、风险位置和待执行动作继续回答；只有确实无法解析指代时，才说明需要用户补充具体对象。",
+        ]
+
+        for index, item in enumerate(history[-8:], start=1):
+            role = role_labels.get(item["role"], item["role"])
+            content = item["content"].strip()
+            if not content:
+                continue
+            history_lines.append(f"{index}. {role}：{content}")
+
+        if normalized_question in short_confirmation_words:
+            history_lines.append(
+                f"当前用户只回复了短确认词“{normalized_question}”，请把它理解为确认上一轮 AI 最后提出的继续动作。"
+            )
+
+        if len(history_lines) <= 4:
+            return None
+        return "\n".join(history_lines)
+
+    def _append_history_context_to_prompt(self, *, user_prompt: str, history_context_block: str | None) -> str:
+        """把历史上下文追加到当前用户提示词末尾。
+
+        这里刻意不把历史块放到最前面。模型供应商的前缀缓存通常依赖请求开头
+        稳定一致；如果每轮都把动态历史塞在开头，`instructions + 记录上下文`
+        这些稳定内容就无法形成可复用前缀。
+        """
+
+        if not history_context_block:
+            return user_prompt
+
+        return "\n\n".join(
+            [
+                user_prompt,
+                "多轮上下文承接要求：",
+                history_context_block,
+            ]
+        )
+
+    def _build_statistics_history_context_block(
+        self,
+        *,
+        history: list[dict[str, str]],
+        question: str,
+    ) -> str | None:
+        """把统计页追问历史压缩成可放进当前 user prompt 的短上下文。
+
+        米醋 / OpenClaudeCode 的 Responses 请求不发送独立历史 input，因此统计页也
+        必须把最近问答写进当前 prompt。这样用户追问“那这个设备呢”时，模型仍能
+        看到上一轮关于统计窗口、风险设备或缺陷分布的结论。
+        """
+
+        if not history:
+            return None
+
+        role_labels = {
+            "user": "用户",
+            "assistant": "AI",
+        }
+        history_lines = [
+            "统计页历史对话：",
+            "以下是当前统计分析弹窗里的最近问答。你必须承接这些历史里的统计窗口、筛选条件、上一轮结论和用户指代。",
+        ]
+        for index, item in enumerate(history[-6:], start=1):
+            role = role_labels.get(item["role"], item["role"])
+            history_lines.append(f"{index}. {role}: {self._trim_prompt_text(item['content'], max_chars=260)}")
+
+        normalized_question = question.strip()
+        if normalized_question in {"可以", "好的", "继续", "写", "帮我写"}:
+            history_lines.append(f"当前用户只回复了“{normalized_question}”，请直接执行上一轮 AI 最后提出的统计分析动作。")
+
+        return "\n".join(history_lines)
+
+    def _is_openclaudecode_responses_vision_request(
+        self,
+        *,
+        model_context: dict[str, Any],
+        image_assets: list[dict[str, str]],
+    ) -> bool:
+        """判断当前请求是否需要走米醋 Responses 视觉紧凑提示词。
+
+        这个判断只针对已经确认的问题组合：OpenClaudeCode / 米醋网关、
+        OpenAI Responses 协议、并且本轮实际附带了图片。其他供应商仍保持原来的
+        完整提示词，避免无关模型行为被一起改动。
+        """
+
+        if not image_assets:
+            return False
+        if str(model_context.get("protocol_type") or "") != "openai_responses":
+            return False
+
+        return self._is_openclaudecode_gateway(model_context=model_context)
+
+    def _should_use_openclaudecode_compact_prompt(self, *, model_context: dict[str, Any]) -> bool:
+        """判断当前请求是否应使用米醋 / OpenClaudeCode 的紧凑提示词。
+
+        米醋 Responses 网关在带图和长上下文叠加时容易出现 502；后续追问即使不再
+        重发图片，也应该继续使用紧凑摘要与压缩历史，避免把上一轮长回答完整塞回网关。
+        """
+
+        if str(model_context.get("protocol_type") or "") != "openai_responses":
+            return False
+        return self._is_openclaudecode_gateway(model_context=model_context)
+
+    def _trim_prompt_text(self, value: Any, *, max_chars: int = 180) -> str:
+        """把任意上下文值压缩成适合放进提示词的短文本。
+
+        参数:
+            value: 可能来自数据库、JSON 字段或历史消息的原始值。
+            max_chars: 最多保留的字符数，超过后用省略号截断。
+
+        返回:
+            返回已序列化并压缩后的字符串，避免长调试块把视觉请求体撑大。
+        """
+
+        serialized_value = self._serialize_context_value(value)
+        if isinstance(serialized_value, (dict, list)):
+            text_value = json.dumps(serialized_value, ensure_ascii=False, separators=(",", ":"))
+        elif serialized_value is None:
+            text_value = "null"
+        else:
+            text_value = str(serialized_value)
+
+        normalized_text = " ".join(text_value.split())
+        if len(normalized_text) <= max_chars:
+            return normalized_text
+        return f"{normalized_text[:max_chars]}..."
+
+    def _build_compact_nested_context_lines(self, *, context: dict[str, Any]) -> list[str]:
+        """提取视觉、传感器、判定和设备上下文里的短字段。
+
+        生产记录里这些字段可能包含调试 blob、原始数组或长日志；紧凑视觉请求只保留
+        少量可读标量，长字段只说明“已登记”，不把原文塞进供应商 payload。
+        """
+
+        context_labels = {
+            "vision_context": "视觉上下文",
+            "sensor_context": "传感器上下文",
+            "decision_context": "判定上下文",
+            "device_context": "设备上下文",
+        }
+        skipped_key_markers = {"debug", "blob", "raw", "base64", "bytes", "image", "trace", "log"}
+        lines: list[str] = []
+
+        for context_key, context_label in context_labels.items():
+            raw_context = context.get(context_key)
+            if not isinstance(raw_context, dict) or not raw_context:
+                continue
+
+            compact_items: list[str] = []
+            for key, value in raw_context.items():
+                normalized_key = str(key).lower()
+                if any(marker in normalized_key for marker in skipped_key_markers):
+                    continue
+                if isinstance(value, (dict, list)) and len(json.dumps(value, ensure_ascii=False, default=str)) > 240:
+                    continue
+
+                compact_items.append(f"{key}={self._trim_prompt_text(value, max_chars=80)}")
+                if len(compact_items) >= 5:
+                    break
+
+            if compact_items:
+                lines.append(f"- {context_label}: {'；'.join(compact_items)}")
+            else:
+                lines.append(f"- {context_label}: 已登记，但内容以长调试/原始数据为主，本轮不展开原文。")
+
+        return lines
+
+    def _build_compact_record_context(self, *, context: dict[str, Any]) -> str:
+        """构造紧凑结构化摘要，替代完整 JSON 上下文。
+
+        返回:
+            一段短文本，保留良坏判断、时间链路、复核状态、文件数量等关键字段；
+            不展开 `vision_context`、`device_context` 等可能很长的原始调试对象。
+        """
+
+        field_pairs = [
+            ("record_id", context.get("record_id")),
+            ("record_no", context.get("record_no")),
+            ("part", f"{context.get('part_name')} / {context.get('part_code')}"),
+            ("device", f"{context.get('device_name')} / {context.get('device_code')}"),
+            ("mp157_result", context.get("result")),
+            ("effective_result", context.get("effective_result")),
+            ("review_status", context.get("review_status")),
+            ("defect_type", context.get("defect_type")),
+            ("defect_desc", context.get("defect_desc")),
+            ("confidence_score", context.get("confidence_score")),
+            ("captured_at", context.get("captured_at")),
+            ("detected_at", context.get("detected_at")),
+            ("uploaded_at", context.get("uploaded_at")),
+            ("storage_last_modified", context.get("storage_last_modified")),
+            ("file_count", context.get("file_count")),
+            ("available_file_kinds", context.get("available_file_kinds")),
+            ("review_count", context.get("review_count")),
+            ("latest_review_decision", context.get("latest_review_decision")),
+            ("latest_review_comment", context.get("latest_review_comment")),
+            ("latest_reviewed_at", context.get("latest_reviewed_at")),
+        ]
+
+        lines = ["紧凑结构化摘要："]
+        for field_name, field_value in field_pairs:
+            lines.append(f"- {field_name}: {self._trim_prompt_text(field_value, max_chars=160)}")
+        lines.extend(self._build_compact_nested_context_lines(context=context))
+        return "\n".join(lines)
+
+    def _infer_compact_file_purpose(self, *, file_object: dict[str, Any]) -> str:
+        """在文件用途缺失时，根据文件名推断图片在模型链路里的角色。"""
+
+        if purpose := str(file_object.get("analysis_purpose") or "").strip():
+            return self._trim_prompt_text(purpose, max_chars=180)
+
+        object_key = str(file_object.get("object_key") or "").lower()
+        file_name = object_key.rsplit("/", 1)[-1]
+        if "_mask" in file_name or file_name.endswith("mask.png"):
+            return "UNet mask：显示疑似缺陷像素区域，用于判断分割模型认为哪里异常。"
+        if "_overlay" in file_name or file_name.endswith("overlay.jpg") or file_name.endswith("overlay.png"):
+            return "UNet overlay：把 mask 叠加到原图上，用于定位缺陷落在零件哪个区域。"
+        if any(marker in file_name for marker in ["mobilenet", "classification", "classify", "classifier"]):
+            return "MobileNetV3-Small 分类结果图：用于核对整图 good/bad 分类倾向。"
+        if "_raw" in file_name or file_name.endswith("raw.jpg") or file_object.get("file_kind") == "source":
+            return "原始采集图：未叠加模型颜色的真实外观，用于观察划伤、缺口、毛刺、污渍和变形。"
+        return "补充证据图：需要结合文件名、记录字段和其它图像共同判断。"
+
+    def _build_compact_file_context(self, *, referenced_files: list[dict[str, Any]]) -> str:
+        """构造四张模型产物图的紧凑用途说明。
+
+        这里固定解释 UNet 和 MobileNetV3-Small 的角色，避免模型只看到图片却不知道
+        mask、overlay、分类图和原始图分别该怎样参与良坏判断。
+
+        普通追问轮次不会重复上传图片本体，因此这里必须同时给出 `preview_url`
+        或 COS 对象位置。模型如果需要承接上一轮视觉依据，就能知道这几张图
+        分别在哪里，而不是把追问当成完全无图的新问题。
+        """
+
+        lines = [
+            "图像证据用途说明：",
+            "- UNet mask：看疑似缺陷像素区域，不等于最终缺陷，需结合原图确认。",
+            "- UNet overlay：看疑似缺陷在零件上的位置，例如外轮廓、内孔边缘或表面。",
+            "- MobileNetV3-Small 分类结果图：看整图 good/bad 倾向，需与 UNet 和原图交叉验证。",
+            "- 原始采集图：看真实外观，是判断划伤、缺口、毛刺、污渍、压痕、变形的主要视觉证据。",
+        ]
+
+        if not referenced_files:
+            lines.append("- 当前没有登记文件对象；如果仍附带图片，请直接按图像内容分析。")
+            return "\n".join(lines)
+
+        for index, file_object in enumerate(referenced_files[:4], start=1):
+            preview_url = str(file_object.get("preview_url") or "").strip()
+            readable_location = (
+                f"preview_url={self._trim_prompt_text(preview_url, max_chars=220)}"
+                if preview_url
+                else (
+                    "preview_url=未登记；"
+                    f"bucket={self._trim_prompt_text(file_object.get('bucket_name'), max_chars=80)}；"
+                    f"region={self._trim_prompt_text(file_object.get('region'), max_chars=40)}"
+                )
+            )
+            lines.append(
+                (
+                    f"- 第 {index} 张：kind={file_object.get('file_kind')}；"
+                    f"object_key={self._trim_prompt_text(file_object.get('object_key'), max_chars=150)}；"
+                    f"{readable_location}；用途={self._infer_compact_file_purpose(file_object=file_object)}"
+                )
+            )
+
+        return "\n".join(lines)
+
+    def _build_compact_history_context_block(self, *, history: list[dict[str, str]], question: str) -> str | None:
+        """把多轮对话历史压缩成短上下文，保留追问记忆但控制请求体大小。"""
+
+        if not history:
+            return None
+
+        short_confirmation_words = {"可以", "好", "好的", "行", "嗯", "继续", "对", "是的", "写", "帮我写"}
+        role_labels = {
+            "user": "用户",
+            "assistant": "AI",
+        }
+        lines = [
+            "压缩后的同一弹窗历史：",
+            "必须承接最近结论、风险位置和上一轮承诺的动作；短确认词要理解为确认上一轮动作。",
+        ]
+
+        for index, item in enumerate(history[-4:], start=1):
+            role = role_labels.get(item["role"], item["role"])
+            lines.append(f"{index}. {role}: {self._trim_prompt_text(item['content'], max_chars=220)}")
+
+        normalized_question = question.strip()
+        if normalized_question in short_confirmation_words:
+            lines.append(f"当前用户只回复了“{normalized_question}”，请直接执行上一轮 AI 最后提出的可继续动作。")
+
+        return "\n".join(lines)
+
+    def _build_compact_history_for_provider(self, *, history: list[dict[str, str]]) -> list[dict[str, str]]:
+        """压缩传给 Responses `input` 数组的历史消息。
+
+        压缩后的历史仍让模型保留上下文记忆，但不会把上一轮长回答和长问题完整重复上传，
+        从而降低米醋 / Cloudflare 在带图请求上的 502 风险。
+        """
+
+        compact_history: list[dict[str, str]] = []
+        for item in history[-4:]:
+            compact_history.append(
+                {
+                    "role": item["role"],
+                    "content": self._trim_prompt_text(item["content"], max_chars=360),
+                }
+            )
+        return compact_history
+
+    def _build_provider_history_for_compact_prompt(
+        self,
+        *,
+        model_context: dict[str, Any],
+        history: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        """为紧凑提示词链路决定是否还需要向供应商发送独立历史消息。
+
+        米醋 / OpenClaudeCode 的 HTTP Responses 对“纯文本追问 + 多条历史 input”
+        组合不稳定，生产第二轮追问会在 SSE 中返回 Cloudflare 502。这里按 CLI /
+        opencode 的本地会话思路处理：历史先由后端压缩并写进当前 user prompt，
+        上游 `input` 数组只保留本轮 user 消息，避免网关把追问当成多消息会话失败。
+
+        其他网关仍保留压缩历史消息，避免无关供应商的多轮行为被一起改变。
+        """
+
+        if self._is_openclaudecode_gateway(model_context=model_context):
+            return []
+        return self._build_compact_history_for_provider(history=history)
+
+    def _build_compact_system_instruction(
+        self,
+        *,
+        model_context: dict[str, Any],
+        has_loaded_images: bool,
+        task_mode: str,
+    ) -> str:
+        """构造米醋 Responses 视觉请求专用的短系统提示词。"""
+
+        image_line = (
+            "本轮已附带图像，必须观察图片并结合字段判断。"
+            if has_loaded_images
+            else "本轮没有附带图像字节，只能基于结构化摘要和文件用途说明回答。"
+        )
+        task_line = (
+            "输出小节：1. 直接回答；2. 判断依据；3. 风险边界；4. 修正板端结果填写建议；5. 下一步建议。"
+            if task_mode == "chat"
+            else "输出小节：1. 复核结论；2. 关键证据；3. 风险边界；4. 修正板端结果填写建议；5. 处置建议。"
+        )
+        return "\n".join(
+            [
+                "你是工业缺陷检测系统里的 AI 复核助理，只围绕当前这一条记录回答，必须使用中文。",
+                image_line,
+                "用户问良品还是坏品时，先给倾向结论：更像良品、更像不良或证据不足；随后解释为什么。",
+                "不能把“尚未人工审核”当作回避判断的前提，它只能作为风险边界或下一步复核建议。",
+                "当前业务默认单面检测；不要默认要求背面、多角度或多工位补图，只能围绕当前这一面可见证据分析。",
+                "四张常见图片含义：UNet mask 看疑似缺陷像素，UNet overlay 看缺陷位置，MobileNetV3-Small 图看 good/bad 分类倾向，原始采集图看真实外观。",
+                "如果 AI 建议与 MP157 初检 result 不一致，必须写“修正板端结果填写建议”：decision 填 good/bad/uncertain，defect_type 填缺陷类型或 null，cloud_reason 写一句可复制的中文原因。",
+                "区分确定事实和推断；图像不清或字段缺失时说明不确定性，但仍要给当前证据下的建议。",
+                f"当前模型：{model_context.get('display_name')} / {model_context.get('model_identifier')}；协议：{model_context.get('protocol_type')}。",
+                task_line,
+            ]
+        )
+
+    def _build_compact_chat_user_prompt(
+        self,
+        *,
+        question: str,
+        context: dict[str, Any],
+        referenced_files: list[dict[str, Any]],
+        image_assets: list[dict[str, str]],
+        history_context_block: str | None,
+    ) -> str:
+        """构造米醋 Responses 带图对话的紧凑用户提示词。"""
+
+        image_status = f"本轮实际附带图片数量：{len(image_assets)}。" if image_assets else "本轮未附带图片字节。"
+        prompt_parts = [
+            "请基于当前记录、图像证据用途说明、同一弹窗历史和下方紧凑摘要回答；如果本轮没有图像字节，不要声称重新看到了图片。",
+            image_status,
+            self._build_compact_file_context(referenced_files=referenced_files),
+            self._build_compact_record_context(context=context),
+        ]
+        if history_context_block:
+            prompt_parts.append(history_context_block)
+        prompt_parts.extend(
+            [
+                "回答要求：先说这个更像好的、坏的还是证据不足；再说明图像依据、字段依据、冲突点和不确定性。",
+                "如果你的建议与 MP157 初检 result 冲突，补充 decision、defect_type、cloud_reason 的填写建议。",
+                f"用户问题：{question.strip()}",
+            ]
+        )
+        return "\n\n".join(prompt_parts)
+
+    def _build_compact_no_image_chat_user_prompt(
+        self,
+        *,
+        question: str,
+        context: dict[str, Any],
+        referenced_files: list[dict[str, Any]],
+        history_context_block: str | None,
+    ) -> str:
+        """构造带图请求失败后同端点纯文本重试的紧凑提示词。
+
+        这条路径必须继续保留文件用途和压缩历史，但明确告诉模型本次没有图像字节，
+        只能基于上一轮上下文、结构化摘要和文件说明给出建议。
+        """
+
+        prompt_parts = [
+            "上一轮带图 Responses 请求失败，本轮改为同端点纯文本重试。",
+            "本轮没有成功附带图像字节，请不要声称重新看到了图片；可以基于同一弹窗历史、结构化摘要和文件用途说明继续回答。",
+            self._build_compact_file_context(referenced_files=referenced_files),
+            self._build_compact_record_context(context=context),
+        ]
+        if history_context_block:
+            prompt_parts.append(history_context_block)
+        prompt_parts.extend(
+            [
+                "回答要求：承接上一轮结论，不要重新当成第一次对话；如果用户问修正板端结果，直接给 decision、defect_type、cloud_reason。",
+                f"用户问题：{question.strip()}",
+            ]
+        )
+        return "\n\n".join(prompt_parts)
+
+    def _build_compact_review_user_prompt(
+        self,
+        *,
+        note: str | None,
+        context: dict[str, Any],
+        referenced_files: list[dict[str, Any]],
+        image_assets: list[dict[str, str]],
+    ) -> str:
+        """构造米醋 Responses 带图复核摘要的紧凑用户提示词。"""
+
+        review_note = (note or "").strip() or "无"
+        image_status = f"本轮实际附带图片数量：{len(image_assets)}。" if image_assets else "本轮未附带图片字节。"
+        return "\n\n".join(
+            [
+                "请给出当前检测记录的 AI 复核意见。",
+                image_status,
+                self._build_compact_file_context(referenced_files=referenced_files),
+                self._build_compact_record_context(context=context),
+                f"补充要求：{self._trim_prompt_text(review_note, max_chars=260)}",
+                "必须输出明确倾向、关键证据、风险边界、修正板端结果填写建议和现场处置建议。",
+            ]
+        )
 
     def _build_context_snapshot(
         self,
@@ -263,6 +788,7 @@ class AIReviewClient:
                 "object_key": item.get("object_key"),
                 "uploaded_at": self._serialize_context_value(item.get("uploaded_at")),
                 "preview_url": item.get("preview_url"),
+                "analysis_purpose": item.get("analysis_purpose"),
             }
             for item in referenced_files
         ]
@@ -318,12 +844,13 @@ class AIReviewClient:
                 "如果图像证据不足、模型不支持视觉、或上下文信息不足，必须直接说明，不得编造，不得把推测写成事实。",
                 "当结构化字段与图像、初检结果与人工复核、时间链路前后含义存在冲突时，你必须显式指出冲突，而不是自行抹平。",
                 "你给出的结论需要区分“确定事实”和“基于现有证据的推断”；凡是推断都要用“可能/倾向于/需进一步确认”等措辞。",
-                "你必须结合当前记录是否已有人工复核、是否仍待审核、是否存在多张图像、是否缺少关键字段，给出操作层面的建议。",
-                "如果用户追问‘为什么这样判’、‘是否误检’、‘需不需要人工复核’，你必须显式给出判断依据，不要只重复结果标签。",
+                "你必须结合当前记录是否已有人工复核、是否仍待审核、是否存在多张图像、是否缺少关键字段，给出操作层面的建议；但不能把“尚未人工审核”当成回避判断的理由。",
+                "如果用户追问‘好的还是坏的’、‘为什么这样判’、‘是否误检’、‘需不需要人工复核’，必须先给出基于当前图像和字段的良品/不良/证据不足倾向，再说明判断依据，不要只重复结果标签或审核状态。",
                 "给出复核重点时，优先围绕当前图像可见的外轮廓、内孔边缘、毛刺、缺口、划伤、压痕、污渍、锈蚀、变形和异物等具体外观项展开。",
                 vision_line,
                 model_line,
                 *self._build_single_side_review_guard_lines(),
+                *self._build_board_correction_prompt_lines(),
                 *output_contract,
             ]
         )
@@ -354,6 +881,10 @@ class AIReviewClient:
                 "分析时请至少检查：结果一致性、缺陷信息、复核历史、时间链路、图像证据是否充分、当前这一面能确认什么、还有什么只能人工兜底确认。",
                 "如果用户的问题本身没有指明分析维度，你要主动补全为：当前记录总体判断、主要证据、风险边界、下一步建议。",
                 "如果结构化结果、人工复核、文件证据之间有任何不一致，必须单独指出冲突，不允许默认它们完全一致。",
+                "这批图片通常由 UNet + MobileNetV3-Small 链路产生：原始采集图用于看真实外观，UNet mask 用于看疑似缺陷像素区域，UNet overlay 用于定位缺陷落在零件哪里，MobileNetV3-Small 分类结果图用于核对整图 good/bad 分类标签。",
+                "用户询问“好的还是坏的”时，必须先给出倾向结论：更像良品、更像不良，或证据不足；随后说明这个建议来自哪些图像、哪些结构化字段和哪些不确定性。",
+                "不能把“尚未人工审核”当成回避判断的理由；它只能作为风险边界或下一步复核建议，不能替代你对当前图像和模型输出的综合分析。",
+                *self._build_board_correction_prompt_lines(),
                 image_status,
                 "结构化上下文：",
                 context_snapshot,
@@ -391,6 +922,7 @@ class AIReviewClient:
                 "你必须逐项检查：初检结果与最终结果是否一致、缺陷描述是否支撑当前结论、时间链路是否合理、历史复核是否改变了结论、图像证据是否足以支撑判断、是否需要升级为人工复判。",
                 "如果需要给现场动作，请明确写清楚重点看哪里，例如外轮廓、内孔边缘、划伤、压痕、毛刺、缺口、变形、异物或污渍，而不是只写“建议复核”。",
                 "输出要求：使用 5 个小节，内容要充分但不要空泛重复；每个小节都应围绕当前记录的真实字段展开，并让非算法人员也能看懂。",
+                *self._build_board_correction_prompt_lines(),
                 image_status,
                 note_block,
                 "结构化上下文：",
@@ -662,13 +1194,17 @@ class AIReviewClient:
         )
 
     def _fetch_image_asset(self, *, file_object: dict[str, Any]) -> dict[str, str] | None:
-        """抓取单个图片对象并转成多协议可复用的 base64 结构。
+        """抓取单个图片对象并转成多协议可复用的图像结构。
 
         之所以在服务端统一拉取字节，而不是把前端 URL 原样交给不同供应商，
         是因为不同协议对图片字段的格式要求不同：
-        - OpenAI / OpenAI-compatible 常用 `data:` URL
+        - OpenAI Responses / OpenAI-compatible 优先使用供应商可访问的 HTTPS URL
         - Anthropic Messages 需要 `base64` 或 `url`
         - Gemini GenerateContent 需要 `inline_data`
+
+        返回值同时保留 `image_url` 与 base64 形式：OpenAI 类协议走 URL，
+        其他协议继续走 base64，避免把大体积 `data:` URL 塞进米醋 Responses
+        中转请求体。
         """
 
         try:
@@ -700,10 +1236,12 @@ class AIReviewClient:
             )
             return None
 
+        encoded_image = base64.b64encode(image_bytes).decode("utf-8")
         return {
             "mime_type": mime_type,
-            "data_base64": base64.b64encode(image_bytes).decode("utf-8"),
-            "data_url": f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('utf-8')}",
+            "data_base64": encoded_image,
+            "data_url": f"data:{mime_type};base64,{encoded_image}",
+            "image_url": source_url,
             "object_key": str(file_object.get("object_key") or ""),
             "file_kind": str(file_object.get("file_kind") or ""),
         }
@@ -727,6 +1265,52 @@ class AIReviewClient:
 
         return image_assets
 
+    def _should_load_images_for_chat_turn(
+        self,
+        *,
+        model_context: dict[str, Any],
+        question: str,
+        normalized_history: list[dict[str, str]],
+        previous_response_id: str | None,
+    ) -> bool:
+        """判断当前聊天轮次是否需要重新下载并发送图片字节。
+
+        规则说明：
+        - 该优化只针对生产问题链路：米醋 / OpenClaudeCode 的 OpenAI Responses。
+          其他供应商继续沿用原行为，避免扩大协议兼容风险。
+        - 第一轮没有历史时，需要把图片发给模型建立视觉判断基础。
+        - 米醋 / OpenClaudeCode 不依赖供应商侧 `previous_response_id` 记忆；已有本地历史时，
+          默认用压缩历史和图片读取位置承接，不重发图，避免后续追问每次都上传同一组图片。
+        - 用户明确要求“重新看图 / 再看图片 / 按图片重新判断”时，重新附带图片。
+        """
+
+        if not self._should_use_openclaudecode_compact_prompt(model_context=model_context):
+            return True
+        if not normalized_history:
+            return True
+        if not any(item.get("role") == "user" for item in normalized_history):
+            return True
+        normalized_question = "".join(question.strip().lower().split())
+        if not normalized_question:
+            return False
+
+        explicit_image_review_markers = [
+            "重新看图",
+            "再看图",
+            "再看看图",
+            "重新看图片",
+            "再看图片",
+            "按图片重新判断",
+            "根据图片重新判断",
+            "重新判断图片",
+            "重新分析图片",
+            "重新发图",
+            "读取图片",
+            "重新读取图片",
+            "重新加载图片",
+        ]
+        return any(marker in normalized_question for marker in explicit_image_review_markers)
+
     def _should_retry_without_images(
         self,
         *,
@@ -742,6 +1326,8 @@ class AIReviewClient:
         """
 
         if not image_assets:
+            return False
+        if str(model_context.get("protocol_type") or "") == "openai_responses":
             return False
         if error.code != "ai_provider_http_error":
             return False
@@ -779,6 +1365,23 @@ class AIReviewClient:
         # 这里保守兜底：只有同时出现“图像字段”与“文本期望”时才自动退回纯文本，避免误吞其他协议错误。
         return has_image_payload_marker and has_text_only_marker
 
+    def _should_retry_openai_responses_without_images(
+        self,
+        *,
+        model_context: dict[str, Any],
+        error: IntegrationError,
+        image_assets: list[dict[str, str]],
+    ) -> bool:
+        """判断 OpenAI Responses 带图失败时是否可同端点退回纯文本重试。
+
+        该函数保留给统计或非视觉场景扩展，但当前记录质检问答不允许在带图请求失败后
+        自动改成无图回答。否则用户问“这个是好的还是坏的”时，系统会在没有图像证据的
+        情况下返回看似完整的结论，和现场要求冲突。
+        """
+
+        _ = model_context, error, image_assets
+        return False
+
     def _log_image_retry_fallback(
         self,
         *,
@@ -796,6 +1399,29 @@ class AIReviewClient:
             ),
             task_mode,
             model_context.get("protocol_type"),
+            model_context.get("gateway_vendor"),
+            model_context.get("model_identifier"),
+            (error.details or {}).get("status_code"),
+            len(image_assets),
+        )
+
+    def _log_responses_image_retry_fallback(
+        self,
+        *,
+        model_context: dict[str, Any],
+        error: IntegrationError,
+        task_mode: str,
+        image_assets: list[dict[str, str]],
+    ) -> None:
+        """记录 Responses 带图失败后同端点纯文本重试的降级日志。"""
+
+        logger.warning(
+            (
+                "ai_review.responses_image_retry_fallback "
+                "event=ai_review.responses_image_retry_fallback task_mode=%s gateway_vendor=%s "
+                "model=%s status_code=%s image_count=%s"
+            ),
+            task_mode,
             model_context.get("gateway_vendor"),
             model_context.get("model_identifier"),
             (error.details or {}).get("status_code"),
@@ -848,6 +1474,7 @@ class AIReviewClient:
         history: list[dict[str, str]],
         user_prompt: str,
         image_assets: list[dict[str, str]],
+        previous_response_id: str | None = None,
         stream: bool = False,
     ) -> tuple[str, dict[str, str], dict[str, Any]]:
         """构造 OpenAI Responses 协议请求。"""
@@ -858,18 +1485,29 @@ class AIReviewClient:
             model_context=model_context,
         )
         headers = self._build_auth_headers(model_context=model_context)
+        should_send_previous_response_id = self._should_send_responses_previous_response_id(
+            model_context=model_context,
+            previous_response_id=previous_response_id,
+            stream=stream,
+        )
 
+        # 米醋 / OpenClaudeCode 的上下文已经被压缩进本轮 user prompt。这里不能再把
+        # 历史拆成多个 Responses input 项，否则生产第二轮追问会在网关侧返回 502。
+        # 该保护放在协议请求构造层，确保流式 metadata、非流式聊天等入口行为一致。
+        history_for_input = [] if self._is_openclaudecode_gateway(model_context=model_context) else history
         input_items: list[dict[str, Any]] = [
             {
                 "role": item["role"],
                 "content": [{"type": "input_text", "text": item["content"]}],
             }
-            for item in history
+            for item in history_for_input
         ]
+        if should_send_previous_response_id:
+            input_items = []
 
         user_content: list[dict[str, Any]] = [{"type": "input_text", "text": user_prompt}]
         user_content.extend(
-            {"type": "input_image", "image_url": item["data_url"]}
+            {"type": "input_image", "image_url": item.get("image_url") or item["data_url"]}
             for item in image_assets
         )
         input_items.append({"role": "user", "content": user_content})
@@ -879,10 +1517,41 @@ class AIReviewClient:
             "instructions": system_instruction,
             "input": input_items,
             "temperature": 0.2,
-            "store": False,
+            "store": True,
             "stream": stream,
         }
+        if should_send_previous_response_id:
+            payload["previous_response_id"] = previous_response_id
         return endpoint_url, headers, payload
+
+    def _should_send_responses_previous_response_id(
+        self,
+        *,
+        model_context: dict[str, Any],
+        previous_response_id: str | None,
+        stream: bool,
+    ) -> bool:
+        """判断当前 Responses 请求是否可以发送 `previous_response_id`。
+
+        生产实测米醋 / OpenClaudeCode 的 HTTP 流式 Responses 会返回
+        `previous_response_id is only supported on Responses WebSocket v2`；而实测
+        `wss://www.micuapi.ai/v1/responses` 握手返回 404。这里按 Codex / opencode
+        的本地会话策略处理：OpenClaudeCode 不依赖供应商侧 response 存储，
+        统一通过压缩历史承接上下文。
+        """
+
+        if not previous_response_id:
+            return False
+        if self._is_openclaudecode_gateway(model_context=model_context):
+            return False
+        return True
+
+    def _is_openclaudecode_gateway(self, *, model_context: dict[str, Any]) -> bool:
+        """判断当前运行时模型是否来自 OpenClaudeCode / 米醋网关。"""
+
+        gateway_vendor = str(model_context.get("gateway_vendor") or "").strip().lower()
+        gateway_name = str(model_context.get("gateway_name") or "").strip().lower()
+        return gateway_vendor == "openclaudecode" or "openclaudecode" in gateway_name
 
     def _build_openai_compatible_request(
         self,
@@ -914,7 +1583,7 @@ class AIReviewClient:
             {
                 "type": "image_url",
                 "image_url": {
-                    "url": item["data_url"],
+                    "url": item.get("image_url") or item["data_url"],
                 },
             }
             for item in image_assets
@@ -1027,9 +1696,23 @@ class AIReviewClient:
     def _post_json(self, *, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
         """发送 JSON POST 请求并统一处理供应商错误响应。"""
 
+        serialized_payload = json.dumps(payload, ensure_ascii=False)
+        input_image_count = serialized_payload.count('"input_image"') + serialized_payload.count("'input_image'")
+        logger.info(
+            (
+                "ai_review.provider_request event=ai_review.provider_request endpoint=%s "
+                "model=%s input_image_count=%s payload_bytes=%s user_agent=%s"
+            ),
+            url,
+            payload.get("model"),
+            input_image_count,
+            len(serialized_payload.encode("utf-8")),
+            headers.get("User-Agent") or "",
+        )
+
         request = Request(
             url,
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            data=serialized_payload.encode("utf-8"),
             headers=headers,
             method="POST",
         )
@@ -1084,9 +1767,23 @@ class AIReviewClient:
         2. 某些兼容网关虽然收到 `stream=true`，仍直接回完整 JSON
         """
 
+        serialized_payload = json.dumps(payload, ensure_ascii=False)
+        input_image_count = serialized_payload.count('"input_image"') + serialized_payload.count("'input_image'")
+        logger.info(
+            (
+                "ai_review.provider_stream_request event=ai_review.provider_stream_request endpoint=%s "
+                "model=%s input_image_count=%s payload_bytes=%s user_agent=%s"
+            ),
+            url,
+            payload.get("model"),
+            input_image_count,
+            len(serialized_payload.encode("utf-8")),
+            headers.get("User-Agent") or "",
+        )
+
         request = Request(
             url,
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            data=serialized_payload.encode("utf-8"),
             headers=headers,
             method="POST",
         )
@@ -1235,6 +1932,14 @@ class AIReviewClient:
             )
 
         return "\n".join(output_texts)
+
+    def _extract_provider_response_id(self, *, response_data: dict[str, Any]) -> str | None:
+        """从 Responses 响应中提取可用于下一轮承接的响应 ID。"""
+
+        response_id = response_data.get("id")
+        if isinstance(response_id, str) and response_id.strip():
+            return response_id.strip()
+        return None
 
     def _extract_openai_compatible_text(self, *, response_data: dict[str, Any]) -> str:
         """从 OpenAI-compatible Chat Completions 响应中提取文本。"""
@@ -1418,41 +2123,7 @@ class AIReviewClient:
 
         return "\n".join(text_chunks)
 
-    def _should_fallback_openclaudecode_responses(
-        self,
-        *,
-        model_context: dict[str, Any],
-        error: IntegrationError,
-    ) -> bool:
-        """判断当前 Responses 调用是否应该回退到 Chat Completions。
-
-        目前只对 OpenClaudeCode 的 Codex 外接场景做兼容：
-        - 同样的模型和密钥走 `/responses` 时，部分模型会直接返回 Cloudflare 502。
-        - 还有一类中转会对 `/responses` 直接返回非 JSON 内容，说明当前模型并不真正兼容 Responses。
-        - 但同一批模型改走 `/chat/completions` 又可以正常完成文本与多模态请求。
-        因此这里只在 OpenClaudeCode + Responses 这一条已确认的兼容链路下兜底，
-        并且只放行“明显属于协议不兼容”的错误，避免误伤 OpenAI 官方或其他中转的正常错误语义。
-        """
-
-        if str(model_context.get("gateway_vendor") or "") != "openclaudecode":
-            return False
-        if str(model_context.get("protocol_type") or "") != "openai_responses":
-            return False
-
-        error_details = error.details or {}
-
-        # 已确认的兼容性问题之一：Responses 端点返回 502，但同模型走 Chat Completions 可用。
-        if error.code == "ai_provider_http_error":
-            return error_details.get("status_code") == 502
-
-        # 另一类常见故障是中转没有按 Responses 协议返回 JSON，而是返回 HTML 或其他非 JSON 内容。
-        # 这通常意味着“当前模型不适合走 Responses”，继续回退到 Chat Completions 更稳妥。
-        if error.code == "ai_provider_invalid_json":
-            return isinstance(error_details.get("response"), str)
-
-        return False
-
-    def _request_openai_responses_text_with_fallback(
+    def _request_openai_responses_text(
         self,
         *,
         model_context: dict[str, Any],
@@ -1460,12 +2131,13 @@ class AIReviewClient:
         history: list[dict[str, str]],
         user_prompt: str,
         image_assets: list[dict[str, str]],
-    ) -> str:
-        """优先走 Responses，必要时回退到 Chat Completions。
+        previous_response_id: str | None = None,
+    ) -> AICompletionResult:
+        """按当前模型选中的 OpenAI Responses 协议请求文本。
 
-        这里统一封装成一个入口，原因有两点：
-        1. AI 对话与 AI 复核都共享同一套 OpenClaudeCode/Codex 兼容性问题。
-        2. 回退逻辑必须复用同一份上下文、历史消息与图片输入，不能让不同调用方各自拼装。
+        这里故意不再做 `/chat/completions` 自动回退。设置页里的协议就是运行时契约：
+        用户选中 `openai_responses` 时，请求日志必须只出现 `/responses`，否则线上排查
+        会看到与配置不一致的路径。
         """
 
         endpoint_url, headers, payload = self._build_openai_responses_request(
@@ -1474,39 +2146,14 @@ class AIReviewClient:
             history=history,
             user_prompt=user_prompt,
             image_assets=image_assets,
+            previous_response_id=previous_response_id,
         )
 
-        try:
-            response_data = self._post_json(url=endpoint_url, headers=headers, payload=payload)
-            return self._extract_openai_responses_text(response_data=response_data)
-        except IntegrationError as exc:
-            if not self._should_fallback_openclaudecode_responses(
-                model_context=model_context,
-                error=exc,
-            ):
-                raise
-
-            logger.warning(
-                "ai_review.responses_fallback gateway_vendor=%s model=%s endpoint=%s status_code=%s",
-                model_context.get("gateway_vendor"),
-                model_context.get("model_identifier"),
-                endpoint_url,
-                (exc.details or {}).get("status_code"),
-            )
-
-            fallback_endpoint_url, fallback_headers, fallback_payload = self._build_openai_compatible_request(
-                model_context=model_context,
-                system_instruction=system_instruction,
-                history=history,
-                user_prompt=user_prompt,
-                image_assets=image_assets,
-            )
-            fallback_response = self._post_json(
-                url=fallback_endpoint_url,
-                headers=fallback_headers,
-                payload=fallback_payload,
-            )
-            return self._extract_openai_compatible_text(response_data=fallback_response)
+        response_data = self._post_json(url=endpoint_url, headers=headers, payload=payload)
+        return AICompletionResult(
+            text=self._extract_openai_responses_text(response_data=response_data),
+            provider_response_id=self._extract_provider_response_id(response_data=response_data),
+        )
 
     def _stream_openai_compatible_text(
         self,
@@ -1516,6 +2163,7 @@ class AIReviewClient:
         history: list[dict[str, str]],
         user_prompt: str,
         image_assets: list[dict[str, str]],
+        previous_response_id: str | None = None,
     ) -> Iterator[str]:
         """按 Chat Completions 协议向前端逐片段产出文本。"""
 
@@ -1555,7 +2203,7 @@ class AIReviewClient:
                 message="AI 供应商未返回可流式输出的文本内容。",
             )
 
-    def _stream_openai_responses_text_with_fallback(
+    def _stream_openai_responses_text(
         self,
         *,
         model_context: dict[str, Any],
@@ -1563,8 +2211,13 @@ class AIReviewClient:
         history: list[dict[str, str]],
         user_prompt: str,
         image_assets: list[dict[str, str]],
+        previous_response_id: str | None = None,
     ) -> Iterator[str]:
-        """优先走 Responses 流式输出，必要时回退到 Chat Completions。"""
+        """按当前模型选中的 OpenAI Responses 协议流式输出文本。
+
+        流式分支同样严格尊重模型协议配置。`openai_responses` 失败时把供应商错误
+        交给上层 SSE 错误边界处理，不隐式改发 `/chat/completions`。
+        """
 
         endpoint_url, headers, payload = self._build_openai_responses_request(
             model_context=model_context,
@@ -1572,72 +2225,148 @@ class AIReviewClient:
             history=history,
             user_prompt=user_prompt,
             image_assets=image_assets,
+            previous_response_id=previous_response_id,
             stream=True,
         )
 
-        try:
-            has_emitted_text = False
-            for event_name, event_data in self._post_stream_events(
-                url=endpoint_url,
-                headers=headers,
-                payload=payload,
-            ):
-                if event_name == "__json__":
-                    answer_text = self._extract_openai_responses_text(response_data=event_data)
+        has_emitted_text = False
+        for event_name, event_data in self._post_stream_events(
+            url=endpoint_url,
+            headers=headers,
+            payload=payload,
+        ):
+            if event_name == "__json__":
+                answer_text = self._extract_openai_responses_text(response_data=event_data)
+                yield from self._iter_text_chunks(text=answer_text)
+                return
+
+            self._raise_stream_event_error(
+                event_name=event_name,
+                event_data=event_data,
+                endpoint_url=endpoint_url,
+            )
+
+            delta_text = self._extract_openai_responses_stream_delta(event_data=event_data)
+            if delta_text:
+                has_emitted_text = True
+                yield delta_text
+                continue
+
+            if not has_emitted_text and str(event_data.get("type") or "") == "response.output_text.done":
+                done_text = event_data.get("text")
+                if isinstance(done_text, str) and done_text.strip():
+                    yield from self._iter_text_chunks(text=done_text)
+                    return
+
+            if not has_emitted_text and str(event_data.get("type") or "") == "response.completed":
+                response_payload = event_data.get("response")
+                if isinstance(response_payload, dict):
+                    answer_text = self._extract_openai_responses_text(response_data=response_payload)
                     yield from self._iter_text_chunks(text=answer_text)
                     return
 
-                self._raise_stream_event_error(
-                    event_name=event_name,
-                    event_data=event_data,
-                    endpoint_url=endpoint_url,
-                )
-
-                delta_text = self._extract_openai_responses_stream_delta(event_data=event_data)
-                if delta_text:
-                    has_emitted_text = True
-                    yield delta_text
-                    continue
-
-                if not has_emitted_text and str(event_data.get("type") or "") == "response.output_text.done":
-                    done_text = event_data.get("text")
-                    if isinstance(done_text, str) and done_text.strip():
-                        yield from self._iter_text_chunks(text=done_text)
-                        return
-
-                if not has_emitted_text and str(event_data.get("type") or "") == "response.completed":
-                    response_payload = event_data.get("response")
-                    if isinstance(response_payload, dict):
-                        answer_text = self._extract_openai_responses_text(response_data=response_payload)
-                        yield from self._iter_text_chunks(text=answer_text)
-                        return
-
-            if not has_emitted_text:
-                raise IntegrationError(
-                    code="ai_provider_empty_answer",
-                    message="AI 供应商未返回可流式输出的文本内容。",
-                )
-        except IntegrationError as exc:
-            if not self._should_fallback_openclaudecode_responses(
-                model_context=model_context,
-                error=exc,
-            ):
-                raise
-
-            logger.warning(
-                "ai_review.responses_stream_fallback gateway_vendor=%s model=%s endpoint=%s status_code=%s",
-                model_context.get("gateway_vendor"),
-                model_context.get("model_identifier"),
-                endpoint_url,
-                (exc.details or {}).get("status_code"),
+        if not has_emitted_text:
+            raise IntegrationError(
+                code="ai_provider_empty_answer",
+                message="AI 供应商未返回可流式输出的文本内容。",
             )
 
-            yield from self._stream_openai_compatible_text(
+    def request_openai_responses_stream_metadata(
+        self,
+        *,
+        model_context: dict[str, Any],
+        system_instruction: str,
+        history: list[dict[str, str]],
+        user_prompt: str,
+        image_assets: list[dict[str, str]],
+        previous_response_id: str | None = None,
+    ) -> Iterator[dict[str, str | None]]:
+        """按 Responses 流式请求产出文本片段和最终响应 ID。
+
+        记录页 AI 对话需要在 `done` 事件里把供应商响应 ID 返回给前端，便于调试追踪。
+        米醋 / OpenClaudeCode 的 HTTP Responses 不使用该 ID 承接上下文；实际上下文由
+        前端传入历史和后端压缩摘要承接，和 CLI / opencode 的本地会话策略一致。
+        """
+
+        if self._is_openclaudecode_gateway(model_context=model_context):
+            completion_result = self._request_openai_responses_text(
                 model_context=model_context,
                 system_instruction=system_instruction,
                 history=history,
                 user_prompt=user_prompt,
                 image_assets=image_assets,
+                previous_response_id=None,
+            )
+            yield {
+                "type": "metadata",
+                "provider_response_id": completion_result.provider_response_id,
+            }
+            for text_chunk in self._iter_text_chunks(text=completion_result.text):
+                yield {"type": "delta", "text": text_chunk}
+            return
+
+        endpoint_url, headers, payload = self._build_openai_responses_request(
+            model_context=model_context,
+            system_instruction=system_instruction,
+            history=history,
+            user_prompt=user_prompt,
+            image_assets=image_assets,
+            previous_response_id=previous_response_id,
+            stream=True,
+        )
+
+        has_emitted_text = False
+        for event_name, event_data in self._post_stream_events(
+            url=endpoint_url,
+            headers=headers,
+            payload=payload,
+        ):
+            if event_name == "__json__":
+                yield {
+                    "type": "metadata",
+                    "provider_response_id": self._extract_provider_response_id(response_data=event_data),
+                }
+                answer_text = self._extract_openai_responses_text(response_data=event_data)
+                for text_chunk in self._iter_text_chunks(text=answer_text):
+                    yield {"type": "delta", "text": text_chunk}
+                return
+
+            self._raise_stream_event_error(
+                event_name=event_name,
+                event_data=event_data,
+                endpoint_url=endpoint_url,
+            )
+
+            if str(event_data.get("type") or "") == "response.completed":
+                response_payload = event_data.get("response")
+                if isinstance(response_payload, dict):
+                    yield {
+                        "type": "metadata",
+                        "provider_response_id": self._extract_provider_response_id(response_data=response_payload),
+                    }
+                    if not has_emitted_text:
+                        answer_text = self._extract_openai_responses_text(response_data=response_payload)
+                        for text_chunk in self._iter_text_chunks(text=answer_text):
+                            yield {"type": "delta", "text": text_chunk}
+                    return
+
+            delta_text = self._extract_openai_responses_stream_delta(event_data=event_data)
+            if delta_text:
+                has_emitted_text = True
+                yield {"type": "delta", "text": delta_text}
+                continue
+
+            if not has_emitted_text and str(event_data.get("type") or "") == "response.output_text.done":
+                done_text = event_data.get("text")
+                if isinstance(done_text, str) and done_text.strip():
+                    for text_chunk in self._iter_text_chunks(text=done_text):
+                        yield {"type": "delta", "text": text_chunk}
+                    has_emitted_text = True
+
+        if not has_emitted_text:
+            raise IntegrationError(
+                code="ai_provider_empty_answer",
+                message="AI 供应商未返回可流式输出的文本内容。",
             )
 
     def _stream_anthropic_messages_text(
@@ -1648,6 +2377,7 @@ class AIReviewClient:
         history: list[dict[str, str]],
         user_prompt: str,
         image_assets: list[dict[str, str]],
+        previous_response_id: str | None = None,
     ) -> Iterator[str]:
         """按 Anthropic Messages 协议直接转发 SSE 文本增量。
 
@@ -1698,6 +2428,7 @@ class AIReviewClient:
         history: list[dict[str, str]],
         user_prompt: str,
         image_assets: list[dict[str, str]],
+        previous_response_id: str | None = None,
     ) -> Iterator[str]:
         """按协议类型产出文本增量。
 
@@ -1709,12 +2440,13 @@ class AIReviewClient:
         supports_stream = bool(model_context.get("supports_stream"))
 
         if supports_stream and protocol_type == "openai_responses":
-            yield from self._stream_openai_responses_text_with_fallback(
+            yield from self._stream_openai_responses_text(
                 model_context=model_context,
                 system_instruction=system_instruction,
                 history=history,
                 user_prompt=user_prompt,
                 image_assets=image_assets,
+                previous_response_id=previous_response_id,
             )
             return
 
@@ -1744,8 +2476,9 @@ class AIReviewClient:
             history=history,
             user_prompt=user_prompt,
             image_assets=image_assets,
+            previous_response_id=previous_response_id,
         )
-        yield from self._iter_text_chunks(text=answer_text)
+        yield from self._iter_text_chunks(text=answer_text.text)
 
     def _request_protocol_text(
         self,
@@ -1755,7 +2488,8 @@ class AIReviewClient:
         history: list[dict[str, str]],
         user_prompt: str,
         image_assets: list[dict[str, str]],
-    ) -> str:
+        previous_response_id: str | None = None,
+    ) -> AICompletionResult:
         """按当前模型协议发起一次文本补全请求。
 
         这里把“协议分支选择”集中到一个方法里，避免单条记录对话、AI 复核、
@@ -1765,12 +2499,13 @@ class AIReviewClient:
         protocol_type = str(model_context.get("protocol_type") or "")
 
         if protocol_type == "openai_responses":
-            return self._request_openai_responses_text_with_fallback(
+            return self._request_openai_responses_text(
                 model_context=model_context,
                 system_instruction=system_instruction,
                 history=history,
                 user_prompt=user_prompt,
                 image_assets=image_assets,
+                previous_response_id=previous_response_id,
             )
 
         if protocol_type == "openai_compatible":
@@ -1782,15 +2517,17 @@ class AIReviewClient:
                 image_assets=image_assets,
             )
             response_data = self._post_json(url=endpoint_url, headers=headers, payload=payload)
-            return self._extract_openai_compatible_text(response_data=response_data)
+            return AICompletionResult(text=self._extract_openai_compatible_text(response_data=response_data))
 
         if protocol_type == "anthropic_messages":
-            return self._request_anthropic_messages_text(
-                model_context=model_context,
-                system_instruction=system_instruction,
-                history=history,
-                user_prompt=user_prompt,
-                image_assets=image_assets,
+            return AICompletionResult(
+                text=self._request_anthropic_messages_text(
+                    model_context=model_context,
+                    system_instruction=system_instruction,
+                    history=history,
+                    user_prompt=user_prompt,
+                    image_assets=image_assets,
+                )
             )
 
         if protocol_type == "gemini_generate_content":
@@ -1802,7 +2539,7 @@ class AIReviewClient:
                 image_assets=image_assets,
             )
             response_data = self._post_json(url=endpoint_url, headers=headers, payload=payload)
-            return self._extract_gemini_text(response_data=response_data)
+            return AICompletionResult(text=self._extract_gemini_text(response_data=response_data))
 
         raise BadRequestError(
             code="ai_protocol_unsupported",
@@ -1817,37 +2554,131 @@ class AIReviewClient:
         history: list[dict[str, str]],
         context: dict[str, Any],
         referenced_files: list[dict[str, Any]],
-    ) -> str:
+        previous_response_id: str | None = None,
+    ) -> AICompletionResult:
         """根据协议类型发起真实模型调用并返回答案文本。"""
 
-        image_assets = self._load_image_assets(
-            model_context=model_context,
-            referenced_files=referenced_files,
-        )
         normalized_history = self._normalize_history(
             history=history,
             current_question=question,
         )
-        system_instruction = self._build_system_instruction(
+        should_load_images = self._should_load_images_for_chat_turn(
             model_context=model_context,
-            has_loaded_images=bool(image_assets),
-            task_mode="chat",
-        )
-        user_prompt = self._build_chat_user_prompt(
             question=question,
-            context=context,
-            referenced_files=referenced_files,
-            image_assets=image_assets,
+            normalized_history=normalized_history,
+            previous_response_id=previous_response_id,
         )
+        image_assets = (
+            self._load_image_assets(
+                model_context=model_context,
+                referenced_files=referenced_files,
+            )
+            if should_load_images
+            else []
+        )
+        use_compact_vision_prompt = self._should_use_openclaudecode_compact_prompt(
+            model_context=model_context,
+        )
+        if use_compact_vision_prompt:
+            history_context_block = self._build_compact_history_context_block(
+                history=normalized_history,
+                question=question,
+            )
+            request_history = self._build_provider_history_for_compact_prompt(
+                model_context=model_context,
+                history=normalized_history,
+            )
+            system_instruction = self._build_compact_system_instruction(
+                model_context=model_context,
+                has_loaded_images=bool(image_assets),
+                task_mode="chat",
+            )
+            user_prompt = self._build_compact_chat_user_prompt(
+                question=question,
+                context=context,
+                referenced_files=referenced_files,
+                image_assets=image_assets,
+                history_context_block=history_context_block,
+            )
+        else:
+            request_history = normalized_history
+            system_instruction = self._build_system_instruction(
+                model_context=model_context,
+                has_loaded_images=bool(image_assets),
+                task_mode="chat",
+            )
+            user_prompt = self._build_chat_user_prompt(
+                question=question,
+                context=context,
+                referenced_files=referenced_files,
+                image_assets=image_assets,
+            )
+            history_context_block = self._build_history_context_block(
+                history=normalized_history,
+                question=question,
+            )
+            user_prompt = self._append_history_context_to_prompt(
+                user_prompt=user_prompt,
+                history_context_block=history_context_block,
+            )
         try:
             return self._request_protocol_text(
                 model_context=model_context,
                 system_instruction=system_instruction,
-                history=normalized_history,
+                history=request_history,
                 user_prompt=user_prompt,
                 image_assets=image_assets,
+                previous_response_id=previous_response_id,
             )
         except IntegrationError as exc:
+            if self._should_retry_openai_responses_without_images(
+                model_context=model_context,
+                error=exc,
+                image_assets=image_assets,
+            ):
+                self._log_responses_image_retry_fallback(
+                    model_context=model_context,
+                    error=exc,
+                    task_mode="chat",
+                    image_assets=image_assets,
+                )
+                if use_compact_vision_prompt:
+                    fallback_system_instruction = self._build_compact_system_instruction(
+                        model_context=model_context,
+                        has_loaded_images=False,
+                        task_mode="chat",
+                    )
+                    fallback_user_prompt = self._build_compact_no_image_chat_user_prompt(
+                        question=question,
+                        context=context,
+                        referenced_files=referenced_files,
+                        history_context_block=history_context_block,
+                    )
+                else:
+                    fallback_system_instruction = self._build_system_instruction(
+                        model_context=model_context,
+                        has_loaded_images=False,
+                        task_mode="chat",
+                    )
+                    fallback_user_prompt = self._build_chat_user_prompt(
+                        question=question,
+                        context=context,
+                        referenced_files=referenced_files,
+                        image_assets=[],
+                    )
+                    fallback_user_prompt = self._append_history_context_to_prompt(
+                        user_prompt=fallback_user_prompt,
+                        history_context_block=history_context_block,
+                    )
+                return self._request_protocol_text(
+                    model_context=model_context,
+                    system_instruction=fallback_system_instruction,
+                    history=request_history,
+                    user_prompt=fallback_user_prompt,
+                    image_assets=[],
+                    previous_response_id=previous_response_id,
+                )
+
             if not self._should_retry_without_images(
                 model_context=model_context,
                 error=exc,
@@ -1872,12 +2703,17 @@ class AIReviewClient:
                 referenced_files=referenced_files,
                 image_assets=[],
             )
+            fallback_user_prompt = self._append_history_context_to_prompt(
+                user_prompt=fallback_user_prompt,
+                history_context_block=history_context_block,
+            )
             return self._request_protocol_text(
                 model_context=model_context,
                 system_instruction=fallback_system_instruction,
-                history=normalized_history,
+                history=request_history,
                 user_prompt=fallback_user_prompt,
                 image_assets=[],
+                previous_response_id=previous_response_id,
             )
 
     def _stream_model_completion(
@@ -1888,38 +2724,155 @@ class AIReviewClient:
         history: list[dict[str, str]],
         context: dict[str, Any],
         referenced_files: list[dict[str, Any]],
+        previous_response_id: str | None = None,
+        metadata_callback: Callable[[str | None], None] | None = None,
     ) -> Iterator[str]:
         """根据协议类型发起真实模型调用，并逐片段产出答案文本。"""
 
-        image_assets = self._load_image_assets(
-            model_context=model_context,
-            referenced_files=referenced_files,
-        )
         normalized_history = self._normalize_history(
             history=history,
             current_question=question,
         )
-        system_instruction = self._build_system_instruction(
+        should_load_images = self._should_load_images_for_chat_turn(
             model_context=model_context,
-            has_loaded_images=bool(image_assets),
-            task_mode="chat",
-        )
-        user_prompt = self._build_chat_user_prompt(
             question=question,
-            context=context,
-            referenced_files=referenced_files,
-            image_assets=image_assets,
+            normalized_history=normalized_history,
+            previous_response_id=previous_response_id,
         )
+        image_assets = (
+            self._load_image_assets(
+                model_context=model_context,
+                referenced_files=referenced_files,
+            )
+            if should_load_images
+            else []
+        )
+        use_compact_vision_prompt = self._should_use_openclaudecode_compact_prompt(
+            model_context=model_context,
+        )
+        if use_compact_vision_prompt:
+            history_context_block = self._build_compact_history_context_block(
+                history=normalized_history,
+                question=question,
+            )
+            request_history = self._build_provider_history_for_compact_prompt(
+                model_context=model_context,
+                history=normalized_history,
+            )
+            system_instruction = self._build_compact_system_instruction(
+                model_context=model_context,
+                has_loaded_images=bool(image_assets),
+                task_mode="chat",
+            )
+            user_prompt = self._build_compact_chat_user_prompt(
+                question=question,
+                context=context,
+                referenced_files=referenced_files,
+                image_assets=image_assets,
+                history_context_block=history_context_block,
+            )
+        else:
+            request_history = normalized_history
+            system_instruction = self._build_system_instruction(
+                model_context=model_context,
+                has_loaded_images=bool(image_assets),
+                task_mode="chat",
+            )
+            user_prompt = self._build_chat_user_prompt(
+                question=question,
+                context=context,
+                referenced_files=referenced_files,
+                image_assets=image_assets,
+            )
+            history_context_block = self._build_history_context_block(
+                history=normalized_history,
+                question=question,
+            )
+            user_prompt = self._append_history_context_to_prompt(
+                user_prompt=user_prompt,
+                history_context_block=history_context_block,
+            )
 
         try:
+            if (
+                metadata_callback is not None
+                and bool(model_context.get("supports_stream"))
+                and str(model_context.get("protocol_type") or "") == "openai_responses"
+            ):
+                for stream_item in self.request_openai_responses_stream_metadata(
+                    model_context=model_context,
+                    system_instruction=system_instruction,
+                    history=request_history,
+                    user_prompt=user_prompt,
+                    image_assets=image_assets,
+                    previous_response_id=previous_response_id,
+                ):
+                    if stream_item.get("type") == "metadata":
+                        metadata_callback(stream_item.get("provider_response_id"))
+                        continue
+                    if stream_item.get("type") == "delta":
+                        yield str(stream_item.get("text") or "")
+                return
+
             yield from self._stream_protocol_text(
                 model_context=model_context,
                 system_instruction=system_instruction,
-                history=normalized_history,
+                history=request_history,
                 user_prompt=user_prompt,
                 image_assets=image_assets,
+                previous_response_id=previous_response_id,
             )
         except IntegrationError as exc:
+            if self._should_retry_openai_responses_without_images(
+                model_context=model_context,
+                error=exc,
+                image_assets=image_assets,
+            ):
+                self._log_responses_image_retry_fallback(
+                    model_context=model_context,
+                    error=exc,
+                    task_mode="chat",
+                    image_assets=image_assets,
+                )
+                if use_compact_vision_prompt:
+                    fallback_system_instruction = self._build_compact_system_instruction(
+                        model_context=model_context,
+                        has_loaded_images=False,
+                        task_mode="chat",
+                    )
+                    fallback_user_prompt = self._build_compact_no_image_chat_user_prompt(
+                        question=question,
+                        context=context,
+                        referenced_files=referenced_files,
+                        history_context_block=history_context_block,
+                    )
+                else:
+                    fallback_system_instruction = self._build_system_instruction(
+                        model_context=model_context,
+                        has_loaded_images=False,
+                        task_mode="chat",
+                    )
+                    fallback_user_prompt = self._build_chat_user_prompt(
+                        question=question,
+                        context=context,
+                        referenced_files=referenced_files,
+                        image_assets=[],
+                    )
+                    fallback_user_prompt = self._append_history_context_to_prompt(
+                        user_prompt=fallback_user_prompt,
+                        history_context_block=history_context_block,
+                    )
+                fallback_result = self._request_protocol_text(
+                    model_context=model_context,
+                    system_instruction=fallback_system_instruction,
+                    history=request_history,
+                    user_prompt=fallback_user_prompt,
+                    image_assets=[],
+                    previous_response_id=previous_response_id,
+                )
+                yield from self._iter_text_chunks(text=fallback_result.text)
+                return
+
             if not self._should_retry_without_images(
                 model_context=model_context,
                 error=exc,
@@ -1944,13 +2897,19 @@ class AIReviewClient:
                 referenced_files=referenced_files,
                 image_assets=[],
             )
-            yield from self._stream_protocol_text(
+            fallback_user_prompt = self._append_history_context_to_prompt(
+                user_prompt=fallback_user_prompt,
+                history_context_block=history_context_block,
+            )
+            fallback_result = self._request_protocol_text(
                 model_context=model_context,
                 system_instruction=fallback_system_instruction,
-                history=normalized_history,
+                history=request_history,
                 user_prompt=fallback_user_prompt,
                 image_assets=[],
+                previous_response_id=previous_response_id,
             )
+            yield from self._iter_text_chunks(text=fallback_result.text)
 
     def request_review(
         self,
@@ -1981,17 +2940,33 @@ class AIReviewClient:
             model_context=model_context,
             referenced_files=referenced_files or [],
         )
-        system_instruction = self._build_system_instruction(
+        if self._is_openclaudecode_responses_vision_request(
             model_context=model_context,
-            has_loaded_images=bool(image_assets),
-            task_mode="review",
-        )
-        user_prompt = self._build_review_user_prompt(
-            note=note,
-            context=context,
-            referenced_files=referenced_files or [],
             image_assets=image_assets,
-        )
+        ):
+            system_instruction = self._build_compact_system_instruction(
+                model_context=model_context,
+                has_loaded_images=bool(image_assets),
+                task_mode="review",
+            )
+            user_prompt = self._build_compact_review_user_prompt(
+                note=note,
+                context=context,
+                referenced_files=referenced_files or [],
+                image_assets=image_assets,
+            )
+        else:
+            system_instruction = self._build_system_instruction(
+                model_context=model_context,
+                has_loaded_images=bool(image_assets),
+                task_mode="review",
+            )
+            user_prompt = self._build_review_user_prompt(
+                note=note,
+                context=context,
+                referenced_files=referenced_files or [],
+                image_assets=image_assets,
+            )
         try:
             review_message = self._request_protocol_text(
                 model_context=model_context,
@@ -1999,8 +2974,43 @@ class AIReviewClient:
                 history=[],
                 user_prompt=user_prompt,
                 image_assets=image_assets,
-            )
+            ).text
         except IntegrationError as exc:
+            if self._should_retry_openai_responses_without_images(
+                model_context=model_context,
+                error=exc,
+                image_assets=image_assets,
+            ):
+                self._log_responses_image_retry_fallback(
+                    model_context=model_context,
+                    error=exc,
+                    task_mode="review",
+                    image_assets=image_assets,
+                )
+                fallback_system_instruction = self._build_system_instruction(
+                    model_context=model_context,
+                    has_loaded_images=False,
+                    task_mode="review",
+                )
+                fallback_user_prompt = self._build_review_user_prompt(
+                    note=note,
+                    context=context,
+                    referenced_files=referenced_files or [],
+                    image_assets=[],
+                )
+                review_message = self._request_protocol_text(
+                    model_context=model_context,
+                    system_instruction=fallback_system_instruction,
+                    history=[],
+                    user_prompt=fallback_user_prompt,
+                    image_assets=[],
+                ).text
+                return {
+                    "status": "completed",
+                    "message": review_message,
+                    "record_id": record_id,
+                }
+
             if not self._should_retry_without_images(
                 model_context=model_context,
                 error=exc,
@@ -2031,7 +3041,7 @@ class AIReviewClient:
                 history=[],
                 user_prompt=fallback_user_prompt,
                 image_assets=[],
-            )
+            ).text
 
         return {
             "status": "completed",
@@ -2068,7 +3078,7 @@ class AIReviewClient:
             user_prompt=user_prompt,
             # 统计页分析基于聚合数据，不附带单条记录图像。
             image_assets=[],
-        )
+        ).text
 
     def stream_statistics_analysis(
         self,
@@ -2130,10 +3140,25 @@ class AIReviewClient:
             note=note,
             statistics_context=statistics_context,
         )
+        history_context_block = self._build_statistics_history_context_block(
+            history=normalized_history,
+            question=question,
+        )
+        user_prompt = self._append_history_context_to_prompt(
+            user_prompt=user_prompt,
+            history_context_block=history_context_block,
+        )
+        # 米醋 / OpenClaudeCode 的 Responses 链路在多条独立 input 历史上不稳定；
+        # 该网关的历史已写进 `user_prompt`，所以上游只发当前 user 消息。
+        request_history = (
+            []
+            if self._is_openclaudecode_gateway(model_context=model_context)
+            else normalized_history
+        )
         yield from self._stream_protocol_text(
             model_context=model_context,
             system_instruction=system_instruction,
-            history=normalized_history,
+            history=request_history,
             user_prompt=user_prompt,
             # 统计追问仍然只围绕聚合数据，不附带单条图像。
             image_assets=[],
@@ -2160,6 +3185,8 @@ class AIReviewClient:
         context: dict[str, Any],
         referenced_files: list[dict[str, Any]],
         model_context: dict[str, Any],
+        previous_response_id: str | None = None,
+        metadata_callback: Callable[[str | None], None] | None = None,
     ) -> Iterator[str]:
         """基于当前检测记录上下文逐片段返回 AI 回答。"""
 
@@ -2176,6 +3203,8 @@ class AIReviewClient:
             history=history,
             context=context,
             referenced_files=referenced_files,
+            previous_response_id=previous_response_id,
+            metadata_callback=metadata_callback,
         )
 
     def build_suggested_questions_for_context(self, *, context: dict[str, Any]) -> list[str]:
@@ -2193,6 +3222,7 @@ class AIReviewClient:
         context: dict[str, Any],
         referenced_files: list[dict[str, Any]],
         model_context: dict[str, Any] | None = None,
+        previous_response_id: str | None = None,
     ) -> dict:
         """基于当前检测记录上下文返回一段可继续追问的 AI 回答。"""
 
@@ -2204,6 +3234,7 @@ class AIReviewClient:
         )
 
         if model_context is None:
+            provider_response_id = None
             answer_sections = [
                 "我已经切到当前检测记录的上下文，会围绕这条记录的图片对象、检测结果和复核历史继续回答。",
                 "\n".join(self._build_model_lines(model_context=model_context)),
@@ -2224,13 +3255,16 @@ class AIReviewClient:
             answer_text = "\n\n".join(answer_sections)
             status = "contextual_response"
         else:
-            answer_text = self._request_model_completion(
+            completion_result = self._request_model_completion(
                 model_context=model_context,
                 question=question,
                 history=history,
                 context=context,
                 referenced_files=referenced_files,
+                previous_response_id=previous_response_id,
             )
+            answer_text = completion_result.text
+            provider_response_id = completion_result.provider_response_id
             status = "completed"
 
         return {
@@ -2238,6 +3272,7 @@ class AIReviewClient:
             "answer": answer_text,
             "record_id": record_id,
             "provider_hint": provider_hint,
+            "provider_response_id": provider_response_id,
             "context": context,
             "referenced_files": referenced_files,
             "suggested_questions": self._build_suggested_questions(context=context),

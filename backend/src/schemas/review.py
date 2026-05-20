@@ -88,6 +88,7 @@ class AIChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     model_profile_id: int | None = Field(default=None, ge=1)
     provider_hint: str | None = Field(default=None, max_length=64)
+    previous_response_id: str | None = Field(default=None, max_length=128)
     history: list[AIChatHistoryMessage] = Field(default_factory=list)
 
 
@@ -101,6 +102,7 @@ class AIContextFile(BaseModel):
     object_key: str
     uploaded_at: datetime | None
     preview_url: str | None
+    analysis_purpose: str | None = None
 
 
 class AIRecordContext(BaseModel):
@@ -141,6 +143,7 @@ class AIChatResponse(BaseModel):
     answer: str
     record_id: int
     provider_hint: str | None = None
+    provider_response_id: str | None = None
     context: AIRecordContext
     referenced_files: list[AIContextFile]
     suggested_questions: list[str]

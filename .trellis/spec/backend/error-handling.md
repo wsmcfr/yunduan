@@ -185,6 +185,176 @@ def format_sse_event(*, event: str, payload: dict[str, Any]) -> str:
 
 ---
 
+## Scenario: OpenClaudeCode/Micu Responses Multi-Turn AI Context Contract
+
+### 1. Scope / Trigger
+
+- Trigger: any change to record AI chat, statistics follow-up chat, OpenAI Responses payload construction, conversation history compaction, image resend policy, `previous_response_id`, or OpenClaudeCode/Micu provider adaptation
+- Affected layers: frontend chat history -> FastAPI SSE route -> `AIReviewClient` prompt builder -> OpenClaudeCode/Micu `/v1/responses` gateway -> SSE `meta/delta/done/error` events
+- Production bug prevented: first record AI question succeeds, but the second follow-up returns HTTP `200` with SSE `event:error` because Micu returns Cloudflare `502 origin_bad_gateway` for an incompatible multi-turn Responses payload
+
+### 2. Signatures
+
+```http
+POST /api/v1/records/{record_id}/ai-chat/stream
+POST /api/v1/statistics/ai-chat/stream
+```
+
+```py
+class AIReviewClient:
+    def _build_openai_responses_request(...): ...
+    def _should_send_responses_previous_response_id(...): ...
+    def _build_provider_history_for_compact_prompt(...): ...
+    def _build_compact_history_context_block(...): ...
+    def _build_statistics_history_context_block(...): ...
+    def _should_load_images_for_chat_turn(...): ...
+    def request_openai_responses_stream_metadata(...): ...
+```
+
+```json
+{
+  "model": "gpt-...",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "input_text", "text": "...history compact block + current question..."}
+      ]
+    }
+  ]
+}
+```
+
+### 3. Contracts
+
+| Boundary | Contract |
+|---|---|
+| OpenClaudeCode/Micu + `openai_responses` input shape | `payload["input"]` must contain exactly one current `user` item; do not send prior turns as independent Responses `input` items |
+| Multi-turn memory | Prior user/assistant turns must be compacted into the current user prompt block, using explicit markers such as `压缩后的同一弹窗历史` or `统计页历史对话` |
+| `previous_response_id` | Do not send this field to OpenClaudeCode/Micu HTTP Responses; it may be returned to the frontend only as diagnostic metadata |
+| Image policy for record chat | First visual turn must include record images; normal text follow-ups must not resend images; explicit requests to re-check images must resend images |
+| Image context after follow-up | When images are not resent, the current prompt must still preserve image purpose, object key / preview URL references, and the previous visual conclusion summary |
+| Provider history for compact prompt | For OpenClaudeCode/Micu, upstream provider history is empty and local compact history is embedded in the current prompt; other compatible providers may keep their own provider-history behavior |
+| Frontend assistant opening text | Synthetic assistant greetings before the first real user message must not enter provider history and must not turn the first question into a follow-up |
+| Quality answer behavior | When the user asks whether a part is good or bad, the prompt must require a clear recommendation, visual/field evidence, uncertainty, and board-result correction suggestion when AI and MP157 disagree |
+| SSE success stream | A successful follow-up must emit `meta -> delta* -> done`; provider failures must map to `event:error` with stable context instead of silent stream termination |
+
+Additional rules:
+
+- a first visual analysis must not silently fall back to a no-image answer when the image-loading step fails
+- normal follow-ups should reuse local context instead of paying the payload and gateway-stability cost of resending the same images
+- if the AI recommendation conflicts with MP157, the answer should include suggested correction fields such as `decision`, `defect_type`, and `cloud_reason`
+- do not treat `review_status=pending` as a reason to avoid judgment; it is supporting context, not the conclusion
+- provider request logs must keep enough payload diagnostics for production debugging: endpoint, model, `input_image_count`, `payload_bytes`, and `user_agent`
+
+### 4. Validation & Error Matrix
+
+| Condition | Problem | Expected behavior |
+|---|---|---|
+| OpenClaudeCode/Micu follow-up sends prior turns as independent `input` items | Micu gateway may return Cloudflare `502 origin_bad_gateway`; frontend sees HTTP `200` plus SSE `event:error` | Compact history into the current user prompt and send a single `user` input item |
+| OpenClaudeCode/Micu follow-up sends `previous_response_id` | HTTP Responses/WebSocket compatibility differs from Codex CLI assumptions and may fail on Micu | `_should_send_responses_previous_response_id(...)` returns `False` for OpenClaudeCode/Micu |
+| Follow-up omits history entirely | The assistant answers like a fresh session and loses the previous visual conclusion | Prompt includes compact local history and prior visual summary |
+| First real user message is preceded by frontend assistant greeting history | Provider receives an assistant message with no preceding real user turn and may misclassify the request | Normalize history by dropping messages before the first real user turn |
+| First visual turn has zero images | The assistant may make unsupported quality judgments | Treat as an image-loading failure or return a clear inability to visually judge; do not pretend images were reviewed |
+| Normal follow-up resends all images | Payload grows unnecessarily and increases gateway instability | Keep `input_image_count=0` unless the user explicitly asks to re-check images |
+| User explicitly asks to re-read/re-check images but images are not sent | The requested visual re-evaluation is ignored | `_should_load_images_for_chat_turn(...)` returns `True` and `input_image_count>0` |
+| AI says bad while MP157 says good, or AI says good while MP157 says bad | Operator does not know how to fill the board correction fields | Answer includes a correction suggestion for `decision`, `defect_type`, and `cloud_reason` |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | First question sends four images and receives `meta -> delta -> done`; second question sends no images, embeds compact history in the current user prompt, and also receives `meta -> delta -> done` |
+| Good | User asks “重新看图再判断一次”, the follow-up resends images and the provider log shows `input_image_count>0` |
+| Base | Non-Micu provider supports independent Responses history, so only that provider path keeps its compatible history behavior |
+| Bad | Record follow-up builds `input=[old_user, old_assistant, current_user]` for Micu; the provider returns `502`, and the frontend reports an AI error on the second question |
+| Bad | Follow-up sends a single current user prompt but omits the compact history block; the assistant loses the previous record and asks for information it already had |
+
+### 6. Tests Required
+
+- unit test for OpenClaudeCode/Micu record follow-up asserting:
+  - `payload["input"]` length is `1`
+  - the only item has `role="user"`
+  - the prompt contains `压缩后的同一弹窗历史`
+  - no `previous_response_id` is sent
+  - no `input_image` is sent on a normal follow-up
+- unit test for first visual record question asserting image content is present and `input_image_count` is greater than zero
+- unit test for explicit “re-check image” follow-up asserting image content is present again
+- unit test for OpenClaudeCode/Micu statistics follow-up asserting:
+  - `payload["input"]` length is `1`
+  - the prompt contains `统计页历史对话`
+  - no independent provider-history items are sent upstream
+- SSE service/integration test asserting success event order is `meta -> delta* -> done`
+- regression test or manual production verification through the real frontend record dialog:
+  - first turn log contains `input_image_count=4`
+  - second normal follow-up log contains `input_image_count=0`
+  - no `record.ai_chat_stream_failed` log is produced
+
+Assertion points:
+
+- OpenClaudeCode/Micu uses local compact context, not upstream multi-item Responses history
+- the second follow-up is not a fresh session from the model's perspective
+- image resend behavior is intentional and test-covered
+- provider diagnostics make a `502` reproducible without packet capture
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+input_items = []
+for message in history:
+    input_items.append(
+        {
+            "role": message.role,
+            "content": [{"type": "input_text", "text": message.content}],
+        }
+    )
+input_items.append(current_user_input)
+
+payload = {
+    "model": model,
+    "input": input_items,
+    "previous_response_id": previous_response_id,
+}
+```
+
+#### Correct
+
+```py
+history_for_input = []
+compact_history_block = self._build_compact_history_context_block(history)
+user_prompt = f"{compact_history_block}\n\n{current_user_prompt}"
+
+payload = {
+    "model": model,
+    "input": [
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": user_prompt}],
+        }
+    ],
+}
+```
+
+#### Wrong
+
+```py
+def _should_send_responses_previous_response_id(self, provider: ProviderConfig) -> bool:
+    return provider.protocol == "openai_responses"
+```
+
+#### Correct
+
+```py
+def _should_send_responses_previous_response_id(self, provider: ProviderConfig) -> bool:
+    if provider.is_openclaudecode_or_micu:
+        return False
+    return provider.protocol == "openai_responses"
+```
+
+---
+
 ## Scenario: Statistics PDF Export Mode Error Boundary
 
 ### 1. Scope / Trigger

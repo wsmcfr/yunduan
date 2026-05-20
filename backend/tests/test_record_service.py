@@ -42,6 +42,20 @@ class FakeCosClient:
 
         self.deleted_objects.append((bucket_name, region, object_key))
 
+    def build_object_access_url(self, *, bucket_name: str, region: str, object_key: str) -> str:
+        """按 COS 公网访问格式生成测试预览地址。
+
+        参数:
+            bucket_name: 测试文件所属 bucket。
+            region: 测试文件所属地域。
+            object_key: 测试文件对象路径。
+
+        返回:
+            返回可预测的 URL 字符串，避免 AI 上下文测试依赖真实 COS 客户端。
+        """
+
+        return f"https://{bucket_name}.cos.{region}.myqcloud.com/{object_key}"
+
 
 class RecordServiceTestCase(unittest.TestCase):
     """验证管理员删除单条检测记录时的聚合清理行为。"""
@@ -155,13 +169,30 @@ class RecordServiceTestCase(unittest.TestCase):
         self.db.refresh(record)
         return record
 
-    def _create_record_file(self, *, record: DetectionRecord, object_key: str) -> FileObject:
-        """创建检测记录文件对象，验证删除记录会同步清理图片元数据。"""
+    def _create_record_file(
+        self,
+        *,
+        record: DetectionRecord,
+        object_key: str,
+        file_kind: FileKind = FileKind.SOURCE,
+        uploaded_at: datetime | None = None,
+    ) -> FileObject:
+        """创建检测记录文件对象。
+
+        参数:
+            record: 文件归属的检测记录。
+            object_key: COS 对象路径，用于验证删除、AI 引用和模型产物识别。
+            file_kind: 文件类型；默认源图，AI 上下文测试会传入标注图和缩略图。
+            uploaded_at: 上传时间；不传时使用固定测试时间，保证排序断言稳定。
+
+        返回:
+            返回已持久化的 FileObject，方便测试继续读取 id 和对象路径。
+        """
 
         file_object = FileObject(
             company_id=self.company.id,
             detection_record_id=record.id,
-            file_kind=FileKind.SOURCE,
+            file_kind=file_kind,
             storage_provider=StorageProvider.COS,
             bucket_name="demo-bucket",
             region="ap-shanghai",
@@ -169,7 +200,7 @@ class RecordServiceTestCase(unittest.TestCase):
             content_type="image/jpeg",
             size_bytes=2048,
             etag=None,
-            uploaded_at=datetime(2026, 5, 8, 9, 1, 0, tzinfo=timezone.utc),
+            uploaded_at=uploaded_at or datetime(2026, 5, 8, 9, 1, 0, tzinfo=timezone.utc),
             storage_last_modified=None,
         )
         self.db.add(file_object)
@@ -341,6 +372,60 @@ class RecordServiceTestCase(unittest.TestCase):
             self.service.create_record(company_id=self.company.id, payload=payload)
 
         self.assertEqual(caught.exception.code, "part_identity_required")
+
+    def test_ai_context_references_four_model_artifact_images_with_purpose(self) -> None:
+        """AI 对话上下文应带齐四张模型产物图，并说明每张图的质检用途。"""
+
+        record = self._create_detection_record(record_no="REC-AI-FILES-0001")
+        base_time = datetime(2026, 5, 20, 7, 48, 55, tzinfo=timezone.utc)
+        self._create_record_file(
+            record=record,
+            file_kind=FileKind.ANNOTATED,
+            object_key="detections/REC-AI-FILES-0001/annotated/001_segment_20260520_154855_62_mask.png",
+            uploaded_at=base_time,
+        )
+        self._create_record_file(
+            record=record,
+            file_kind=FileKind.ANNOTATED,
+            object_key="detections/REC-AI-FILES-0001/annotated/002_segment_20260520_154855_62_overlay.jpg",
+            uploaded_at=base_time,
+        )
+        self._create_record_file(
+            record=record,
+            file_kind=FileKind.ANNOTATED,
+            object_key="detections/REC-AI-FILES-0001/annotated/003_mobilenetv3_classification_gasket_good.jpg",
+            uploaded_at=base_time,
+        )
+        self._create_record_file(
+            record=record,
+            file_kind=FileKind.SOURCE,
+            object_key="detections/REC-AI-FILES-0001/source/004_segment_20260520_154855_62_raw.jpg",
+            uploaded_at=base_time,
+        )
+        self._create_record_file(
+            record=record,
+            file_kind=FileKind.THUMBNAIL,
+            object_key="detections/REC-AI-FILES-0001/thumbnail/005_thumb.jpg",
+            uploaded_at=base_time,
+        )
+        self.db.refresh(record)
+
+        referenced_files = self.service._build_ai_referenced_files(record=record)  # type: ignore[attr-defined]
+
+        self.assertEqual(len(referenced_files), 4)
+        self.assertEqual(
+            [item["object_key"].split("/")[-1] for item in referenced_files],
+            [
+                "001_segment_20260520_154855_62_mask.png",
+                "002_segment_20260520_154855_62_overlay.jpg",
+                "003_mobilenetv3_classification_gasket_good.jpg",
+                "004_segment_20260520_154855_62_raw.jpg",
+            ],
+        )
+        self.assertIn("UNet 分割 mask", referenced_files[0]["analysis_purpose"])
+        self.assertIn("UNet 分割叠加图", referenced_files[1]["analysis_purpose"])
+        self.assertIn("MobileNetV3-Small 分类", referenced_files[2]["analysis_purpose"])
+        self.assertIn("原始采集图", referenced_files[3]["analysis_purpose"])
 
     def test_delete_record_purges_files_reviews_and_cos_objects(self) -> None:
         """删除检测记录时，应一并清理文件元数据、复核历史和 COS 对象。"""

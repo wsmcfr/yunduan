@@ -247,6 +247,143 @@ const payload = {
 
 ---
 
+## Scenario: Record AI Chat Reference Image Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: any change touching single-record AI chat context files, `AIContextFile`, record-file selection for multimodal prompts, or the AI chat dialog reference-file UI.
+- Affected layers: `RecordService` file selection -> `AIContextFile` schema -> AI prompt snapshot -> frontend DTO/model mapper -> `AiReviewChatDialog`.
+
+### 2. Signatures
+
+```py
+class AIContextFile(BaseModel):
+    id: int
+    file_kind: FileKind
+    bucket_name: str
+    region: str
+    object_key: str
+    uploaded_at: datetime | None
+    preview_url: str | None
+    analysis_purpose: str | None = None
+```
+
+```py
+RecordService._select_ai_reference_files(record: DetectionRecord) -> list[FileObject]
+RecordService._resolve_ai_file_analysis_purpose(file_object: FileObject) -> str
+```
+
+```ts
+export interface AIContextFileDto {
+  id: number;
+  file_kind: FileKind;
+  object_key: string;
+  analysis_purpose: string | null;
+}
+
+export interface AIContextFile {
+  id: number;
+  fileKind: FileKind;
+  objectKey: string;
+  analysisPurpose: string | null;
+}
+```
+
+### 3. Contracts
+
+| Boundary / field | Contract |
+|---|---|
+| Backend reference selection | Preserve up to four complementary model artifacts, not only three generic images. |
+| Artifact order | Prefer UNet mask, UNet overlay, MobileNetV3-Small classification result, then raw source image. |
+| `analysis_purpose` | Must explain what the image means for inspection, for example raw image, UNet mask, UNet overlay, or MobileNetV3-Small classification evidence. |
+| AI prompt snapshot | Must include `analysis_purpose` inside `referenced_files` so the model understands how to use each image. |
+| Good/bad user questions | Prompts must ask the model to give a direct good/bad/evidence-insufficient tendency before discussing audit status. |
+| Board correction prompt | If the AI's evidence-based recommendation differs from `record_context.result`, the answer must include a `修正板端结果填写建议` section with `decision`, `defect_type`, and `cloud_reason` values that map to the board-correction dialog. |
+| Follow-up memory | The frontend sends recent `history`, and the backend must also embed a readable recent-history block in the current user prompt so provider gateways that mishandle message arrays still preserve follow-up context. |
+| Prompt cache order | The readable history block must be appended after the stable record prompt and context snapshot, not prepended before them, so stable instructions and record context remain a cacheable prefix. |
+| Pending manual review | `review_status="pending"` is a risk boundary and next-step suggestion, not a reason to avoid image-based advice. |
+| Frontend mapper | `analysis_purpose -> analysisPurpose` must happen in `commonMappers.ts`; components must not read snake_case directly. |
+| Reference-file UI | Use short file labels plus tooltip/full detail; do not render full COS paths in tags where they can overflow the dialog. |
+
+### 4. Validation & Error Matrix
+
+| Condition | Boundary | Expected behavior |
+|---|---|---|
+| Record has mask, overlay, classification, raw, and thumbnail files | service selection | Return the four evidence files and omit the thumbnail. |
+| File name ends with `_mask.png` | service metadata | `analysis_purpose` identifies it as a UNet mask. |
+| File name ends with `_overlay.jpg` | service metadata | `analysis_purpose` identifies it as a UNet overlay image. |
+| File name contains `mobilenet`, `classification`, `classify`, or `classifier` | service metadata | `analysis_purpose` identifies it as MobileNetV3-Small classification evidence. |
+| User asks "is this good or bad" while review is pending | prompt boundary | Answer should first state the current evidence-based tendency, then explain uncertainty and review action. |
+| AI recommendation conflicts with MP157 initial result | prompt boundary | Add `修正板端结果填写建议`: for `good -> bad`, use `decision=bad`, defect type, and a copyable bad-result reason; for `bad -> good`, use `decision=good`, `defect_type=null` or `无明显缺陷`, and a copyable good-result reason. |
+| User follow-up says "this position", "why", or "continue" | prompt boundary | Current model request includes recent user/assistant turns in a `同一弹窗历史对话` block appended after the stable current-record prompt. |
+| Long COS object key appears in referenced files | UI boundary | The dialog stays within its width; full path remains accessible by tooltip. |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | AI receives four images: `*_mask.png`, `*_overlay.jpg`, `*classification*.jpg`, and `*_raw.jpg`, each with a purpose sentence. |
+| Good | The model answer explains why the current evidence leans good or bad, then notes whether manual review is still needed. |
+| Good | MP157 initially says `good`, but AI recommends `bad`; the answer says the correction dialog should use `decision=bad`, a concrete `defect_type`, and a copyable `cloud_reason`. |
+| Good | The user asks a second question using "这个位置"; the backend prompt includes the previous assistant answer so the model can resolve the reference. |
+| Base | Only source and annotated images exist; both still get purpose text and are sent in stable order. |
+| Bad | Backend slices reference files to three images and drops the raw image or classifier result. |
+| Bad | UI renders `标注图 / detections/.../very-long-object-key.png` as an unbounded tag and expands the chat dialog horizontally. |
+| Bad | Prompt tells the user only "manual review has not happened yet" when the question asks for a quality recommendation. |
+| Bad | AI says "it may be bad" but does not tell the operator what to put in `decision`, `defect_type`, and `cloud_reason`. |
+| Bad | The frontend displays previous bubbles but the current backend model request only contains the newest question, so the model cannot know what "这个" refers to. |
+
+### 6. Tests Required
+
+- Backend service test asserting four model artifact images are selected in the expected order.
+- Backend AI client test asserting chat prompts include artifact meanings and the direct good/bad advice requirement.
+- Backend AI client test asserting chat/review prompts include board-correction field recommendations when AI advice can conflict with the MP157 initial result.
+- Backend AI client tests asserting non-streaming and streaming single-record chat requests embed recent previous turns in the current user prompt.
+- Frontend utility test asserting evidence image sorting keeps mask, overlay, classifier, and raw images together.
+- Frontend build/typecheck after changing `AIContextFileDto` or `AIContextFile`.
+
+Assertion points:
+
+- `referenced_files[].analysis_purpose` survives backend schema serialization.
+- `mapAIContextFileDto(...)` maps `analysis_purpose` to `analysisPurpose`.
+- Reference tags use bounded labels and keep full object keys in a detail surface.
+- `review_status` remains visible but does not replace the AI's evidence-based recommendation.
+- Follow-up prompts include recent history both as structured `history` messages and as a readable prompt block appended after the stable record context.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+return sorted(record.files, key=... )[:3]
+```
+
+```ts
+// Full object key is rendered directly inside a tag and can stretch the dialog.
+{{ getAiFileKindLabel(file.fileKind) }} / {{ file.objectKey }}
+```
+
+#### Correct
+
+```py
+return sorted(
+    record.files,
+    key=lambda item: (
+        self._resolve_ai_file_artifact_priority(file_object=item),
+        self._ai_file_priority.get(item.file_kind, 99),
+    ),
+)[:4]
+```
+
+```ts
+function buildReferenceFileLabel(file: AIContextFile): string {
+  const fileName = file.objectKey.split("/").filter(Boolean).at(-1) ?? file.objectKey;
+  return `${getAiFileKindLabel(file.fileKind)} / ${fileName}`;
+}
+```
+
+---
+
 ## Scenario: Board Review Sync DTO Boundary
 
 ### 1. Scope / Trigger
@@ -294,6 +431,7 @@ syncBoardReview(recordId: number, payload: BoardReviewSyncRequestDto): Promise<B
 |---|---|
 | `cloud_reason` | Frontend must trim and block empty text before calling the API; backend still validates again. |
 | `reviewed_at` | If generated by the browser, send timezone-aware ISO such as `new Date().toISOString()`, not Element Plus local datetime text. |
+| AI correction recommendation | AI text may suggest the operator-filled values, but the dialog still submits only `decision`, `cloud_reason`, `defect_type`, and `reviewed_at`; it must not invent extra payload fields. |
 | `DetectionRecordModel.boardSync*` | All sync fields must be mapped through `mapDetectionRecordDto(...)`; components must not read snake_case DTOs directly. |
 | `DeviceModel.hasBoardReviewToken` | UI can display configured/not configured, but must not expose token plaintext. |
 | Device edit token field | Empty edit value means "do not update existing token"; only send `board_review_token` when the admin fills it. |

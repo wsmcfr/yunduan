@@ -5,6 +5,7 @@ import {
   buildAiPreviewUrl,
   createDefaultAiSuggestedQuestions,
   createAiOpeningMessage,
+  getAiFileArtifactPriority,
   sortAiDisplayFiles,
 } from "./aiReview";
 
@@ -56,6 +57,41 @@ describe("ai review utilities", () => {
       "source",
       "thumbnail",
     ]);
+  });
+
+  it("会按模型产物用途排列 UNet 与 MobileNetV3-Small 四张证据图", () => {
+    const sortedFiles = sortAiDisplayFiles([
+      {
+        fileKind: "source",
+        uploadedAt: "2026-05-20T07:48:55.000Z",
+        objectKey: "detections/demo/source/segment_20260520_154855_62_raw.jpg",
+      },
+      {
+        fileKind: "annotated",
+        uploadedAt: "2026-05-20T07:48:55.000Z",
+        objectKey: "detections/demo/annotated/mobilenetv3_classification_gasket_good.jpg",
+      },
+      {
+        fileKind: "annotated",
+        uploadedAt: "2026-05-20T07:48:55.000Z",
+        objectKey: "detections/demo/annotated/segment_20260520_154855_62_overlay.jpg",
+      },
+      {
+        fileKind: "annotated",
+        uploadedAt: "2026-05-20T07:48:55.000Z",
+        objectKey: "detections/demo/annotated/segment_20260520_154855_62_mask.png",
+      },
+    ]);
+
+    expect(sortedFiles.map((item) => item.objectKey.split("/").at(-1))).toEqual([
+      "segment_20260520_154855_62_mask.png",
+      "segment_20260520_154855_62_overlay.jpg",
+      "mobilenetv3_classification_gasket_good.jpg",
+      "segment_20260520_154855_62_raw.jpg",
+    ]);
+    expect(getAiFileArtifactPriority("demo_mask.png")).toBeLessThan(
+      getAiFileArtifactPriority("demo_raw.jpg"),
+    );
   });
 
   it("打开 AI 对话时会生成带记录上下文的首条引导语", () => {

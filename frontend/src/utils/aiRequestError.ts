@@ -96,6 +96,22 @@ function isRateLimitMessage(message: string): boolean {
 }
 
 /**
+ * 判断供应商错误是否属于中转站或上游模型服务的临时网关故障。
+ * 这类错误通常不是用户输入、密钥或云端代码问题，直接展示 Cloudflare JSON 会误导现场人员。
+ */
+function isTemporaryGatewayMessage(message: string): boolean {
+  const normalizedMessage = message.toLowerCase();
+  return [
+    "origin_bad_gateway",
+    "bad gateway",
+    "cloudflare",
+    "gateway timeout",
+    "temporarily unavailable",
+    "incomplete response",
+  ].some((keyword) => normalizedMessage.includes(keyword));
+}
+
+/**
  * 把 AI 供应商相关错误翻译成更适合一线用户理解的提示语。
  * 这层统一供单条记录 AI 对话和统计 AI 工作台复用，避免不同页面各自误判错误类型。
  */
@@ -138,6 +154,16 @@ export function getAiProviderErrorMessage(caughtError: unknown, fallbackMessage:
         return `AI 供应商已触发限流或配额限制，${waitHint}：${providerMessage}`;
       }
       return `AI 供应商已触发限流或配额限制，${waitHint}，也可以先切换到其他模型或网关。`;
+    }
+
+    if (
+      [502, 503, 504].includes(upstreamStatusCode)
+      || (providerMessage && isTemporaryGatewayMessage(providerMessage))
+    ) {
+      const waitHint = retryAfter
+        ? `建议至少等待 ${retryAfter} 秒后再重试`
+        : "请稍后重试";
+      return `AI 供应商上游网关临时失败，${waitHint}；如果连续失败，请切换到其它模型或稍后再试。`;
     }
 
     if (providerMessage && isAuthenticationMessage(providerMessage)) {

@@ -13,12 +13,56 @@ const fileKindLabelMap: Record<FileKind, string> = {
   thumbnail: "缩略图",
 };
 
+const fileArtifactPriorityRules: Array<{
+  priority: number;
+  matcher: (fileName: string) => boolean;
+}> = [
+  {
+    priority: 0,
+    matcher: (fileName) => fileName.includes("_mask") || fileName.endsWith("mask.png"),
+  },
+  {
+    priority: 1,
+    matcher: (fileName) =>
+      fileName.includes("_overlay")
+      || fileName.endsWith("overlay.jpg")
+      || fileName.endsWith("overlay.png"),
+  },
+  {
+    priority: 2,
+    matcher: (fileName) =>
+      ["mobilenet", "classification", "classify", "classifier"].some((marker) =>
+        fileName.includes(marker),
+      ),
+  },
+  {
+    priority: 3,
+    matcher: (fileName) => fileName.includes("_raw") || fileName.endsWith("raw.jpg"),
+  },
+];
+
 /**
  * 返回文件类型标签。
  * 这样 AI 对话区和文件预览区不会各自维护一套类型文案。
  */
 export function getAiFileKindLabel(fileKind: FileKind): string {
   return fileKindLabelMap[fileKind];
+}
+
+/**
+ * 根据文件名判断模型产物图的显示优先级。
+ *
+ * 参数:
+ * objectKey: COS 对象路径或文件名。
+ *
+ * 返回:
+ * 返回越小表示越应该排在前面。UNet mask、UNet overlay、MobileNetV3-Small 分类图
+ * 和原始图组成当前 AI 对话最关键的四张证据图。
+ */
+export function getAiFileArtifactPriority(objectKey: string): number {
+  const fileName = objectKey.toLowerCase().split("/").filter(Boolean).at(-1) ?? "";
+  const matchedRule = fileArtifactPriorityRules.find((rule) => rule.matcher(fileName));
+  return matchedRule?.priority ?? 9;
 }
 
 /**
@@ -59,12 +103,21 @@ export function buildAiPreviewUrl(
 
 /**
  * 对 AI 对话里展示的文件做稳定排序。
- * 优先级：标注图 -> 源图 -> 缩略图；同类型内按上传时间倒序。
+ * 优先级：模型产物用途 -> 文件类型 -> 上传时间倒序。
  */
-export function sortAiDisplayFiles<T extends Pick<FileObjectModel, "fileKind" | "uploadedAt">>(
+export function sortAiDisplayFiles<
+  T extends Pick<FileObjectModel, "fileKind" | "uploadedAt"> & Partial<Pick<FileObjectModel, "objectKey">>,
+>(
   files: readonly T[],
 ): T[] {
   return [...files].sort((left, right) => {
+    const artifactPriorityDiff =
+      getAiFileArtifactPriority(left.objectKey ?? "")
+      - getAiFileArtifactPriority(right.objectKey ?? "");
+    if (artifactPriorityDiff !== 0) {
+      return artifactPriorityDiff;
+    }
+
     const priorityDiff = aiFilePriority[left.fileKind] - aiFilePriority[right.fileKind];
     if (priorityDiff !== 0) {
       return priorityDiff;

@@ -557,6 +557,7 @@ export function mapAIContextFileDto(dto: AIContextFileDto): AIContextFile {
     objectKey: dto.object_key,
     uploadedAt: dto.uploaded_at,
     previewUrl: dto.preview_url,
+    analysisPurpose: dto.analysis_purpose,
   };
 }
 
@@ -603,6 +604,7 @@ export function mapAIChatResponseDto(dto: AIChatResponseDto): AIChatResponse {
     answer: dto.answer,
     recordId: dto.record_id,
     providerHint: dto.provider_hint,
+    providerResponseId: dto.provider_response_id,
     context: mapAIRecordContextDto(dto.context),
     referencedFiles: dto.referenced_files.map(mapAIContextFileDto),
     suggestedQuestions: dto.suggested_questions,

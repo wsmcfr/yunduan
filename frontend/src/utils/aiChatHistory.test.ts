@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "node:fs";
+
 import { buildAiChatHistoryPayload } from "./aiChatHistory";
 
 describe("ai chat history utilities", () => {
@@ -58,5 +60,13 @@ describe("ai chat history utilities", () => {
     expect(history).toEqual([
       { role: "assistant", content: "最新消息三" },
     ]);
+  });
+
+  it("记录页 AI 对话会把上一轮 Responses ID 带入下一轮请求", () => {
+    const source = readFileSync("src/features/review/AiReviewChatDialog.vue", "utf-8");
+
+    expect(source).toContain("const lastProviderResponseId = ref<string | null>(null);");
+    expect(source).toContain("previous_response_id: lastProviderResponseId.value");
+    expect(source).toContain("lastProviderResponseId.value = response.providerResponseId;");
   });
 });

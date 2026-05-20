@@ -738,6 +738,8 @@ NEW_V1_URL = "https://www.micuapi.ai/v1"
 | `ai_gateways.official_url` | Historical `https://docs.openclaudecode.cn/#/` should migrate to `https://www.micuapi.ai` |
 | `ai_model_profiles.base_url_override` | Historical old-host `/v1` overrides must migrate to `https://www.micuapi.ai/v1` |
 | Runtime URL construction | OpenAI-compatible and Responses paths still append endpoints below `/v1`; Anthropic Messages uses the host without `/v1` and appends `/v1/messages` itself |
+| Runtime protocol override | OpenClaudeCode/Micu API GPT/Codex models must run as `openai_responses` even if an old row was saved as `openai_compatible`; the runtime request path must be `/v1/responses`. |
+| Strict selected protocol | Once runtime context says `protocol_type="openai_responses"`, the AI client must not silently retry `/chat/completions`; provider failures should surface through the normal integration/SSE error boundary. |
 
 Additional rules:
 
@@ -752,6 +754,8 @@ Additional rules:
 | Only `aiSettingsCatalog.ts` changes | Existing server rows still call the old host | Add Alembic data migration |
 | Codex override migrates to host without `/v1` | Responses runtime calls the wrong endpoint | Store `https://www.micuapi.ai/v1` for existing override rows |
 | OpenClaudeCode vendor enum is renamed | Existing rows and gateway-specific runtime logic break | Keep `vendor='openclaudecode'` and change URLs only |
+| Stored `gpt-*` model row still says `openai_compatible` | Runtime would call `/v1/chat/completions` despite the model being a Responses/Codex model | `AIGatewayService.build_runtime_model_context(...)` returns `protocol_type="openai_responses"` and normalized base URL `https://www.micuapi.ai/v1`. |
+| `/v1/responses` returns non-JSON or 502 | Old compatibility fallback can create unexpected `/chat/completions` logs | Do not cross protocols automatically; return the provider error so the selected model/protocol can be fixed explicitly. |
 
 ### 5. Good / Base / Bad Cases
 
@@ -760,12 +764,16 @@ Additional rules:
 | Good | Alembic rewrites existing OpenClaudeCode gateway rows from old primary or old SLB hosts to `https://www.micuapi.ai` while keeping `vendor='openclaudecode'` |
 | Base | Existing Codex / Responses model overrides using an old `/v1` URL migrate to `https://www.micuapi.ai/v1` |
 | Base | Existing Anthropic-style gateway base URL migrates to the host-only `https://www.micuapi.ai`, and runtime code appends the correct endpoint later |
+| Base | A historical `gpt-5.4` row saved as `openai_compatible` is corrected at runtime to `openai_responses`, without mutating the database row during request handling |
 | Bad | Only frontend presets are changed, leaving production database rows and server runtime traffic on the old OpenClaudeCode host |
 | Bad | `base_url_override` is migrated to `https://www.micuapi.ai` without `/v1`, so Responses requests are assembled under the wrong path |
+| Bad | The AI client first calls `/v1/responses`, then automatically retries `/v1/chat/completions` after an invalid JSON response, making provider logs contradict the selected protocol |
 
 ### 6. Tests Required
 
 - backend AI client tests asserting OpenClaudeCode runtime URLs use `https://www.micuapi.ai`
+- backend AI gateway service test asserting historical OpenClaudeCode GPT/Codex rows are corrected to `openai_responses` and `https://www.micuapi.ai/v1`
+- backend AI client tests asserting an `openai_responses` request never falls back to `/chat/completions` on provider errors
 - model discovery tests asserting OpenClaudeCode discovery probes Micu API URLs
 - frontend catalog tests asserting current preset and template URLs
 
@@ -775,6 +783,7 @@ Assertion points:
 - model profile override rows with known old `/v1` URLs are rewritten to `https://www.micuapi.ai/v1`
 - custom third-party URLs are not rewritten by the data migration
 - internal vendor keys stay `openclaudecode`
+- selected runtime protocol controls the only allowed request endpoint; no hidden cross-protocol retry happens after provider errors
 
 ### 7. Wrong vs Correct
 

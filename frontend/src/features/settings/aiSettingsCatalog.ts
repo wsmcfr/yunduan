@@ -65,7 +65,7 @@ export const authModeLabels: Record<AIAuthMode, string> = {
  * OpenClaudeCode 文档里给出的 Codex 外接 User-Agent。
  */
 export const OPENCLAUDECODE_CODEX_UA =
-  "codex_cli_rs/0.77.0 (Windows 10.0.26100; x86_64) WindowsTerminal";
+  "codex_cli_rs/0.132.0 (Windows 10.0.26100; x86_64) WindowsTerminal";
 
 /**
  * OpenClaudeCode 文档里给出的 Claude 外接 User-Agent。
