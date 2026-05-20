@@ -7,12 +7,13 @@ from typing import Iterator
 
 from sqlalchemy.orm import Session
 
-from src.core.errors import AppError, ConflictError, NotFoundError
+from src.core.errors import AppError, BadRequestError, ConflictError, NotFoundError
 from src.core.logging import get_logger
 from src.core.sse import build_sse_error_payload, format_sse_event
 from src.db.models.detection_record import DetectionRecord
 from src.db.models.enums import DetectionResult, FileKind, ReviewStatus
 from src.db.models.file_object import FileObject
+from src.db.models.part import Part
 from src.repositories.detection_record_repository import DetectionRecordRepository
 from src.repositories.device_repository import DeviceRepository
 from src.repositories.part_repository import PartRepository
@@ -111,8 +112,7 @@ class RecordService:
     def create_record(self, *, company_id: int, payload: DetectionRecordCreateRequest) -> DetectionRecord:
         """创建新的检测主记录。"""
 
-        if self.part_repository.get_by_id(payload.part_id, company_id=company_id) is None:
-            raise NotFoundError(code="part_not_found", message="零件不存在。")
+        part = self._resolve_record_part(company_id=company_id, payload=payload)
         if self.device_repository.get_by_id(payload.device_id, company_id=company_id) is None:
             raise NotFoundError(code="device_not_found", message="设备不存在。")
 
@@ -123,7 +123,7 @@ class RecordService:
         record = DetectionRecord(
             company_id=company_id,
             record_no=record_no,
-            part_id=payload.part_id,
+            part_id=part.id,
             device_id=payload.device_id,
             result=payload.result,
             review_status=payload.review_status,
@@ -157,6 +157,63 @@ class RecordService:
             record.device_id,
         )
         return record
+
+    def _resolve_record_part(self, *, company_id: int, payload: DetectionRecordCreateRequest) -> Part:
+        """解析检测记录要关联的零件，必要时按 MP157 上报的零件编码自动创建。
+
+        参数:
+            company_id: 当前登录账号所属公司，用于保证零件查询和创建都在租户边界内完成。
+            payload: 创建检测记录请求体，可能携带旧字段 part_id，也可能携带 MP157 新字段 part_code。
+
+        主要流程:
+            1. 优先兼容旧的 part_id 路径，传入 part_id 时只做存在性校验。
+            2. 未传 part_id 时，要求至少传入 part_code，并按当前公司内的 part_code 查找零件。
+            3. part_code 已存在时直接复用，避免同类零件被重复创建。
+            4. part_code 不存在且 auto_create_part=true 时创建零件主数据。
+            5. part_code 不存在且未允许自动创建时返回 part_not_found。
+
+        返回:
+            返回已存在或刚创建的 Part ORM 对象；调用方使用它的 id 创建检测记录。
+        """
+
+        if payload.part_id is not None:
+            part = self.part_repository.get_by_id(payload.part_id, company_id=company_id)
+            if part is None:
+                raise NotFoundError(code="part_not_found", message="零件不存在。")
+            return part
+
+        normalized_part_code = (payload.part_code or "").strip()
+        if not normalized_part_code:
+            raise BadRequestError(
+                code="part_identity_required",
+                message="创建检测记录必须提供 part_id 或 part_code。",
+            )
+
+        existed_part = self.part_repository.get_by_code(normalized_part_code, company_id=company_id)
+        if existed_part is not None:
+            return existed_part
+
+        if not payload.auto_create_part:
+            raise NotFoundError(code="part_not_found", message="零件不存在。")
+
+        part_name = (payload.part_name or normalized_part_code).strip()
+        part_category = payload.part_category.strip() if payload.part_category else None
+        part = Part(
+            company_id=company_id,
+            part_code=normalized_part_code,
+            name=part_name,
+            category=part_category,
+            description="MP157 自动创建零件类型。",
+            is_active=True,
+        )
+        self.part_repository.create(part)
+        logger.info(
+            "part.auto_created event=part.auto_created part_id=%s part_code=%s company_id=%s",
+            part.id,
+            part.part_code,
+            company_id,
+        )
+        return part
 
     def get_record_detail(self, *, company_id: int, record_id: int) -> DetectionRecord:
         """读取检测记录详情。"""

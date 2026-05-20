@@ -19,7 +19,11 @@ class DetectionRecordCreateRequest(BaseModel):
     """创建检测记录请求体。"""
 
     record_no: str | None = Field(default=None, max_length=64)
-    part_id: int = Field(ge=1)
+    part_id: int | None = Field(default=None, ge=1)
+    part_code: str | None = Field(default=None, min_length=2, max_length=64)
+    part_name: str | None = Field(default=None, min_length=1, max_length=128)
+    part_category: str | None = Field(default=None, max_length=64)
+    auto_create_part: bool = False
     device_id: int = Field(ge=1)
     result: DetectionResult
     review_status: ReviewStatus = ReviewStatus.PENDING

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.core.errors import NotFoundError
+from src.core.errors import BadRequestError, NotFoundError
 from src.db.base import Base
 from src.db.models.company import Company
 from src.db.models.detection_record import DetectionRecord
@@ -25,6 +25,7 @@ from src.db.models.enums import (
 from src.db.models.file_object import FileObject
 from src.db.models.part import Part
 from src.db.models.review_record import ReviewRecord
+from src.schemas.detection_record import DetectionRecordCreateRequest
 from src.services.record_service import RecordService
 
 
@@ -193,6 +194,118 @@ class RecordServiceTestCase(unittest.TestCase):
         self.db.commit()
         self.db.refresh(review)
         return review
+
+    def _build_record_payload(
+        self,
+        *,
+        record_no: str,
+        part_id: int | None = None,
+        part_code: str | None = None,
+        part_name: str | None = None,
+        part_category: str | None = None,
+        auto_create_part: bool = False,
+    ) -> DetectionRecordCreateRequest:
+        """构造检测记录创建请求，便于测试 part_id 与 part_code 两条入口。
+
+        参数:
+            record_no: 本次检测记录编号，测试中显式传入以避免随机编号影响断言。
+            part_id: 已有零件主键；传入时沿用旧的创建记录路径。
+            part_code: MP157 上报的零件编码；未传 part_id 时服务层按它查找或自动创建零件。
+            part_name: 自动创建零件时使用的中文名称。
+            part_category: 自动创建零件时使用的分类。
+            auto_create_part: 是否允许服务层在 part_code 不存在时创建零件。
+
+        返回:
+            返回 DetectionRecordCreateRequest，供 RecordService.create_record() 直接使用。
+        """
+
+        return DetectionRecordCreateRequest(
+            record_no=record_no,
+            part_id=part_id,
+            part_code=part_code,
+            part_name=part_name,
+            part_category=part_category,
+            auto_create_part=auto_create_part,
+            device_id=self.device.id,
+            result=DetectionResult.GOOD,
+            review_status=ReviewStatus.PENDING,
+            surface_result=DetectionResult.GOOD,
+            backlight_result=None,
+            eddy_result=None,
+            defect_type=None,
+            defect_desc=None,
+            confidence_score=0.91,
+            vision_context={"model": "mobilenetv3-small"},
+            sensor_context=None,
+            decision_context=None,
+            device_context={
+                "part_code": part_code,
+                "class_label": f"{part_code}_good" if part_code else None,
+            },
+            captured_at=datetime(2026, 5, 20, 3, 39, 59, tzinfo=timezone.utc),
+            detected_at=None,
+            uploaded_at=None,
+            storage_last_modified=None,
+        )
+
+    def test_create_record_auto_creates_part_from_part_code(self) -> None:
+        """MP157 只上传 part_code 且允许自动创建时，应先创建零件再创建检测记录。"""
+
+        payload = self._build_record_payload(
+            record_no="REC-AUTO-PART-0001",
+            part_code="wave_washer",
+            part_name="波形垫圈",
+            part_category="弹性垫圈",
+            auto_create_part=True,
+        )
+
+        record = self.service.create_record(company_id=self.company.id, payload=payload)
+
+        self.assertNotEqual(record.part_id, self.part.id)
+        self.assertEqual(record.part.part_code, "wave_washer")
+        self.assertEqual(record.part.name, "波形垫圈")
+        self.assertEqual(record.part.category, "弹性垫圈")
+        self.assertEqual(record.device_context["part_code"], "wave_washer")
+
+    def test_create_record_reuses_existing_part_code_without_auto_create(self) -> None:
+        """MP157 上传的 part_code 已存在时，即使未开启自动创建，也应复用已有零件。"""
+
+        payload = self._build_record_payload(
+            record_no="REC-REUSE-PART-0001",
+            part_code=self.part.part_code,
+            auto_create_part=False,
+        )
+
+        record = self.service.create_record(company_id=self.company.id, payload=payload)
+
+        self.assertEqual(record.part_id, self.part.id)
+        self.assertEqual(record.part.part_code, self.part.part_code)
+
+    def test_create_record_rejects_unknown_part_code_without_auto_create(self) -> None:
+        """MP157 上传未知 part_code 但未允许自动创建时，应拒绝创建记录避免误建主数据。"""
+
+        payload = self._build_record_payload(
+            record_no="REC-UNKNOWN-PART-0001",
+            part_code="unknown_wave_washer",
+            auto_create_part=False,
+        )
+
+        with self.assertRaises(NotFoundError) as caught:
+            self.service.create_record(company_id=self.company.id, payload=payload)
+
+        self.assertEqual(caught.exception.code, "part_not_found")
+
+    def test_create_record_requires_part_id_or_part_code(self) -> None:
+        """创建检测记录必须至少提供 part_id 或 part_code 之一。"""
+
+        payload = self._build_record_payload(
+            record_no="REC-MISSING-PART-0001",
+        )
+
+        with self.assertRaises(BadRequestError) as caught:
+            self.service.create_record(company_id=self.company.id, payload=payload)
+
+        self.assertEqual(caught.exception.code, "part_identity_required")
 
     def test_delete_record_purges_files_reviews_and_cos_objects(self) -> None:
         """删除检测记录时，应一并清理文件元数据、复核历史和 COS 对象。"""

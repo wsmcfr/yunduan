@@ -535,7 +535,7 @@ async function submitBoardSync(): Promise<void> {
 
 ## 9. 零件类型适配规则
 
-板端上传检测记录时已经按云端现有契约调用 `GET /api/v1/parts?limit=100`，再把匹配到的 `part_id` 放进 `POST /api/v1/records`。
+板端上传检测记录时会先按云端现有契约调用 `GET /api/v1/parts?limit=100`，能匹配到真实零件类型时把 `part_id` 放进 `POST /api/v1/records`。如果匹配不到，但板端已经能从模型类别归一出真实 `part_code`，则由 `POST /api/v1/records` 携带 `part_code/part_name/part_category/auto_create_part=true`，云端自动创建或复用零件后再创建检测记录。
 
 云端需要坚持以下规则：
 
@@ -544,7 +544,7 @@ async function submitBoardSync(): Promise<void> {
 | 模型输出 `gasket_good` | `part_code=gasket`，`result=good` | 新建零件类型 `gasket_good` |
 | 模型输出 `gasket_bad` | `part_code=gasket`，`result=bad` | 新建零件类型 `gasket_bad` |
 | 模型输出 `washer_good` | `part_code=washer`，`result=good` | 把它也归到 `gasket` |
-| 新增另一种真实零件 | 在云端 `parts` 新增该零件，例如 `washer`、`splitwasher` | 因为好坏结果不同而新增零件 |
+| 新增另一种真实零件 | 在 `POST /api/v1/records` 中发送 `part_code/part_name/part_category/auto_create_part=true`，或在云端零件管理手工新增该真实零件，例如 `washer`、`splitwasher`、`wave_washer` | 因为好坏结果不同而新增零件 |
 
 云端排障时看两个位置：
 
@@ -554,7 +554,9 @@ async function submitBoardSync(): Promise<void> {
 | `records.device_context.part_code` | 板端归一后的零件编码，例如 `gasket`。 |
 | `records.device_context.class_label` | 模型原始标签，例如 `gasket_bad`。 |
 
-如果上传失败并提示找不到零件类型，应该先在云端零件管理中创建真实零件类型，例如 `gasket`；不要创建 `gasket_good` 和 `gasket_bad` 两条零件。
+如果上传失败并提示找不到零件类型，先看请求体是否缺少 `part_code` 或 `auto_create_part=true`。板端能确定真实零件编码时，不需要先手工创建零件；云端 `backend/src/services/record_service.py::RecordService._resolve_record_part()` 会在当前公司内按 `part_code` 查询，查不到且 `auto_create_part=true` 时自动创建零件。只有板端完全没有传 `part_code`，或现场明确禁止自动创建时，才需要人工在云端零件管理里创建真实零件类型。
+
+`wave_washer` 的中文名必须使用板端传入的 `part_name=波形垫圈`，分类使用 `part_category=弹性垫圈`；云端不要自行把它翻译成“电平”。
 
 ## 10. 设备配置方式
 

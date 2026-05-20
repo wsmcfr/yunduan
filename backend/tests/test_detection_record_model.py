@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from src.db.models.detection_record import DetectionRecord
 from src.db.models.enums import DetectionResult, ReviewSource, ReviewStatus
 from src.db.models.review_record import ReviewRecord
+from src.schemas.detection_record import DetectionRecordCreateRequest
 
 
 class DetectionRecordModelTestCase(unittest.TestCase):
@@ -106,3 +107,23 @@ class DetectionRecordModelTestCase(unittest.TestCase):
 
         self.assertEqual(record.latest_review.id, 4)
         self.assertEqual(record.effective_result, DetectionResult.GOOD)
+
+    def test_create_request_accepts_part_code_without_part_id(self) -> None:
+        """检测记录创建请求应允许 MP157 只传 part_code 触发服务层自动建零件。"""
+
+        payload = DetectionRecordCreateRequest(
+            record_no="REC-AUTO-PART-SCHEMA",
+            part_code="wave_washer",
+            part_name="波形垫圈",
+            part_category="弹性垫圈",
+            auto_create_part=True,
+            device_id=1,
+            result=DetectionResult.GOOD,
+            captured_at=datetime(2026, 5, 20, 3, 39, 59, tzinfo=timezone.utc),
+        )
+
+        self.assertIsNone(payload.part_id)
+        self.assertEqual(payload.part_code, "wave_washer")
+        self.assertEqual(payload.part_name, "波形垫圈")
+        self.assertEqual(payload.part_category, "弹性垫圈")
+        self.assertTrue(payload.auto_create_part)

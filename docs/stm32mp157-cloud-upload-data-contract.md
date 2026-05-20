@@ -48,8 +48,11 @@ STM32MP157 采集图片
 | `password` | 必须 | `<现场配置>` | 云端给 MP157 分配的登录密码，不能写进公开代码 |
 | `device_code` | 必须 | `MP157-VIS-01` | 云端设备编码，用来查找本机 `device_id` |
 | `device_id` | 必须 | `1` | 云端设备表主键，创建检测记录时必须传 |
-| `part_id` | 必须 | `1` | 云端零件表主键，创建检测记录时必须传 |
-| `part_code` | 建议 | `PART-RING-001` | 零件编码，主要放在本地日志和 `device_context` 里便于排障 |
+| `part_id` | 可选 | `1` | 云端零件表主键；如果 MP157 已缓存映射，优先传它 |
+| `part_code` | 必须二选一 | `wave_washer` | 零件编码；未传 `part_id` 时云端按它查找零件 |
+| `part_name` | 自动创建时建议 | `波形垫圈` | 云端按 `part_code` 自动创建零件时使用的显示名称 |
+| `part_category` | 自动创建时建议 | `弹性垫圈` | 云端按 `part_code` 自动创建零件时使用的分类 |
+| `auto_create_part` | 建议 | `true` | 允许云端在 `part_code` 不存在时自动创建零件 |
 | `network_interface` | 建议 | `ppp0` | EC20 PPP 网卡名称，curl 可使用 `--interface ppp0` |
 | `f4_uart_device` | 建议 | `/dev/ttySTM1` | MP157 与 STM32F4 通信串口 |
 | `f4_baudrate` | 建议 | `115200` | F4 串口波特率 |
@@ -131,14 +134,79 @@ curl --interface ppp0 \
 
 ### 6.2 零件信息
 
-检测记录必须带 `part_id`。如果 MP157 端只知道零件编码，启动时要先调用 `GET /api/v1/parts?limit=100` 拉取映射。
+检测记录必须能定位零件。MP157 可以继续传已缓存的 `part_id`；如果只知道模型归一后的零件编码，则在 `POST /api/v1/records` 顶层传 `part_code`，云端会先按当前公司内的 `parts.part_code` 查找。查不到且 `auto_create_part=true` 时，云端自动创建零件后再创建检测记录。
 
 | 字段 | 云端位置 | 上报要求 | 示例 | 说明 |
 |---|---|---:|---|---|
-| `part_id` | `POST /records` 顶层字段 | 必须 | `1` | 云端零件主键 |
-| `part_code` | `device_context.part_code` | 建议 | `PART-RING-001` | 边缘端本地记录和排障使用 |
-| `part_name` | 云端零件表返回 | 可选 | `轴承端盖` | 通常由云端展示，不要求 MP157 每次上报 |
-| `part_category` | 云端零件表返回 | 可选 | `金属件` | 统计分类由云端维护 |
+| `part_id` | `POST /records` 顶层字段 | 和 `part_code` 二选一 | `1` | 云端零件主键，传入时沿用旧流程 |
+| `part_code` | `POST /records` 顶层字段和 `device_context.part_code` | 和 `part_id` 二选一 | `wave_washer` | 边缘端归一后的零件编码，例如 `wave_washer_good` 要归一成 `wave_washer` |
+| `part_name` | `POST /records` 顶层字段 | 自动创建时建议 | `波形垫圈` | 自动创建零件时的云端显示名称；省略时云端用 `part_code` 兜底 |
+| `part_category` | `POST /records` 顶层字段 | 自动创建时建议 | `弹性垫圈` | 自动创建零件时的统计分类 |
+| `auto_create_part` | `POST /records` 顶层字段 | 建议 | `true` | 为 `true` 时，云端找不到 `part_code` 会自动创建零件；为 `false` 时返回 `part_not_found` |
+
+### 6.3 云端自动创建零件逻辑
+
+当 MP157 端没有可用 `part_id`，但能从模型类别得到稳定 `part_code` 时，云端必须允许记录接口自动创建真实零件类型。这里的自动创建只针对“真实零件类型”，不针对 `good/bad` 好坏结果。
+
+| 层级 | 文件/函数 | 契约 |
+|---|---|---|
+| 请求 Schema | `backend/src/schemas/detection_record.py::DetectionRecordCreateRequest` | 接收 `part_id`、`part_code`、`part_name`、`part_category`、`auto_create_part`。 |
+| 服务入口 | `backend/src/services/record_service.py::RecordService.create_record()` | 创建检测记录前调用 `_resolve_record_part()`，拿到已存在或刚创建的 `Part`。 |
+| 零件解析 | `RecordService._resolve_record_part()` | 优先校验 `part_id`；未传 `part_id` 时按当前公司内 `part_code` 查询；查不到且 `auto_create_part=true` 时创建零件；否则返回 `part_not_found`。 |
+| 零件查询 | `backend/src/repositories/part_repository.py::get_by_code()` | 查询必须带 `company_id`，避免跨公司复用同名零件。 |
+| 自动创建字段 | `Part(part_code, name, category, description, is_active)` | `name` 使用 `part_name`，为空时回退 `part_code`；`category` 使用 `part_category`；`description` 固定说明为 MP157 自动创建；新零件默认启用。 |
+| 日志 | `part.auto_created` | 自动创建时记录 `part_id`、`part_code`、`company_id`，便于排查。 |
+
+自动创建请求示例：
+
+```json
+{
+  "record_no": "MP157-20260520-125945",
+  "device_id": 3,
+  "part_code": "wave_washer",
+  "part_name": "波形垫圈",
+  "part_category": "弹性垫圈",
+  "auto_create_part": true,
+  "result": "good",
+  "device_context": {
+    "part_code": "wave_washer",
+    "class_label": "wave_washer_good"
+  },
+  "captured_at": "2026-05-20T12:59:45+08:00",
+  "detected_at": "2026-05-20T12:59:45+08:00"
+}
+```
+
+返回的记录详情必须能看到云端创建或复用后的零件：
+
+```json
+{
+  "id": 93,
+  "part_id": 5,
+  "part": {
+    "id": 5,
+    "part_code": "wave_washer",
+    "name": "波形垫圈",
+    "category": "弹性垫圈"
+  }
+}
+```
+
+本次板端联调的根因结论：
+
+| 现象 | 根因 | 修正 |
+|---|---|---|
+| 首页检测和历史重发都显示图片上传失败 | 板端在创建检测记录前先查 `/api/v1/parts?limit=100`，找不到模型输出的真实零件类型后本地失败；COS prepare、PUT 和文件登记没有机会执行。 | 板端在查不到 `part_id` 时发送 `part_code/part_name/part_category/auto_create_part=true`；云端由 `_resolve_record_part()` 自动创建或复用零件后再创建检测记录。 |
+| `wave_washer` 显示名称错误 | 模型英文编码被误解为普通英文词或错误翻译。 | MP157 端应传 `part_name=波形垫圈`、`part_category=弹性垫圈`；云端只保存板端显式字段，不自行翻译成“电平”。 |
+
+自动创建验收必须同时确认记录和图片：
+
+| 验收点 | 通过标准 |
+|---|---|
+| 创建记录 | `POST /api/v1/records` 返回新 `record_id`，记录详情包含期望 `part.part_code/name/category`。 |
+| 文件上传 | 记录详情中 `file_kind=source` 数量为 1，`file_kind=annotated` 数量等于板端传入的结果图数量。 |
+| 多租户 | 相同 `part_code` 只在当前公司内复用或创建，不跨公司查询。 |
+| 好坏分离 | `wave_washer_good` 和 `wave_washer_bad` 只能归到同一个 `wave_washer` 零件；好坏只写入 `records.result`。 |
 
 ## 7. 检测主记录请求
 
@@ -151,8 +219,11 @@ curl --interface ppp0 \
 ```json
 {
   "record_no": "MP157-VIS-01-20260516-143012-0001",
-  "part_id": 1,
   "device_id": 1,
+  "part_code": "wave_washer",
+  "part_name": "波形垫圈",
+  "part_category": "弹性垫圈",
+  "auto_create_part": true,
   "result": "bad",
   "review_status": "pending",
   "surface_result": "bad",
@@ -407,7 +478,11 @@ curl --interface ppp0 \
 | 字段 | 类型 | 上报要求 | 后端约束 | 示例 | 说明 |
 |---|---|---:|---|---|---|
 | `record_no` | string 或 null | 强烈建议 | 最大 64 字符，全平台唯一 | `MP157-VIS-01-20260516-143012-0001` | MP157 本地生成的检测编号；断网补传和人工排查都依赖它 |
-| `part_id` | integer | 必须 | `>=1`，必须属于当前公司 | `1` | 云端已有零件 ID |
+| `part_id` | integer 或 null | 和 `part_code` 二选一 | `>=1`，必须属于当前公司 | `1` | 云端已有零件 ID；传入时优先使用 |
+| `part_code` | string 或 null | 和 `part_id` 二选一 | 2 到 64 字符，公司内唯一 | `wave_washer` | MP157 归一后的零件编码；云端按它查找或自动创建零件 |
+| `part_name` | string 或 null | 自动创建时建议 | 1 到 128 字符 | `波形垫圈` | 自动创建零件时的显示名称；省略时用 `part_code` 兜底 |
+| `part_category` | string 或 null | 自动创建时建议 | 最大 64 字符 | `弹性垫圈` | 自动创建零件时的统计分类 |
+| `auto_create_part` | boolean | 可选 | 默认 `false` | `true` | 未传 `part_id` 且 `part_code` 不存在时，是否允许云端自动创建零件 |
 | `device_id` | integer | 必须 | `>=1`，必须属于当前公司 | `1` | 云端已有 MP157 设备 ID |
 | `result` | enum | 必须 | `good` / `bad` / `uncertain` | `bad` | 本次检测最终初判结果 |
 | `review_status` | enum | 可选 | `pending` / `reviewed` / `ai_reserved` | `pending` | MP157 初检一般传 `pending` 或不传，后端默认 `pending` |
@@ -1148,7 +1223,7 @@ curl --interface ppp0 \
 |---:|---|---|---|
 | 401 | `missing_token` 或登录相关错误 | 未登录、Cookie 过期 | 重新登录后重试 |
 | 403 | 权限不足 | 账号无当前公司权限 | 停止重试，通知云端配置账号 |
-| 404 | `part_not_found` | `part_id` 不存在或不属于当前公司 | 刷新零件映射，必要时人工处理 |
+| 404 | `part_not_found` | `part_id` 不存在或不属于当前公司，或只传 `part_code` 但未设置 `auto_create_part=true` | 如果 MP157 能确定真实零件类型，重新发送 `part_code/part_name/part_category/auto_create_part=true`；否则刷新零件映射或人工处理 |
 | 404 | `device_not_found` | `device_id` 不存在或不属于当前公司 | 刷新设备映射，确认设备未被删除 |
 | 404 | `record_not_found` | 文件登记使用的 `record_id` 不存在 | 检查本地状态文件 |
 | 409 | `record_no_exists` | 相同 `record_no` 已入库 | 不要生成新编号；按补传逻辑确认是否已成功 |
@@ -1161,7 +1236,7 @@ curl --interface ppp0 \
 |---|---:|---|
 | PPP 网络可用 | 必须 | `curl --interface ppp0 http://119.91.65.122/health` 返回 `{"status":"ok"}` |
 | 设备 ID 已缓存 | 必须 | 本地 `device_code` 能映射到云端 `device_id` |
-| 零件 ID 已缓存 | 必须 | 本地 `part_code` 能映射到云端 `part_id` |
+| 零件身份已明确 | 必须 | 优先有 `part_id`；没有 `part_id` 时必须有归一化 `part_code`，并在允许自动创建时发送 `part_name/part_category/auto_create_part=true` |
 | 记录编号稳定 | 必须 | 同一检测样本断网补传仍使用同一个 `record_no` |
 | 时间带时区 | 必须 | 所有 datetime 都类似 `2026-05-16T14:30:12.000+08:00` |
 | 模型输出完整 | 强烈建议 | `vision_context.unet` 与 `vision_context.mobilenetv3_small` 均有版本、阈值、关键结果 |
@@ -1181,6 +1256,8 @@ curl --interface ppp0 \
 | 把腾讯云 `COS_SECRET_ID` / `COS_SECRET_KEY` 放到 MP157 | 边缘端泄露后会暴露整个存储桶权限 |
 | 把图片 base64 放进 `POST /records` | 当前接口不接收图片二进制，会导致请求巨大且无法进入 COS 流程 |
 | 给 STM32F4 单独创建设备并上报 `device_type=f4` | 当前云端设备管理只允许 MP157 主控设备 |
+| 把 `wave_washer_good` 和 `wave_washer_bad` 当成两个零件编码 | 好坏结果应该写入 `records.result`，零件编码必须归一成 `wave_washer` |
+| 云端自行把 `wave_washer` 翻译成中文 | 零件显示名应使用 MP157 明确传入的 `part_name=波形垫圈`，避免误翻成“电平”等错误名称 |
 | 发送无时区时间 | 云端和前端会产生排序、统计和延迟计算偏差 |
 | 每次重试都生成新的 `record_no` | 会造成重复记录，无法判断同一检测样本是否已经上传 |
 | 复用过期的 COS `upload_url` | 预签名 URL 有时效，过期必须重新 prepare |
