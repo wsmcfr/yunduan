@@ -950,3 +950,60 @@ Updated STM32MP157 cloud upload contract with verified F4-side hardware fields f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 21: 修复 AI 多轮上下文与米醋追问失败
+
+**Date**: 2026-05-20
+**Task**: 修复 AI 多轮上下文与米醋追问失败
+**Branch**: `main`
+
+### Summary
+
+本次完成 AI 对话长上下文与米醋/OpenClaudeCode Responses 网关兼容修复。核心是让记录详情 AI 对话和统计页追问具备稳定的同一会话上下文：普通追问不再像新会话一样回答，也不再把历史作为多条独立 Responses `input` 发给米醋网关，从而修复“第一问成功、第二问 SSE 内返回错误”的生产问题。
+
+### Main Changes
+
+| Area | Notes |
+|------|-------|
+| AI 多轮上下文 | 修复记录详情和统计页 AI 追问上下文。OpenClaudeCode/Micu Responses 不再把历史轮次作为独立上游 `input` 发送，而是把本地压缩历史写入当前 user prompt，避免追问像新会话一样回答。 |
+| 米醋二次追问失败 | 修复第一问成功、第二问 HTTP 200 但 SSE 内 `event:error` 的生产问题。根因是米醋/Cloudflare 对多条历史 `input` 的 Responses payload 返回 `502 origin_bad_gateway`。 |
+| Responses 网关契约 | 禁止 OpenClaudeCode/Micu HTTP Responses 上送 `previous_response_id`，该字段只保留为前端/调试元数据；米醋兼容请求保持单条当前 `user` input。 |
+| 图片策略 | 首轮视觉分析继续发送图片；普通追问不重复发送图片；用户明确要求重新看图时才重新加载图片。追问 prompt 保留图片用途、图片引用和上一轮视觉结论。 |
+| AI 判定质量 | 调整 prompt/context，让用户问良品/坏品时必须给出明确建议、依据、不确定性；AI 判断和 MP157 冲突时给出板端修正字段建议，而不是把人工未审核当作主要结论。 |
+| 前端和错误展示 | 优化 AI 聊天历史和请求错误处理，让 UI 保留有效上下文，并更清楚地展示流式响应和供应商错误。 |
+| 规范沉淀 | 补充 Micu/OpenClaudeCode Responses 多轮上下文契约、类型安全/历史处理、板端复核同步、数据库/记录行为等可执行 Trellis spec。 |
+| 测试覆盖 | 新增/更新后端和前端测试，覆盖米醋追问 payload 形状、图片重发策略、统计页历史压缩、记录服务行为、AI 网关行为、前端历史工具和错误解析。 |
+
+**Verification**:
+- `python -m unittest discover -s tests` in `backend`: 119 tests passed.
+- `npm run test` in `frontend`: 13 files / 51 tests passed.
+- `npm run build` in `frontend`: passed, including `vue-tsc --noEmit`.
+- `git diff --check`: no whitespace errors.
+- Production frontend flow was manually verified before commit: first record AI question succeeded with images; second follow-up succeeded without image resend and without `record.ai_chat_stream_failed`.
+
+**Commit**:
+- `805dc98 fix(ai): 修复多轮追问上下文与米醋网关兼容`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `805dc98` | (see git log) |
+
+### Testing
+
+- [OK] `backend`: `python -m unittest discover -s tests`，119 个测试通过。
+- [OK] `frontend`: `npm run test`，13 个测试文件 / 51 个测试通过。
+- [OK] `frontend`: `npm run build` 通过，包含 `vue-tsc --noEmit` 类型检查。
+- [OK] `git diff --check` 无空白错误。
+- [OK] 生产前端记录详情 AI 对话已手工验证：第一问带图成功，第二轮普通追问不重发图且无 `record.ai_chat_stream_failed`。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
