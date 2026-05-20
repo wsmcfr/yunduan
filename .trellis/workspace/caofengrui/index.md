@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
-- **Last Active**: 2026-05-20
+- **Total Sessions**: 23
+- **Last Active**: 2026-05-21
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1049 | Active |
+| `journal-1.md` | ~1109 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-05-21 | 优化管理界面响应式布局与操作列样式 | `43cabc9` | `main` |
 | 22 | 2026-05-20 | AI streaming and model selection alignment | `85409f0` | `main` |
 | 21 | 2026-05-20 | 修复 AI 多轮上下文与米醋追问失败 | `805dc98` | `main` |
 | 20 | 2026-05-20 | 记录 MP157 检测信息完整显示与零件身份归一化 | `4b0f7f2` | `main` |

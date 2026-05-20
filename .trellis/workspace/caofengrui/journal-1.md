@@ -1047,3 +1047,66 @@ Updated STM32MP157 cloud upload contract with verified F4-side hardware fields f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: 优化管理界面响应式布局与操作列样式
+
+**Date**: 2026-05-21
+**Task**: 优化管理界面响应式布局与操作列样式
+**Branch**: `main`
+
+### Summary
+
+完成管理界面 UI/UX 响应式优化并部署上线。本次重点修复小屏一页式外壳高度分配、移动端导航占屏、表格操作列拥挤与固定列错误、详情页图片区离屏、统计页 hero 右溢，以及开发环境卡片暴露造成的演示感问题；同时补充前端测试与 Trellis 前端规范，主实现已提交、部署并推送到 GitHub。
+
+### Main Changes
+
+| 模块 | 本次记录 |
+|---|---|
+| 一页式外壳 | 修复小屏高度分配，保证认证后页面仍是一屏外壳，整体页面不滚动，内容在 `.page-grid` 内部滚动。 |
+| 小屏导航 | 将移动端侧栏改为紧凑模式，避免侧栏占据上半屏；隐藏开发环境卡片，弱化开发调试感。 |
+| 表格操作列 | 移除记录、零件、设备表格操作列的右侧固定，改为紧凑横向胶囊按钮，减少拥挤和横向滚动依赖。 |
+| 操作按钮文案 | 将记录、零件、设备操作按钮统一压缩为短文案，例如 `复核`、`详情`、`删除`、`编辑`、`样本`、`停用`。 |
+| 详情与统计页 | 重排移动端详情图片区，避免 carousel 离屏；收窄统计页 hero，消除 390px 宽度下右溢。 |
+| 视觉主题 | 调整页面头部、背景和管理界面密度，让界面更符合芯片检测/比赛演示场景。 |
+| 规范沉淀 | 更新 `.trellis/spec/frontend/component-guidelines.md` 与 `quality-guidelines.md`，记录一页式外壳、表格操作列和移动端溢出防线。 |
+| 验证 | 已通过 `git diff --check`、`frontend npm run test`（61 个测试）、`frontend npm run build`。 |
+| 部署 | 已部署到服务器 `/opt/yunduan/frontend/dist`，公开访问 `/records` 返回 200，`/health` 返回 ok。 |
+| GitHub | 主实现提交 `43cabc9 fix(ui): 优化管理界面响应式布局与操作列样式` 已推送到 `origin/main`。 |
+
+**关键文件**:
+- `frontend/src/components/layout/AppShell.vue`
+- `frontend/src/components/layout/AppSidebar.vue`
+- `frontend/src/components/layout/AppHeader.vue`
+- `frontend/src/components/common/PageHeader.vue`
+- `frontend/src/pages/RecordsPage.vue`
+- `frontend/src/pages/PartsPage.vue`
+- `frontend/src/pages/DevicesPage.vue`
+- `frontend/src/pages/RecordDetailPage.vue`
+- `frontend/src/pages/StatisticsPage.vue`
+- `frontend/src/components/layout/layoutShell.test.ts`
+- `frontend/src/pages/managementPages.test.ts`
+- `.trellis/spec/frontend/component-guidelines.md`
+- `.trellis/spec/frontend/quality-guidelines.md`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `43cabc9` | (see git log) |
+
+### Testing
+
+- [OK] `git diff --check`
+- [OK] `cd frontend; npm run test`，共 15 个测试文件、61 个测试通过
+- [OK] `cd frontend; npm run build`，包含 `vue-tsc --noEmit` 与 Vite 生产构建
+- [OK] 服务器部署后检查 `/records` 返回 200，`/health` 返回 ok
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
