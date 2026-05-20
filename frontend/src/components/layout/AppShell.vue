@@ -33,6 +33,7 @@ import AppSidebar from "./AppSidebar.vue";
   display: flex;
   gap: 18px;
   height: calc(100dvh - 40px);
+  max-height: calc(100dvh - 40px);
   min-height: 0;
 }
 
@@ -74,19 +75,48 @@ import AppSidebar from "./AppSidebar.vue";
     padding: 12px;
   }
 
+  /**
+   * 小屏外壳改为“两行”：上方是紧凑导航，下方是含 header 和业务页的内容区。
+   * 第二行必须用 minmax(0, 1fr)，否则 sidebar/header 的自然高度会把 .page-grid 挤成 0px。
+   */
   .shell__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
     height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
     min-height: 0;
-    flex-direction: column;
+  }
+
+  .shell__content {
+    gap: 10px;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .shell__page {
     min-height: 0;
-    padding: 20px;
+    padding: 14px;
   }
 
   :deep(.page-grid) {
     padding-right: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .shell {
+    padding: 8px;
+  }
+
+  .shell__grid {
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+
+  .shell__page {
+    padding: 10px;
   }
 }
 

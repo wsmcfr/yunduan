@@ -234,27 +234,27 @@ onMounted(() => {
       </div>
 
       <ElTable :data="items" v-loading="loading" empty-text="暂无设备数据">
-        <ElTableColumn prop="deviceCode" label="设备编码" min-width="150" />
-        <ElTableColumn prop="name" label="设备名称" min-width="160" />
-        <ElTableColumn prop="deviceType" label="类型" min-width="120" />
-        <ElTableColumn label="状态" min-width="100">
+        <ElTableColumn prop="deviceCode" label="设备编码" min-width="126" show-overflow-tooltip />
+        <ElTableColumn prop="name" label="设备名称" min-width="132" show-overflow-tooltip />
+        <ElTableColumn prop="deviceType" label="类型" min-width="88" show-overflow-tooltip />
+        <ElTableColumn label="状态" min-width="92">
           <template #default="{ row }">
             <StatusTag :value="row.status" />
           </template>
         </ElTableColumn>
-        <ElTableColumn prop="firmwareVersion" label="固件版本" min-width="130" />
-        <ElTableColumn prop="ipAddress" label="IP 地址" min-width="150" />
-        <ElTableColumn label="检测记录" min-width="110">
+        <ElTableColumn prop="firmwareVersion" label="固件" min-width="92" show-overflow-tooltip />
+        <ElTableColumn prop="ipAddress" label="IP" min-width="118" show-overflow-tooltip />
+        <ElTableColumn label="记录" min-width="78" align="right">
           <template #default="{ row }">
             {{ row.recordCount }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="图片元数据" min-width="120">
+        <ElTableColumn label="图片" min-width="78" align="right">
           <template #default="{ row }">
             {{ row.imageCount }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="板端回写" min-width="180">
+        <ElTableColumn label="板端回写" min-width="136">
           <template #default="{ row }">
             <div class="board-sync-cell">
               <ElTag
@@ -274,22 +274,25 @@ onMounted(() => {
             </div>
           </template>
         </ElTableColumn>
-        <ElTableColumn label="最近心跳" min-width="180">
+        <ElTableColumn label="最近心跳" min-width="148">
           <template #default="{ row }">
             {{ formatDateTime(row.lastSeenAt) }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="操作" width="170" fixed="right">
+        <ElTableColumn label="操作" min-width="156" align="center">
           <template #default="{ row }">
-            <ElButton text type="primary" @click="openEditDialog(row)">编辑</ElButton>
-            <ElButton
-              text
-              type="danger"
-              :loading="deletingDeviceId === row.id"
-              @click="handleDeleteDevice(row)"
-            >
-              删除
-            </ElButton>
+            <div class="table-actions">
+              <ElButton class="table-action-button" text type="primary" @click="openEditDialog(row)">编辑</ElButton>
+              <ElButton
+                class="table-action-button"
+                text
+                type="danger"
+                :loading="deletingDeviceId === row.id"
+                @click="handleDeleteDevice(row)"
+              >
+                删除
+              </ElButton>
+            </div>
           </template>
         </ElTableColumn>
       </ElTable>
@@ -340,6 +343,7 @@ onMounted(() => {
 }
 
 .toolbar-actions,
+.table-actions,
 .table-section__header,
 .table-section__footer,
 .board-sync-cell {
@@ -353,6 +357,29 @@ onMounted(() => {
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.table-actions {
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: max-content;
+}
+
+/* 表格操作按钮使用低高度胶囊样式，避免默认文本按钮在管理表格里竖向堆叠。 */
+.table-action-button {
+  height: 28px;
+  min-width: 42px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.34);
+  font-weight: 700;
+}
+
+/* 覆盖 Element Plus 相邻按钮的默认外边距，让操作组只由 flex gap 控制间距。 */
+.table-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .table-section__meta {

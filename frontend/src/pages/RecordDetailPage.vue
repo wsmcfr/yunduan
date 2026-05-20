@@ -371,6 +371,7 @@ watch(
 
         <div v-else class="detail-preview">
           <ElCarousel
+            class="detail-preview__carousel"
             arrow="always"
             indicator-position="outside"
             height="360px"
@@ -403,6 +404,42 @@ watch(
               </div>
             </ElCarouselItem>
           </ElCarousel>
+
+          <div class="detail-preview__mobile-list">
+            <article
+              v-for="file in previewFiles"
+              :key="`mobile-${file.id}`"
+              class="detail-preview__mobile-card"
+            >
+              <div class="detail-preview__meta-head">
+                <strong>{{ file.label }}</strong>
+                <ElTag effect="dark" round>{{ formatDateTime(file.uploadedAt) }}</ElTag>
+              </div>
+
+              <ElImage
+                v-if="file.previewUrl"
+                :src="file.previewUrl"
+                :alt="file.label"
+                fit="contain"
+                class="detail-preview__mobile-image"
+              >
+                <template #error>
+                  <div class="detail-preview__fallback">
+                    <strong>{{ file.label }}</strong>
+                    <p>当前对象已登记，但浏览器无法直接预览该文件。</p>
+                    <code>{{ file.objectKey }}</code>
+                  </div>
+                </template>
+              </ElImage>
+
+              <div v-else class="detail-preview__fallback">
+                <strong>{{ file.label }}</strong>
+                <p>当前对象没有可直接访问的预览地址。</p>
+              </div>
+
+              <code>{{ file.objectKey }}</code>
+            </article>
+          </div>
 
           <div class="detail-preview__meta-list">
             <article
@@ -700,6 +737,7 @@ watch(
 
 .detail-preview,
 .detail-preview__meta-list,
+.detail-preview__mobile-list,
 .detail-preview__print-list,
 .detail-context,
 .detail-review-workspace,
@@ -806,6 +844,10 @@ watch(
   display: none;
 }
 
+.detail-preview__mobile-list {
+  display: none;
+}
+
 .detail-preview__print-image {
   width: 100%;
   max-height: none;
@@ -834,6 +876,47 @@ watch(
   .detail-context,
   .detail-preview__meta-list {
     grid-template-columns: 1fr;
+  }
+
+  /**
+   * 移动端不用 Element Plus 轮播承载证据图。
+   * 轮播会把非激活项定位到视口外，视觉上被裁掉但仍容易形成右溢检测和触控误判。
+   */
+  .detail-preview__carousel,
+  .detail-preview__meta-list {
+    display: none;
+  }
+
+  .detail-preview__mobile-list {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .detail-preview__mobile-card {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid rgba(149, 184, 223, 0.12);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .detail-preview__mobile-card code {
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-all;
+    color: var(--app-text);
+  }
+
+  .detail-preview__mobile-image {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    min-height: 180px;
+    max-height: min(46dvh, 320px);
+    overflow: hidden;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03);
   }
 }
 

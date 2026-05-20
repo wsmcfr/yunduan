@@ -122,6 +122,7 @@ The web app should preserve those strengths.
 | Switching `body` back to `overflow-y: auto` to reveal clipped content | Fixes one screenshot by making the whole app a long page; use the internal `.page-grid` scroll contract instead |
 | Adding `height="100%"` to route-level tables inside compressed grid rows | The table can shrink into a tiny pane and make pagination or bottom rows look cut off |
 | Treating a table refresh as enough after delete/create/update on pages that also show category cards or resource summaries | The row list updates but the visible resource cards keep old counts and timestamps |
+| Leaving management row actions as raw text buttons in a narrow operation column | Buttons such as edit/delete/review can stack vertically and look like a broken fixed column; use the compact action-button contract in `component-guidelines.md` |
 
 ### Convention: Visual QA Is Part of Done
 
@@ -135,6 +136,7 @@ Required visual QA pass:
 - verify long records, detail, statistics, and gallery content scroll inside the right `.page-grid` panel
 - verify there is no competing full-page nested scroll container under `.page-grid`
 - verify repeated cards or action panels align consistently when they are presented as one group
+- verify management table operation columns scan as a compact horizontal control group, not as a tall vertical slab
 - verify sparse panels do not leave abnormal empty slabs beside dense panels
 - verify the page uses an aesthetic appropriate to the scenario:
   - dashboards should emphasize hierarchy and storytelling

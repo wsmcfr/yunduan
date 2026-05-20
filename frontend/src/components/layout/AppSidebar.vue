@@ -31,28 +31,22 @@ const iconMap = {
 const currentRouteName = computed(() => String(route.name ?? ""));
 
 /**
- * 侧栏底部环境卡片文案。
- * 线上部署时不再显示“本地联调模式”，避免看起来像忘记删除的开发提示。
+ * 跳转到指定业务路由。
+ *
+ * 主要流程：
+ * 1. 接收导航配置中的路由名称；
+ * 2. 调用 vue-router 进入目标页面；
+ * 3. 让当前激活路由计算属性自动驱动高亮状态。
+ *
+ * @param routeName 导航项绑定的路由名称。
  */
-const runtimeEnvironmentLabel = computed(() => (import.meta.env.DEV ? "开发环境" : "云端控制台"));
-const runtimeEnvironmentTitle = computed(() => (import.meta.env.DEV ? "开发代理已启用" : "生产环境在线"));
-const runtimeEnvironmentHint = computed(() => (
-  import.meta.env.DEV
-    ? "当前前端通过开发代理访问后端接口，适合本地联调和功能验证。"
-    : "当前页面运行在已部署环境中，可直接使用系统能力和公司级配置。"
-));
-const runtimeEnvironmentApiTarget = computed(() => (
-  import.meta.env.DEV ? "127.0.0.1:8000" : "同域 /api/v1/*"
-));
-const runtimeEnvironmentHost = computed(() => window.location.host || "未记录主机");
-
 function navigate(routeName: string): void {
   void router.push({ name: routeName });
 }
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar sidebar--compact">
     <div class="sidebar__brand">
       <span class="sidebar__brand-badge">
         <ContestChipMark class="sidebar__brand-mark" />
@@ -76,24 +70,6 @@ function navigate(routeName: string): void {
         <span>{{ item.title }}</span>
       </button>
     </nav>
-
-    <div class="sidebar__footer app-panel">
-      <span class="sidebar__footer-label">{{ runtimeEnvironmentLabel }}</span>
-      <strong class="sidebar__footer-title">{{ runtimeEnvironmentTitle }}</strong>
-      <p class="sidebar__footer-text">
-        {{ runtimeEnvironmentHint }}
-      </p>
-      <div class="sidebar__footer-meta">
-        <div class="sidebar__footer-meta-item">
-          <span>接口来源</span>
-          <strong>{{ runtimeEnvironmentApiTarget }}</strong>
-        </div>
-        <div class="sidebar__footer-meta-item">
-          <span>当前主机</span>
-          <strong>{{ runtimeEnvironmentHost }}</strong>
-        </div>
-      </div>
-    </div>
   </aside>
 </template>
 
@@ -185,74 +161,91 @@ function navigate(routeName: string): void {
   height: 18px;
 }
 
-.sidebar__footer {
-  margin-top: auto;
-  padding: 18px;
-}
-
-.sidebar__footer-label {
-  color: var(--app-text-secondary);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.sidebar__footer-title {
-  display: block;
-  margin-top: 10px;
-  font-size: 18px;
-}
-
-.sidebar__footer-text {
-  margin: 10px 0 0;
-  color: var(--app-text-secondary);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.sidebar__footer-meta {
-  display: grid;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.sidebar__footer-meta-item {
-  display: grid;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid rgba(149, 184, 223, 0.12);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.sidebar__footer-meta-item span {
-  color: var(--app-text-secondary);
-  font-size: 12px;
-}
-
-.sidebar__footer-meta-item strong {
-  color: var(--app-text);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
 @media (max-width: 1024px) {
-  .sidebar {
+  /**
+   * 小屏侧栏只承担页面切换功能，品牌和导航压缩在一行内。
+   * 这样既保留一页控制台外壳，又不会让导航完整占据上半屏。
+   */
+  .sidebar--compact {
+    flex-direction: row;
+    align-items: center;
     width: 100%;
     height: auto;
-    overflow: visible;
-    padding: 18px;
+    max-height: 92px;
+    overflow: hidden;
+    padding: 10px 12px;
+    gap: 12px;
   }
 
   .sidebar__nav {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    scroll-snap-type: x proximity;
+  }
+
+  .sidebar__brand {
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 10px;
+    max-width: 260px;
+  }
+
+  .sidebar__brand-badge {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+  }
+
+  .sidebar__brand-title {
+    font-size: 16px;
+    line-height: 1.25;
+  }
+
+  .sidebar__brand-subtitle {
+    margin-top: 2px;
+    max-width: 180px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .sidebar__nav-item {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    scroll-snap-align: start;
+  }
+
+  .sidebar__nav-item:hover,
+  .sidebar__nav-item.is-active {
+    transform: translateY(-1px);
   }
 }
 
 @media (max-width: 768px) {
-  .sidebar__nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .sidebar--compact {
+    max-height: 72px;
+    padding: 8px 10px;
+  }
+
+  .sidebar__brand-copy {
+    display: none;
+  }
+
+  .sidebar__brand-badge {
+    width: 40px;
+    height: 40px;
+  }
+
+  .sidebar__nav-item {
+    gap: 8px;
+    padding: 9px 11px;
+    font-size: 13px;
   }
 }
 </style>

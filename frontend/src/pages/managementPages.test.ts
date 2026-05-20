@@ -48,4 +48,33 @@ describe("management page pagination and resource refresh contracts", () => {
     expect(source).toContain("具体零件类型明细");
     expect(source).toContain("resolvePartDisplayName");
   });
+
+  it.each([
+    ["设备管理页", "src/pages/DevicesPage.vue"],
+    ["检测记录页", "src/pages/RecordsPage.vue"],
+  ])("%s 的操作列不使用右固定层", (_name, path) => {
+    /**
+     * 这个断言保护窄屏表格体验：
+     * Element Plus 的右固定列会生成独立 fixed 区域，在内部滚动面板和暗色主题下容易形成割裂灰块。
+     */
+    const source = readPageSource(path);
+
+    expect(source).not.toContain('fixed="right"');
+  });
+
+  it.each([
+    ["设备管理页", "src/pages/DevicesPage.vue"],
+    ["零件管理页", "src/pages/PartsPage.vue"],
+    ["检测记录页", "src/pages/RecordsPage.vue"],
+  ])("%s 的操作列使用紧凑横向按钮组", (_name, path) => {
+    /**
+     * 操作列是管理表格最容易显得拥挤的位置。
+     * 这里用源码契约锁住桌面端横向按钮组，避免“编辑/删除/停用/复核/详情”重新变成竖向堆叠。
+     */
+    const source = readPageSource(path);
+
+    expect(source).toContain("table-action-button");
+    expect(source).toContain("flex-wrap: nowrap;");
+    expect(source).toContain(".table-actions :deep(.el-button + .el-button)");
+  });
 });

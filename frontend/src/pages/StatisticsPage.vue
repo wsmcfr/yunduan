@@ -1568,6 +1568,8 @@ function handleTrendMouseLeave(): void {
 .stats-page {
   /* 统计页内容会随筛选和 AI 对话自然增长，统一交给右侧 page-grid 内部滚动承接。 */
   gap: 22px;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
 }
 
 .stats-page__hero,
@@ -1625,17 +1627,25 @@ function handleTrendMouseLeave(): void {
 
 .stats-page__hero {
   grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .stats-page__hero-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-start;
+  min-width: 0;
 }
 
 .stats-filter-card,
 .stats-panel,
 .stats-ai-panel {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   padding: 24px;
 }
 
@@ -1656,6 +1666,33 @@ function handleTrendMouseLeave(): void {
 .stats-ai-panel__submit-meta {
   display: grid;
   gap: 18px;
+}
+
+.stats-filter-card__header,
+.stats-panel__header,
+.stats-ai-panel__actions,
+.stats-ai-panel__conversation-header,
+.stats-ai-panel__submit-bar,
+.stats-ranking__meta,
+.stats-distribution-card__item,
+.stats-workspace-pager__header,
+.stats-workspace-pager__footer,
+.stats-ai-panel__analysis-header {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.stats-filter-card__header > *,
+.stats-panel__header > *,
+.stats-ai-panel__actions > *,
+.stats-ai-panel__conversation-header > *,
+.stats-ai-panel__submit-bar > *,
+.stats-ranking__meta > *,
+.stats-distribution-card__item > *,
+.stats-workspace-pager__header > *,
+.stats-workspace-pager__footer > *,
+.stats-ai-panel__analysis-header > * {
+  min-width: 0;
 }
 
 .stats-filter-card__quick-range {
@@ -2251,6 +2288,7 @@ function handleTrendMouseLeave(): void {
 
   .stats-page__hero {
     grid-template-columns: 1fr;
+    gap: 14px;
   }
 
   .stats-trend__summary,
@@ -2277,6 +2315,46 @@ function handleTrendMouseLeave(): void {
   .stats-page__metrics,
   .stats-distribution-grid {
     grid-template-columns: 1fr;
+  }
+
+  /**
+   * 移动端 hero 的按钮不再横向挤压。
+   * Element Plus 相邻按钮默认会带 margin-left，这里统一清掉，避免 390px 下出现细小右溢。
+   */
+  .stats-page__hero-actions {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .stats-page__hero-actions :deep(.el-button) {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  /**
+   * 小屏统计卡片需要用更紧凑的内边距，并把内部 flex/grid 头部压回内容盒。
+   * 这样筛选窗口标题、生成时间标签等内容不会因为默认 stretch 计算出现 1-4px 的右溢。
+   */
+  .stats-filter-card,
+  .stats-panel,
+  .stats-ai-panel {
+    overflow-x: hidden;
+    padding: 18px;
+  }
+
+  .stats-filter-card__header,
+  .stats-panel__header,
+  .stats-ai-panel__actions,
+  .stats-ai-panel__conversation-header,
+  .stats-ai-panel__submit-bar,
+  .stats-ranking__meta,
+  .stats-distribution-card__item,
+  .stats-workspace-pager__header,
+  .stats-workspace-pager__footer,
+  .stats-ai-panel__analysis-header {
+    justify-self: stretch;
+    width: calc(100% - 36px);
+    overflow-x: hidden;
   }
 
   .stats-distribution-card__donut {

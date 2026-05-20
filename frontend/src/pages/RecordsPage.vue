@@ -476,61 +476,64 @@ onMounted(() => {
       </div>
 
       <ElTable :data="items" v-loading="loading" empty-text="当前还没有检测记录">
-        <ElTableColumn label="所属分类" min-width="140">
+        <ElTableColumn label="所属分类" min-width="112" show-overflow-tooltip>
           <template #default="{ row }">
             {{ normalizePartCategoryLabel(row.part.category ?? null) }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="零件类型" min-width="190">
+        <ElTableColumn label="零件类型" min-width="154" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.part.name }} / {{ row.part.partCode }}
           </template>
         </ElTableColumn>
-        <ElTableColumn prop="recordNo" label="记录编号" min-width="170" />
-        <ElTableColumn label="来源设备" min-width="180">
+        <ElTableColumn prop="recordNo" label="记录编号" min-width="138" show-overflow-tooltip />
+        <ElTableColumn label="来源设备" min-width="154" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.device.name }} / {{ row.device.deviceCode }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="MP 初检" min-width="110">
+        <ElTableColumn label="MP 初检" min-width="92">
           <template #default="{ row }">
             <StatusTag :value="row.result" />
           </template>
         </ElTableColumn>
-        <ElTableColumn label="最终结果" min-width="110">
+        <ElTableColumn label="最终" min-width="92">
           <template #default="{ row }">
             <StatusTag :value="row.effectiveResult" />
           </template>
         </ElTableColumn>
-        <ElTableColumn label="复核状态" min-width="110">
+        <ElTableColumn label="复核" min-width="92">
           <template #default="{ row }">
             <StatusTag :value="row.reviewStatus" />
           </template>
         </ElTableColumn>
-        <ElTableColumn label="置信度" min-width="100">
+        <ElTableColumn label="置信度" min-width="84" align="right">
           <template #default="{ row }">
             {{ formatConfidence(row.confidenceScore) }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="拍摄时间" min-width="180">
+        <ElTableColumn label="拍摄时间" min-width="148">
           <template #default="{ row }">
             {{ formatDateTime(row.capturedAt) }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="操作" min-width="180" fixed="right">
+        <ElTableColumn label="操作" min-width="156" align="center">
           <template #default="{ row }">
-            <ElButton text type="primary" @click="openRecordDetail(row.id)">
-              {{ row.reviewStatus === "pending" ? "进入复核" : "查看详情" }}
-            </ElButton>
-            <ElButton
-              v-if="isCompanyAdmin"
-              text
-              type="danger"
-              :loading="deletingRecordId === row.id"
-              @click="handleDeleteRecord(row)"
-            >
-              删除
-            </ElButton>
+            <div class="table-actions">
+              <ElButton class="table-action-button" text type="primary" @click="openRecordDetail(row.id)">
+                {{ row.reviewStatus === "pending" ? "复核" : "详情" }}
+              </ElButton>
+              <ElButton
+                class="table-action-button"
+                v-if="isCompanyAdmin"
+                text
+                type="danger"
+                :loading="deletingRecordId === row.id"
+                @click="handleDeleteRecord(row)"
+              >
+                删除
+              </ElButton>
+            </div>
           </template>
         </ElTableColumn>
       </ElTable>
@@ -585,6 +588,7 @@ onMounted(() => {
 .records-toolbar__footer,
 .records-table__footer,
 .toolbar-actions,
+.table-actions,
 .records-table__header,
 .records-table__header-actions,
 .category-panel__header {
@@ -598,6 +602,30 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.table-actions {
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: max-content;
+}
+
+/* 表格操作按钮使用与设备、零件页一致的低高度胶囊样式，避免详情/删除在桌面端竖向堆叠。 */
+.table-action-button {
+  height: 28px;
+  min-width: 42px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.34);
+  font-weight: 700;
+}
+
+/* 覆盖 Element Plus 相邻按钮默认 margin，让按钮间距只由 flex gap 控制。 */
+.table-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .category-panel__header p,

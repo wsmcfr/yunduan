@@ -286,6 +286,146 @@ Why:
 - context-specific density prevents admin screens from looking like dashboards and prevents dashboards from feeling lifeless
 - natural-height side panels avoid the common “large empty column” defect that users read as broken design instead of deliberate whitespace
 
+### Convention: Compact Management Table Row Actions
+
+Management tables such as `RecordsPage`, `PartsPage`, and `DevicesPage` should render row actions as a compact horizontal action group, not as loose Element Plus text buttons stacked inside a narrow column.
+
+#### Scope / Trigger
+
+- Trigger: any change to an `ElTableColumn label="操作"` in management-style pages.
+- Applies to list pages that combine dense data scanning with quick row commands, including records, parts, devices, users, companies, gateway/model lists, and similar admin tables.
+- Applies when adding actions such as edit, delete, review, detail, enable/disable, sample/gallery, approve/reject, reset, or status toggles.
+
+#### Signatures
+
+| Selector / Attribute | Required Contract |
+|---|---|
+| `ElTableColumn label="操作"` | Use a natural `min-width` large enough for one row of actions and `align="center"` when the column is action-only. |
+| `.table-actions` | Flex container for row action buttons. Desktop default is centered, one-line, and gap-controlled. |
+| `.table-action-button` | Local class applied to every row action `ElButton` in the column. |
+| `.table-actions :deep(.el-button + .el-button)` | Must reset Element Plus adjacent-button margin so the group spacing is predictable. |
+
+#### Contracts
+
+| Contract | Required Behavior |
+|---|---|
+| Desktop row actions | Keep short labels in one horizontal row: examples are `详情`, `复核`, `删除`, `编辑`, `样本`, `停用`. |
+| Button sizing | Use a low-height pill style, typically `height: 28px`, `min-width: 42px`, and horizontal padding around `10px`. |
+| Spacing owner | Use `gap` on `.table-actions`; do not rely on Element Plus default `.el-button + .el-button` margin. |
+| Column sizing | Choose a `min-width` that fits the expected action count: two short actions usually need about `156px`; three short actions usually need about `204px`. |
+| Destructive actions | Keep semantic button type such as `type="danger"` while using the same compact visual structure. |
+| Narrow layouts | If a management table truly cannot fit, prefer table-level horizontal overflow inside `.page-grid`; do not make the browser document scroll. |
+
+Example:
+
+```vue
+<ElTableColumn label="操作" min-width="156" align="center">
+  <template #default="{ row }">
+    <div class="table-actions">
+      <ElButton class="table-action-button" text type="primary" @click="openDetail(row.id)">
+        详情
+      </ElButton>
+      <ElButton class="table-action-button" text type="danger" @click="deleteRow(row)">
+        删除
+      </ElButton>
+    </div>
+  </template>
+</ElTableColumn>
+
+<style scoped>
+.table-actions {
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: max-content;
+}
+
+.table-action-button {
+  height: 28px;
+  min-width: 42px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.34);
+  font-weight: 700;
+}
+
+.table-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+</style>
+```
+
+#### Validation & Error Matrix
+
+| Symptom | Likely Cause | Required Fix |
+|---|---|---|
+| Actions appear as a tall vertical block | Column is too narrow, labels are too long, or `.table-actions` wraps | Shorten labels, increase `min-width`, and use `flex-wrap: nowrap` for desktop. |
+| Button spacing looks uneven | Element Plus adjacent-button margin is mixing with flex gap | Add `.table-actions :deep(.el-button + .el-button) { margin-left: 0; }`. |
+| Right side looks like a separate gray strip | `fixed="right"` creates a detached table layer in the dark console | Remove `fixed="right"` and let the table scroll naturally within the route panel. |
+| Operation column dominates the table | Long button text such as `查看该类型样本` or `进入复核` is used in row actions | Use short labels such as `样本`, `复核`, or `详情`; longer explanation belongs in detail views or tooltips. |
+| Mobile fix makes desktop worse | The same wrapping rule is used for all widths | Keep desktop one-line; only allow wrapping in a deliberate narrow breakpoint if the table design needs it. |
+
+#### Good / Base / Bad Cases
+
+| Case | Expected Result |
+|---|---|
+| Good: records table with `复核/详情` and `删除` | Both buttons are centered on one line and keep semantic colors. |
+| Good: parts table with `样本`, `编辑`, `停用` | Three short buttons fit in one row without a tall action slab. |
+| Base: non-admin records table | Only the visible action still uses `.table-action-button`, so the row height stays stable. |
+| Bad: `fixed="right"` action column | The dark table shows a detached fixed area and breaks visual continuity. |
+| Bad: raw Element Plus text buttons | Default margins and line height make row actions look loose or vertically stacked. |
+
+#### Tests Required
+
+- Add or update a page/source contract test for every management page that owns an operation column.
+- Assert that the page source includes `table-action-button`.
+- Assert that `.table-actions` uses `flex-wrap: nowrap;` for the desktop contract.
+- Assert that `.table-actions :deep(.el-button + .el-button)` exists when scoped styles style Element Plus buttons locally.
+- Assert management action columns do not reintroduce `fixed="right"` unless a separate visual probe proves it is acceptable in the authenticated dark shell.
+
+Current example assertion points:
+
+```ts
+expect(source).toContain("table-action-button");
+expect(source).toContain("flex-wrap: nowrap;");
+expect(source).toContain(".table-actions :deep(.el-button + .el-button)");
+expect(source).not.toContain('fixed="right"');
+```
+
+#### Wrong vs Correct
+
+Wrong:
+
+```vue
+<ElTableColumn label="操作" min-width="146">
+  <template #default="{ row }">
+    <ElButton text type="primary">进入复核</ElButton>
+    <ElButton text type="danger">删除</ElButton>
+  </template>
+</ElTableColumn>
+```
+
+Why wrong:
+
+- raw text buttons inherit default spacing and can wrap or stack in narrow columns
+- long labels increase the chance of a tall operation block
+- the column has no explicit visual contract shared with other management pages
+
+Correct:
+
+```vue
+<ElTableColumn label="操作" min-width="156" align="center">
+  <template #default="{ row }">
+    <div class="table-actions">
+      <ElButton class="table-action-button" text type="primary">复核</ElButton>
+      <ElButton class="table-action-button" text type="danger">删除</ElButton>
+    </div>
+  </template>
+</ElTableColumn>
+```
+
 ### Convention: Avoid Double-Shell Wrappers In Dense Workspaces
 
 Dense workspaces such as the statistics AI stage must not stack a shared global shell on top of a page-specific root wrapper when the root already manages its own spacing and sub-block composition.

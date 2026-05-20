@@ -164,18 +164,74 @@ onUnmounted(() => {
 }
 
 @media (max-width: 900px) {
+  /**
+   * 小屏顶部栏保持单行优先，避免标题、时间和按钮纵向堆叠后挤压业务面板高度。
+   * 当操作区域放不下时，只让按钮组自身横向滚动，不让外层页面产生横向滚动。
+   */
   .app-header {
-    flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .app-header__meta {
+    min-width: 0;
+  }
+
+  .app-header__eyebrow,
+  .app-header__time-label,
+  .app-header__user-text small {
+    display: none;
+  }
+
+  .app-header__title {
+    margin: 0;
+    overflow: hidden;
+    font-size: 18px;
+    line-height: 1.25;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .app-header__actions {
-    width: 100%;
-    flex-wrap: wrap;
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+    white-space: nowrap;
   }
 
   .app-header__time {
-    align-items: flex-start;
+    flex: 0 0 auto;
+    align-items: flex-end;
+    font-size: 12px;
+  }
+
+  .app-header__user {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 6px 8px;
+  }
+
+  .app-header__user-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .app-header__user-text span {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .app-header__time {
+    display: none;
+  }
+
+  .app-header__user-text {
+    display: none;
   }
 }
 </style>

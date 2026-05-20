@@ -401,57 +401,57 @@ onMounted(() => {
       </div>
 
       <ElTable :data="displayedParts" v-loading="loading" empty-text="暂无零件数据">
-        <ElTableColumn prop="partCode" label="类型编码" min-width="150" />
-        <ElTableColumn label="类型名称" min-width="170">
+        <ElTableColumn prop="partCode" label="类型编码" min-width="122" show-overflow-tooltip />
+        <ElTableColumn label="类型名称" min-width="142" show-overflow-tooltip>
           <template #default="{ row }">
             {{ resolvePartDisplayName(row.partCode, row.name) }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="所属分类" min-width="140">
+        <ElTableColumn label="所属分类" min-width="112" show-overflow-tooltip>
           <template #default="{ row }">
             {{ normalizePartCategoryLabel(row.category) }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="最近来源设备" min-width="220">
+        <ElTableColumn label="最近来源设备" min-width="154" show-overflow-tooltip>
           <template #default="{ row }">
             {{ formatLatestSourceDevice(row) }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="关联设备数" min-width="120">
+        <ElTableColumn label="设备" min-width="76" align="right">
           <template #default="{ row }">
             {{ row.deviceCount }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="关联记录" min-width="110">
+        <ElTableColumn label="记录" min-width="76" align="right">
           <template #default="{ row }">
             {{ row.recordCount }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="关联图片" min-width="110">
+        <ElTableColumn label="图片" min-width="76" align="right">
           <template #default="{ row }">
             {{ row.imageCount }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="启用状态" min-width="100">
+        <ElTableColumn label="状态" min-width="86">
           <template #default="{ row }">
             <ElTag :type="row.isActive ? 'success' : 'info'" round effect="dark">
               {{ row.isActive ? "启用" : "停用" }}
             </ElTag>
           </template>
         </ElTableColumn>
-        <ElTableColumn label="最近图片上传" min-width="180">
+        <ElTableColumn label="最近上传" min-width="148">
           <template #default="{ row }">
             {{ formatDateTime(row.latestUploadedAt) }}
           </template>
         </ElTableColumn>
-        <ElTableColumn label="操作" min-width="260">
+        <ElTableColumn label="操作" min-width="204" align="center">
           <template #default="{ row }">
             <div class="table-actions">
-              <ElButton text type="success" @click="openPartGallery(row)">
-                查看该类型样本
+              <ElButton class="table-action-button" text type="success" @click="openPartGallery(row)">
+                样本
               </ElButton>
-              <ElButton text type="primary" @click="openEditDialog(row)">编辑</ElButton>
-              <ElButton text @click="togglePartStatus(row)">
+              <ElButton class="table-action-button" text type="primary" @click="openEditDialog(row)">编辑</ElButton>
+              <ElButton class="table-action-button" text @click="togglePartStatus(row)">
                 {{ row.isActive ? "停用" : "启用" }}
               </ElButton>
             </div>
@@ -511,6 +511,29 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.table-actions {
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: max-content;
+}
+
+/* 表格操作按钮使用低高度胶囊样式，避免 Element Plus 默认文本按钮在窄列里显得松散并换成两行。 */
+.table-action-button {
+  height: 28px;
+  min-width: 42px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.34);
+  font-weight: 700;
+}
+
+/* 覆盖 Element Plus 相邻按钮的默认外边距，让操作组只由 flex gap 控制间距。 */
+.table-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .category-panel__header,
