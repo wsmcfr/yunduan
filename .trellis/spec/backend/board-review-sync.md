@@ -200,3 +200,95 @@ type DeviceDto = {
   has_board_review_token: boolean;
 };
 ```
+
+---
+
+## Scenario: Production Reverse Tunnel Monitoring Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: the STM32MP157 board is deployed as an independent device and the development VM/Windows machine will not remain running.
+- Trigger: the cloud backend needs a stable callback URL for `POST /api/v1/records/{record_id}/sync-board-review`.
+- The cloud server may monitor tunnel health, but cannot own reconnection to a NAT/private board.
+
+### 2. Signatures
+
+| Operation | Signature |
+|---|---|
+| Production device URL | `board_review_url=http://127.0.0.1:18081/api/v1/review-result` |
+| Cloud probe command | `curl -i --max-time 5 http://127.0.0.1:18081/api/v1/review-result` |
+| Cloud listener check | `ss -ltnp | grep 127.0.0.1:18081` |
+| Cloud check script | `/opt/yunduan/scripts/check_board_review_tunnel.sh` |
+| Cloud check timer | `systemctl status yunduan-board-review-tunnel-check.timer` |
+| Cloud check log | `/var/log/yunduan-board-review-tunnel-check.log` |
+| Board owner | `/etc/init.d/S91board-review-tunnel` on the STM32MP157 board |
+
+### 3. Contracts
+
+| Boundary | Contract |
+|---|---|
+| Backend callback address | For the reverse-tunnel route, cloud device config must point to cloud loopback `127.0.0.1:18081`, not board LAN `192.168.*` or PPP `10.*`. |
+| Cloud check responsibility | The timer checks listener and HTTP forwarding only. It must not attempt to SSH into the board or launch a replacement tunnel from the server. |
+| Board reconnect responsibility | The board watchdog owns `ssh -R` startup and reconnection because the board can initiate outbound SSH through NAT/4G. |
+| GET smoke test | `GET /api/v1/review-result` returning board HTTP `404` is considered reachable; business sync still uses authenticated `POST`. |
+| Failure persistence | If the tunnel is down during review sync, keep the cloud review and mark `board_sync_status=failed` with a clear reachability error. |
+
+### 4. Validation & Error Matrix
+
+| Condition | Cloud Behavior | Expected Error / Status |
+|---|---|---|
+| `127.0.0.1:18081` listening and GET returns 404 | Treat tunnel as reachable for smoke checks | Timer logs `OK ... http_code=404` |
+| `127.0.0.1:18081` not listening | Timer records failure | Wait for board watchdog; do not overwrite device URL with a private board IP |
+| POST sync timeout through tunnel | Preserve review and mark sync failed | `连接板端超时，请检查开发板网络和回写地址。` |
+| POST sync connection refused | Preserve review and mark sync failed | `连接板端失败：<error>` |
+| VM/Windows temporary tunnel exists | Do not document it as production dependency | Replace with board-owned `S91board-review-tunnel` |
+
+### 5. Good/Base/Bad Cases
+
+| Case | Example | Expected Result |
+|---|---|---|
+| Good production setup | Board runs `S91board-review-tunnel`; cloud timer checks every 60 seconds | Backend can call `127.0.0.1:18081` while board stays behind NAT |
+| Good outage handling | 4G drops briefly during review sync | Cloud review is saved; sync status shows failed; board monitor reconnects later |
+| Base health check | Cloud GET receives board 404 | Proves routing, not record existence |
+| Bad cloud-owned reconnect | Cloud cron runs SSH to a private board address | Fails outside LAN and violates the ownership boundary |
+| Bad private device URL | `board_review_url=http://192.168.1.250:18080/...` | Works only from LAN, not from production backend |
+
+### 6. Tests Required
+
+- Production health:
+  - Assert `systemctl status yunduan-board-review-tunnel-check.timer` is active.
+  - Assert `ss -ltnp | grep 127.0.0.1:18081` shows `sshd`.
+  - Assert `curl -i --max-time 5 http://127.0.0.1:18081/api/v1/review-result` returns a board HTTP response.
+- Backend service tests:
+  - Assert network timeout and connection-refused cases preserve the created review and set `board_sync_status=failed`.
+  - Assert successful board response sets `board_sync_status=success`, clears `board_sync_error`, and stores `board_last_synced_review_id`.
+- Manual outage test:
+  - Stop the board SSH tunnel, submit a review sync, confirm readable failure.
+  - Restart or wait for board watchdog, submit again, confirm success for a real record.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```text
+Cloud timer reconnects the board tunnel.
+```
+
+#### Correct
+
+```text
+Board watchdog reconnects the SSH tunnel.
+Cloud timer checks 127.0.0.1:18081 and logs whether the backend callback route is usable.
+```
+
+#### Wrong
+
+```text
+board_review_url=http://192.168.1.250:18080/api/v1/review-result
+```
+
+#### Correct
+
+```text
+board_review_url=http://127.0.0.1:18081/api/v1/review-result
+```

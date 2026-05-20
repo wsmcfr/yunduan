@@ -556,7 +556,7 @@ async function submitBoardSync(): Promise<void> {
 
 如果上传失败并提示找不到零件类型，先看请求体是否缺少 `part_code` 或 `auto_create_part=true`。板端能确定真实零件编码时，不需要先手工创建零件；云端 `backend/src/services/record_service.py::RecordService._resolve_record_part()` 会在当前公司内按 `part_code` 查询，查不到且 `auto_create_part=true` 时自动创建零件。只有板端完全没有传 `part_code`，或现场明确禁止自动创建时，才需要人工在云端零件管理里创建真实零件类型。
 
-`wave_washer` 的中文名必须使用板端传入的 `part_name=波形垫圈`，分类使用 `part_category=弹性垫圈`；云端不要自行把它翻译成“电平”。
+`wave_washer` 的中文名必须使用板端传入或云端归一后的 `part_name=波形垫圈`，分类使用 `part_category=垫圈类`；云端不要自行把它翻译成“电平”。历史训练编码 `gasket` 也代表波形垫圈，业务显示不能按英文词面翻译成“垫片”。
 
 ## 10. 设备配置方式
 
@@ -718,3 +718,57 @@ grep -n '"record_id"\|"record_no"\|"cloud_review_result"\|"cloud_review_reason"'
 | 6 | 同步成功/失败状态能在云端记录详情中看到。 |
 | 7 | 板端本地 `/mnt/sdcard/images/upload_history.json` 对应记录出现云端修正结果和原因。 |
 | 8 | `gasket_good/gasket_bad` 不会在云端创建两个零件类型，二者都属于同一个 `gasket` 零件。 |
+
+## 16. 2026-05-20 实际落地总结
+
+### 16.1 本次做了什么
+
+| 方向 | 已完成内容 | 关键文件/服务 |
+|---|---|---|
+| 板端回写服务 | 板端 Qt 程序保留 `POST /api/v1/review-result`，云端修正后可以写回本地 `upload_history.json`。 | `/root/qt_camera_display/qt_camera_display`、`/mnt/sdcard/images/upload_history.json` |
+| 板端独立隧道 | 板端开机后主动建立 `ssh -R 127.0.0.1:18081:127.0.0.1:18080`，断线后由板端 monitor 自动重连。 | `/root/qt_camera_display/board-review-tunnel.sh`、`/etc/init.d/S91board-review-tunnel` |
+| 云端周期检查 | 云端不负责重连 NAT 后的板端，只每 60 秒检查本机 `127.0.0.1:18081` 是否可达并写日志。 | `/opt/yunduan/scripts/check_board_review_tunnel.sh`、`yunduan-board-review-tunnel-check.timer` |
+| 云端后端零件归一 | `gasket` 历史编码显示为“波形垫圈”；`washer` 显示为“平垫圈”；`垫圈类` 只是分类。 | `backend/src/services/part_identity.py`、`part_service.py`、`record_service.py` |
+| 云端前端零件分类 | 零件页先显示分类入口，再保留具体零件类型；不会把好坏结果或分类当成具体零件。 | `frontend/src/features/parts/partCategories.ts`、`frontend/src/pages/PartsPage.vue` |
+| 长文本显示经验 | 板端小屏和云端页面都不能只截断长复核说明；卡片显示摘要，完整内容放到可滚动详情页/弹层。 | 板端 `historyAnalysisDetailOverlay`；云端详情页/弹窗契约 |
+
+### 16.2 最终连接边界
+
+| 问题 | 结论 |
+|---|---|
+| 最终是否依赖 Windows 或虚拟机 | 不依赖。Windows/虚拟机只用于开发、部署和调试。 |
+| 谁负责建立隧道 | 开发板负责。板端主动连接云服务器并建立 `ssh -R`。 |
+| 谁负责断线重连 | 开发板负责。`board-review-tunnel.sh` 的 monitor 循环发现 ssh 进程不存在后重连。 |
+| 云服务器负责什么 | 云端后端、nginx 和 systemd timer 常驻；timer 只检查 `127.0.0.1:18081` 是否监听和能否转发到板端。 |
+| 云端设备回写地址应该填什么 | `http://127.0.0.1:18081/api/v1/review-result`。这里的 `127.0.0.1` 是云服务器本机。 |
+| 为什么不能填 `192.168.1.250` | 这是板端局域网地址，云服务器公网后端访问不到。 |
+
+### 16.3 零件命名经验
+
+| 模型/历史编码 | 正确业务显示 | 说明 |
+|---|---|---|
+| `gasket`、`gasket_good`、`gasket_bad` | 波形垫圈 | 当时训练命名没起好，不能翻译成“垫片”。 |
+| `washer`、`washer_good`、`washer_bad` | 平垫圈 | 平垫圈是另一个真实零件。 |
+| `splitwasher` | 弹性垫圈 | 弹性垫圈是另一个真实零件。 |
+| `垫圈类` | 分类 | 分类用于聚合展示，不代表一个具体零件。 |
+
+### 16.4 已验证命令
+
+| 测试目标 | 执行位置 | 命令 | 预期输出/现象 | 失败时排查 |
+|---|---|---|---|---|
+| 板端隧道状态 | 开发板 SSH | `/etc/init.d/S91board-review-tunnel status` | 输出 `monitor: running`、`ssh_tunnel: running`、`remote_forward: 127.0.0.1:18081:127.0.0.1:18080`。 | 查 `/tmp/board-review-tunnel.log`、4G 网络、私钥权限和云端端口占用。 |
+| 云端隧道监听 | 云服务器 | `ss -ltnp | grep 127.0.0.1:18081` | 看到 `sshd` 监听云端本机 18081。 | 若没有监听，等待板端重连；再查板端 monitor。 |
+| 云端转发探测 | 云服务器 | `curl -i --max-time 5 http://127.0.0.1:18081/api/v1/review-result` | 返回板端 HTTP 404 JSON，说明已经转发到板端服务。 | 若超时查 4G/SSH；若连接拒绝查板端 Qt 18080 服务。 |
+| 云端 timer | 云服务器 | `systemctl status yunduan-board-review-tunnel-check.timer; tail -n 80 /var/log/yunduan-board-review-tunnel-check.log` | timer active，日志周期出现 `OK 反向隧道可达`。 | 查 service/timer 是否 enabled、脚本权限和日志路径。 |
+| 云端后端零件测试 | 云端后端目录 | `python -m pytest tests/test_part_service.py tests/test_record_service.py tests/test_detection_record_model.py -q` | 测试通过，证明零件归一和记录创建契约稳定。 | 查 `part_identity.py` 映射和 `_resolve_record_part()`。 |
+| 云端前端分类测试 | 云端前端目录 | `npm test -- partCategories managementPages` | 测试通过，证明零件分类和管理页显示稳定。 | 查 `partCategories.ts`、`PartsPage.vue` 和 mapper。 |
+
+### 16.5 后续修改必须遵守
+
+| 规则 | 原因 |
+|---|---|
+| 云端按钮同步失败时不要删除云端复核记录，只更新 `board_sync_status/board_sync_error`。 | 复核结论是云端事实，板端同步只是外部链路状态。 |
+| 不要把 `_good/_bad` 当作零件类型。 | 好坏是检测结果，不是物理零件主数据。 |
+| 不要把 `gasket` 显示成“垫片”。 | 本项目历史训练中 `gasket` 代表波形垫圈。 |
+| 不要把完整复核说明硬塞进固定高度卡片。 | 操作员需要读完整原因；小卡片只负责摘要。 |
+| 不要让云端尝试主动重连板端。 | 板端在 NAT/4G 后面，只能由板端主动向云端建立反向隧道。 |

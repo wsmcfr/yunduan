@@ -23,6 +23,7 @@ from src.schemas.upload import FileObjectCreateRequest
 from src.integrations.ai_review_client import AIReviewClient
 from src.integrations.cos_client import CosClient
 from src.services.ai_gateway_service import AIGatewayService
+from src.services.part_identity import normalize_part_category, normalize_part_display_name
 
 logger = get_logger(__name__)
 
@@ -180,6 +181,7 @@ class RecordService:
             part = self.part_repository.get_by_id(payload.part_id, company_id=company_id)
             if part is None:
                 raise NotFoundError(code="part_not_found", message="零件不存在。")
+            self._normalize_record_part_identity(part)
             return part
 
         normalized_part_code = (payload.part_code or "").strip()
@@ -191,13 +193,20 @@ class RecordService:
 
         existed_part = self.part_repository.get_by_code(normalized_part_code, company_id=company_id)
         if existed_part is not None:
+            self._normalize_record_part_identity(existed_part)
             return existed_part
 
         if not payload.auto_create_part:
             raise NotFoundError(code="part_not_found", message="零件不存在。")
 
-        part_name = (payload.part_name or normalized_part_code).strip()
-        part_category = payload.part_category.strip() if payload.part_category else None
+        part_name = normalize_part_display_name(
+            part_code=normalized_part_code,
+            raw_name=payload.part_name,
+        )
+        part_category = normalize_part_category(
+            part_code=normalized_part_code,
+            raw_category=payload.part_category,
+        )
         part = Part(
             company_id=company_id,
             part_code=normalized_part_code,
@@ -214,6 +223,26 @@ class RecordService:
             company_id,
         )
         return part
+
+    def _normalize_record_part_identity(self, part: Part) -> None:
+        """在创建记录复用已有零件时同步修正历史显示名。
+
+        参数:
+            part: 当前记录将要关联的零件对象。
+
+        返回:
+            无返回值；必要时修改 ORM 对象并 flush，随后由外层事务提交。
+        """
+
+        normalized_name = normalize_part_display_name(part_code=part.part_code, raw_name=part.name)
+        normalized_category = normalize_part_category(part_code=part.part_code, raw_category=part.category)
+
+        if part.name == normalized_name and part.category == normalized_category:
+            return
+
+        part.name = normalized_name
+        part.category = normalized_category
+        self.part_repository.save(part)
 
     def get_record_detail(self, *, company_id: int, record_id: int) -> DetectionRecord:
         """读取检测记录详情。"""

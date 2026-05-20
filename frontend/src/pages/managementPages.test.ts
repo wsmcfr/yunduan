@@ -40,4 +40,12 @@ describe("management page pagination and resource refresh contracts", () => {
     expect(source).toContain("await Promise.all([loadOptions(), refresh()]);");
     expect(source).toContain("await refreshRecordsView();");
   });
+
+  it("零件管理页明确区分零件大类和具体类型", () => {
+    const source = readPageSource("src/pages/PartsPage.vue");
+
+    expect(source).toContain("零件大类入口");
+    expect(source).toContain("具体零件类型明细");
+    expect(source).toContain("resolvePartDisplayName");
+  });
 });

@@ -83,11 +83,13 @@ class PartServiceTestCase(unittest.TestCase):
         self.db.refresh(device)
         return device
 
-    def _create_part(self, *, code: str) -> Part:
+    def _create_part(self, *, code: str, name: str | None = None, category: str | None = "测试") -> Part:
         """创建零件类型测试数据。
 
         参数:
             code: 零件编码；`SIM-PART-` 前缀用于模拟历史导入残留。
+            name: 零件显示名称；不传时使用测试默认名称。
+            category: 零件所属大类；默认写入测试分类。
 
         返回:
             已写入数据库并刷新后的零件对象。
@@ -96,8 +98,8 @@ class PartServiceTestCase(unittest.TestCase):
         part = Part(
             company_id=self.company.id,
             part_code=code,
-            name=f"{code} 测试零件",
-            category="测试",
+            name=name or f"{code} 测试零件",
+            category=category,
             description=None,
             is_active=True,
         )
@@ -163,6 +165,26 @@ class PartServiceTestCase(unittest.TestCase):
         self.assertIsNotNone(persisted_manual_part)
         self.assertEqual(total, 2)
         self.assertEqual({item.part_code for item in items}, {"SIM-PART-USED", "PART-MANUAL-NEW"})
+
+    def test_list_parts_normalizes_legacy_gasket_display_name(self) -> None:
+        """列表查询会把历史 gasket/垫片 存量数据修正为波形垫圈和垫圈类。"""
+
+        legacy_part = self._create_part(code="gasket", name="垫片", category="垫圈")
+
+        _total, items = self.service.list_parts(
+            company_id=self.company.id,
+            keyword=None,
+            is_active=None,
+            skip=0,
+            limit=10,
+        )
+
+        listed_part = next(item for item in items if item.id == legacy_part.id)
+        persisted_part = self.db.scalar(select(Part).where(Part.id == legacy_part.id))
+        self.assertEqual(listed_part.name, "波形垫圈")
+        self.assertEqual(listed_part.category, "垫圈类")
+        self.assertEqual(persisted_part.name, "波形垫圈")
+        self.assertEqual(persisted_part.category, "垫圈类")
 
 
 if __name__ == "__main__":

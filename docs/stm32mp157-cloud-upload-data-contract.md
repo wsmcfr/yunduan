@@ -51,7 +51,7 @@ STM32MP157 采集图片
 | `part_id` | 可选 | `1` | 云端零件表主键；如果 MP157 已缓存映射，优先传它 |
 | `part_code` | 必须二选一 | `wave_washer` | 零件编码；未传 `part_id` 时云端按它查找零件 |
 | `part_name` | 自动创建时建议 | `波形垫圈` | 云端按 `part_code` 自动创建零件时使用的显示名称 |
-| `part_category` | 自动创建时建议 | `弹性垫圈` | 云端按 `part_code` 自动创建零件时使用的分类 |
+| `part_category` | 自动创建时建议 | `垫圈类` | 云端按 `part_code` 自动创建零件时使用的大类；`波形垫圈/平垫圈/弹性垫圈` 是大类下的具体零件类型 |
 | `auto_create_part` | 建议 | `true` | 允许云端在 `part_code` 不存在时自动创建零件 |
 | `network_interface` | 建议 | `ppp0` | EC20 PPP 网卡名称，curl 可使用 `--interface ppp0` |
 | `f4_uart_device` | 建议 | `/dev/ttySTM1` | MP157 与 STM32F4 通信串口 |
@@ -141,7 +141,7 @@ curl --interface ppp0 \
 | `part_id` | `POST /records` 顶层字段 | 和 `part_code` 二选一 | `1` | 云端零件主键，传入时沿用旧流程 |
 | `part_code` | `POST /records` 顶层字段和 `device_context.part_code` | 和 `part_id` 二选一 | `wave_washer` | 边缘端归一后的零件编码，例如 `wave_washer_good` 要归一成 `wave_washer` |
 | `part_name` | `POST /records` 顶层字段 | 自动创建时建议 | `波形垫圈` | 自动创建零件时的云端显示名称；省略时云端用 `part_code` 兜底 |
-| `part_category` | `POST /records` 顶层字段 | 自动创建时建议 | `弹性垫圈` | 自动创建零件时的统计分类 |
+| `part_category` | `POST /records` 顶层字段 | 自动创建时建议 | `垫圈类` | 自动创建零件时的统计大类 |
 | `auto_create_part` | `POST /records` 顶层字段 | 建议 | `true` | 为 `true` 时，云端找不到 `part_code` 会自动创建零件；为 `false` 时返回 `part_not_found` |
 
 ### 6.3 云端自动创建零件逻辑
@@ -165,7 +165,7 @@ curl --interface ppp0 \
   "device_id": 3,
   "part_code": "wave_washer",
   "part_name": "波形垫圈",
-  "part_category": "弹性垫圈",
+  "part_category": "垫圈类",
   "auto_create_part": true,
   "result": "good",
   "device_context": {
@@ -187,7 +187,7 @@ curl --interface ppp0 \
     "id": 5,
     "part_code": "wave_washer",
     "name": "波形垫圈",
-    "category": "弹性垫圈"
+    "category": "垫圈类"
   }
 }
 ```
@@ -197,7 +197,8 @@ curl --interface ppp0 \
 | 现象 | 根因 | 修正 |
 |---|---|---|
 | 首页检测和历史重发都显示图片上传失败 | 板端在创建检测记录前先查 `/api/v1/parts?limit=100`，找不到模型输出的真实零件类型后本地失败；COS prepare、PUT 和文件登记没有机会执行。 | 板端在查不到 `part_id` 时发送 `part_code/part_name/part_category/auto_create_part=true`；云端由 `_resolve_record_part()` 自动创建或复用零件后再创建检测记录。 |
-| `wave_washer` 显示名称错误 | 模型英文编码被误解为普通英文词或错误翻译。 | MP157 端应传 `part_name=波形垫圈`、`part_category=弹性垫圈`；云端只保存板端显式字段，不自行翻译成“电平”。 |
+| `wave_washer` 显示名称错误 | 模型英文编码被误解为普通英文词或错误翻译。 | MP157 端应传 `part_name=波形垫圈`、`part_category=垫圈类`；云端只保存或归一为标准字段，不自行翻译成“电平”。 |
+| `gasket` 显示成垫片 | 早期训练时把波形垫圈编码命名为 `gasket`，不能按英文词面理解。 | 云端和前端按 `part_code=gasket` 归一为 `part_name=波形垫圈`、`part_category=垫圈类`。 |
 
 自动创建验收必须同时确认记录和图片：
 
@@ -222,7 +223,7 @@ curl --interface ppp0 \
   "device_id": 1,
   "part_code": "wave_washer",
   "part_name": "波形垫圈",
-  "part_category": "弹性垫圈",
+  "part_category": "垫圈类",
   "auto_create_part": true,
   "result": "bad",
   "review_status": "pending",
@@ -481,7 +482,7 @@ curl --interface ppp0 \
 | `part_id` | integer 或 null | 和 `part_code` 二选一 | `>=1`，必须属于当前公司 | `1` | 云端已有零件 ID；传入时优先使用 |
 | `part_code` | string 或 null | 和 `part_id` 二选一 | 2 到 64 字符，公司内唯一 | `wave_washer` | MP157 归一后的零件编码；云端按它查找或自动创建零件 |
 | `part_name` | string 或 null | 自动创建时建议 | 1 到 128 字符 | `波形垫圈` | 自动创建零件时的显示名称；省略时用 `part_code` 兜底 |
-| `part_category` | string 或 null | 自动创建时建议 | 最大 64 字符 | `弹性垫圈` | 自动创建零件时的统计分类 |
+| `part_category` | string 或 null | 自动创建时建议 | 最大 64 字符 | `垫圈类` | 自动创建零件时的统计大类 |
 | `auto_create_part` | boolean | 可选 | 默认 `false` | `true` | 未传 `part_id` 且 `part_code` 不存在时，是否允许云端自动创建零件 |
 | `device_id` | integer | 必须 | `>=1`，必须属于当前公司 | `1` | 云端已有 MP157 设备 ID |
 | `result` | enum | 必须 | `good` / `bad` / `uncertain` | `bad` | 本次检测最终初判结果 |
@@ -1257,7 +1258,8 @@ curl --interface ppp0 \
 | 把图片 base64 放进 `POST /records` | 当前接口不接收图片二进制，会导致请求巨大且无法进入 COS 流程 |
 | 给 STM32F4 单独创建设备并上报 `device_type=f4` | 当前云端设备管理只允许 MP157 主控设备 |
 | 把 `wave_washer_good` 和 `wave_washer_bad` 当成两个零件编码 | 好坏结果应该写入 `records.result`，零件编码必须归一成 `wave_washer` |
-| 云端自行把 `wave_washer` 翻译成中文 | 零件显示名应使用 MP157 明确传入的 `part_name=波形垫圈`，避免误翻成“电平”等错误名称 |
+| 云端自行把 `wave_washer` 翻译成中文 | 零件显示名应使用 MP157 明确传入或云端归一后的 `part_name=波形垫圈`，避免误翻成“电平”等错误名称 |
+| 云端把历史编码 `gasket` 显示成“垫片” | `gasket` 是训练标签遗留命名，业务含义是波形垫圈；显示名必须归一为 `波形垫圈` |
 | 发送无时区时间 | 云端和前端会产生排序、统计和延迟计算偏差 |
 | 每次重试都生成新的 `record_no` | 会造成重复记录，无法判断同一检测样本是否已经上传 |
 | 复用过期的 COS `upload_url` | 预签名 URL 有时效，过期必须重新 prepare |

@@ -6,6 +6,21 @@ import type { PartModel } from "@/types/models";
  */
 export const UNCATEGORIZED_PART_CATEGORY_LABEL = "未分类";
 
+const PART_NAME_BY_CODE: Record<string, string> = {
+  gasket: "波形垫圈",
+  wave_washer: "波形垫圈",
+  washer: "平垫圈",
+  splitwasher: "弹性垫圈",
+};
+
+const WASHER_CATEGORY_ALIASES = new Set([
+  "垫圈",
+  "垫片",
+  "弹性垫圈",
+  "washer-family",
+  "washer_family",
+]);
+
 export interface PartCategorySummary {
   key: string;
   label: string;
@@ -23,7 +38,40 @@ export interface PartCategorySummary {
  */
 export function normalizePartCategoryLabel(category: string | null | undefined): string {
   const normalizedValue = category?.trim();
-  return normalizedValue ? normalizedValue : UNCATEGORIZED_PART_CATEGORY_LABEL;
+  if (!normalizedValue) {
+    return UNCATEGORIZED_PART_CATEGORY_LABEL;
+  }
+  return WASHER_CATEGORY_ALIASES.has(normalizedValue) ? "垫圈类" : normalizedValue;
+}
+
+/**
+ * 归一化真实模型字段里的分类值。
+ * 空分类仍保留为 null，避免编辑弹窗把“未分类”占位文案写回后端。
+ */
+export function normalizePartCategoryValue(category: string | null | undefined): string | null {
+  const normalizedValue = category?.trim();
+  if (!normalizedValue) {
+    return null;
+  }
+  return WASHER_CATEGORY_ALIASES.has(normalizedValue) ? "垫圈类" : normalizedValue;
+}
+
+/**
+ * 根据模型零件编码生成统一显示名。
+ * 历史训练标签 `gasket` 实际代表波形垫圈，不能按英文词面翻译成“垫片”。
+ */
+export function resolvePartDisplayName(
+  partCode: string | null | undefined,
+  rawName: string | null | undefined,
+): string {
+  const normalizedCode = partCode?.trim().toLowerCase() ?? "";
+  const mappedName = PART_NAME_BY_CODE[normalizedCode];
+  if (mappedName) {
+    return mappedName;
+  }
+
+  const normalizedName = rawName?.trim();
+  return normalizedName || normalizedCode || "未知零件";
 }
 
 /**
@@ -57,6 +105,11 @@ export function groupPartsByCategory(parts: PartModel[]): PartCategorySummary[] 
   for (const part of parts) {
     const label = normalizePartCategoryLabel(part.category);
     const categoryKey = buildPartCategoryKey(label);
+    const displayPart = {
+      ...part,
+      name: resolvePartDisplayName(part.partCode, part.name),
+      category: label,
+    };
     const existingEntry = categoryBucket.get(categoryKey);
 
     if (!existingEntry) {
@@ -64,25 +117,25 @@ export function groupPartsByCategory(parts: PartModel[]): PartCategorySummary[] 
         key: categoryKey,
         label,
         totalParts: 1,
-        activeParts: part.isActive ? 1 : 0,
-        recordCount: part.recordCount,
-        imageCount: part.imageCount,
-        latestUploadedAt: part.latestUploadedAt,
-        latestSourceDevice: part.latestSourceDevice,
-        parts: [part],
+        activeParts: displayPart.isActive ? 1 : 0,
+        recordCount: displayPart.recordCount,
+        imageCount: displayPart.imageCount,
+        latestUploadedAt: displayPart.latestUploadedAt,
+        latestSourceDevice: displayPart.latestSourceDevice,
+        parts: [displayPart],
       });
       continue;
     }
 
     existingEntry.totalParts += 1;
-    existingEntry.activeParts += part.isActive ? 1 : 0;
-    existingEntry.recordCount += part.recordCount;
-    existingEntry.imageCount += part.imageCount;
-    if (compareNullableDateDesc(part.latestUploadedAt, existingEntry.latestUploadedAt) < 0) {
-      existingEntry.latestUploadedAt = part.latestUploadedAt;
-      existingEntry.latestSourceDevice = part.latestSourceDevice;
+    existingEntry.activeParts += displayPart.isActive ? 1 : 0;
+    existingEntry.recordCount += displayPart.recordCount;
+    existingEntry.imageCount += displayPart.imageCount;
+    if (compareNullableDateDesc(displayPart.latestUploadedAt, existingEntry.latestUploadedAt) < 0) {
+      existingEntry.latestUploadedAt = displayPart.latestUploadedAt;
+      existingEntry.latestSourceDevice = displayPart.latestSourceDevice;
     }
-    existingEntry.parts.push(part);
+    existingEntry.parts.push(displayPart);
   }
 
   return Array.from(categoryBucket.values())

@@ -255,7 +255,7 @@ class RecordServiceTestCase(unittest.TestCase):
             record_no="REC-AUTO-PART-0001",
             part_code="wave_washer",
             part_name="波形垫圈",
-            part_category="弹性垫圈",
+            part_category="垫圈类",
             auto_create_part=True,
         )
 
@@ -264,8 +264,23 @@ class RecordServiceTestCase(unittest.TestCase):
         self.assertNotEqual(record.part_id, self.part.id)
         self.assertEqual(record.part.part_code, "wave_washer")
         self.assertEqual(record.part.name, "波形垫圈")
-        self.assertEqual(record.part.category, "弹性垫圈")
+        self.assertEqual(record.part.category, "垫圈类")
         self.assertEqual(record.device_context["part_code"], "wave_washer")
+
+    def test_create_record_auto_creates_gasket_as_wave_washer(self) -> None:
+        """历史模型标签 gasket 代表波形垫圈，云端自动创建时不能显示成垫片。"""
+
+        payload = self._build_record_payload(
+            record_no="REC-AUTO-GASKET-0001",
+            part_code="gasket",
+            auto_create_part=True,
+        )
+
+        record = self.service.create_record(company_id=self.company.id, payload=payload)
+
+        self.assertEqual(record.part.part_code, "gasket")
+        self.assertEqual(record.part.name, "波形垫圈")
+        self.assertEqual(record.part.category, "垫圈类")
 
     def test_create_record_reuses_existing_part_code_without_auto_create(self) -> None:
         """MP157 上传的 part_code 已存在时，即使未开启自动创建，也应复用已有零件。"""
@@ -280,6 +295,26 @@ class RecordServiceTestCase(unittest.TestCase):
 
         self.assertEqual(record.part_id, self.part.id)
         self.assertEqual(record.part.part_code, self.part.part_code)
+
+    def test_create_record_normalizes_legacy_part_when_using_part_id(self) -> None:
+        """旧客户端只传 part_id 时，也应修正历史 gasket 显示名和大类。"""
+
+        self.part.part_code = "gasket"
+        self.part.name = "垫片"
+        self.part.category = "垫圈"
+        self.db.commit()
+
+        payload = self._build_record_payload(
+            record_no="REC-LEGACY-PART-ID-0001",
+            part_id=self.part.id,
+        )
+
+        record = self.service.create_record(company_id=self.company.id, payload=payload)
+
+        self.assertEqual(record.part_id, self.part.id)
+        self.assertEqual(record.part.part_code, "gasket")
+        self.assertEqual(record.part.name, "波形垫圈")
+        self.assertEqual(record.part.category, "垫圈类")
 
     def test_create_record_rejects_unknown_part_code_without_auto_create(self) -> None:
         """MP157 上传未知 part_code 但未允许自动创建时，应拒绝创建记录避免误建主数据。"""

@@ -8,6 +8,7 @@ import PartFormDialog from "@/features/parts/PartFormDialog.vue";
 import {
   groupPartsByCategory,
   normalizePartCategoryLabel,
+  resolvePartDisplayName,
 } from "@/features/parts/partCategories";
 import { routeNames } from "@/router/routes";
 import { createPart, fetchParts, updatePart } from "@/services/api/parts";
@@ -301,7 +302,7 @@ onMounted(() => {
     <PageHeader
       eyebrow="Parts"
       title="零件分类管理"
-      description="这里先按零件分类组织入口，再查看分类下的具体类型。样本图片浏览、人工复检与 AI 复核统一走分类图库和检测详情页。"
+      description="这里先按零件大类组织入口，再查看大类下的具体零件类型。样本图片浏览、人工复检与 AI 复核统一走分类图库和检测详情页。"
     />
 
     <ElAlert
@@ -337,9 +338,9 @@ onMounted(() => {
     <section class="app-panel category-panel">
       <div class="category-panel__header">
         <div>
-          <strong>分类入口</strong>
+          <strong>零件大类入口</strong>
           <p class="muted-text">
-            先看分类，再进入分类下的类型与样本。这样后续零件多起来时不会直接堆成一长页。
+            先看零件大类，再进入大类下的具体类型与样本。平垫圈、波形垫圈这类具体对象仍然保留为独立零件类型。
           </p>
         </div>
         <ElTag effect="dark" round type="info">
@@ -356,7 +357,7 @@ onMounted(() => {
         >
           <strong>全部分类</strong>
           <span>{{ total }} 个类型</span>
-          <span>查看当前筛选下的全部零件类型</span>
+          <span>查看当前筛选下的全部具体零件类型</span>
         </button>
 
         <button
@@ -381,7 +382,7 @@ onMounted(() => {
       <div class="table-section__header">
         <div>
           <strong>{{ detailTitle }}</strong>
-          <p class="table-section__meta">{{ detailDescription }}</p>
+          <p class="table-section__meta">具体零件类型明细 · {{ detailDescription }}</p>
         </div>
 
         <div class="table-section__header-actions">
@@ -401,7 +402,11 @@ onMounted(() => {
 
       <ElTable :data="displayedParts" v-loading="loading" empty-text="暂无零件数据">
         <ElTableColumn prop="partCode" label="类型编码" min-width="150" />
-        <ElTableColumn prop="name" label="类型名称" min-width="170" />
+        <ElTableColumn label="类型名称" min-width="170">
+          <template #default="{ row }">
+            {{ resolvePartDisplayName(row.partCode, row.name) }}
+          </template>
+        </ElTableColumn>
         <ElTableColumn label="所属分类" min-width="140">
           <template #default="{ row }">
             {{ normalizePartCategoryLabel(row.category) }}

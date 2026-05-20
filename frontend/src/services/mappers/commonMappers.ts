@@ -75,6 +75,10 @@ import type {
   UserPasswordChangeRequestInfo,
   UserProfile,
 } from "@/types/models";
+import {
+  normalizePartCategoryValue,
+  resolvePartDisplayName,
+} from "@/features/parts/partCategories";
 
 /**
  * 将认证运行时选项 DTO 映射为前端模型。
@@ -310,7 +314,7 @@ export function mapPartQualityItemDto(dto: PartQualityItemDto): PartQualityItem 
   return {
     partId: dto.part_id,
     partCode: dto.part_code,
-    partName: dto.part_name,
+    partName: resolvePartDisplayName(dto.part_code, dto.part_name),
     totalCount: dto.total_count,
     goodCount: dto.good_count,
     badCount: dto.bad_count,
@@ -359,8 +363,8 @@ export function mapStatisticsSampleImageItemDto(
     recordNo: dto.record_no,
     partId: dto.part_id,
     partCode: dto.part_code,
-    partName: dto.part_name,
-    partCategory: dto.part_category,
+    partName: resolvePartDisplayName(dto.part_code, dto.part_name),
+    partCategory: normalizePartCategoryValue(dto.part_category),
     deviceId: dto.device_id,
     deviceCode: dto.device_code,
     deviceName: dto.device_name,
@@ -386,8 +390,8 @@ export function mapStatisticsPartImageGroupDto(
   return {
     partId: dto.part_id,
     partCode: dto.part_code,
-    partName: dto.part_name,
-    partCategory: dto.part_category,
+    partName: resolvePartDisplayName(dto.part_code, dto.part_name),
+    partCategory: normalizePartCategoryValue(dto.part_category),
     recordCount: dto.record_count,
     imageCount: dto.image_count,
     latestUploadedAt: dto.latest_uploaded_at,
@@ -464,8 +468,8 @@ export function mapPartDto(dto: PartDto): PartModel {
   return {
     id: dto.id,
     partCode: dto.part_code,
-    name: dto.name,
-    category: dto.category,
+    name: resolvePartDisplayName(dto.part_code, dto.name),
+    category: normalizePartCategoryValue(dto.category),
     description: dto.description,
     isActive: dto.is_active,
     recordCount: dto.record_count,
@@ -724,8 +728,8 @@ export function mapDetectionRecordDto(dto: DetectionRecordDto): DetectionRecordM
     part: {
       id: dto.part.id,
       partCode: dto.part.part_code,
-      name: dto.part.name,
-      category: dto.part.category,
+      name: resolvePartDisplayName(dto.part.part_code, dto.part.name),
+      category: normalizePartCategoryValue(dto.part.category),
     },
     device: {
       id: dto.device.id,

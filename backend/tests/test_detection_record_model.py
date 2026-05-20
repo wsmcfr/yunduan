@@ -115,7 +115,7 @@ class DetectionRecordModelTestCase(unittest.TestCase):
             record_no="REC-AUTO-PART-SCHEMA",
             part_code="wave_washer",
             part_name="波形垫圈",
-            part_category="弹性垫圈",
+            part_category="垫圈类",
             auto_create_part=True,
             device_id=1,
             result=DetectionResult.GOOD,
@@ -125,5 +125,5 @@ class DetectionRecordModelTestCase(unittest.TestCase):
         self.assertIsNone(payload.part_id)
         self.assertEqual(payload.part_code, "wave_washer")
         self.assertEqual(payload.part_name, "波形垫圈")
-        self.assertEqual(payload.part_category, "弹性垫圈")
+        self.assertEqual(payload.part_category, "垫圈类")
         self.assertTrue(payload.auto_create_part)

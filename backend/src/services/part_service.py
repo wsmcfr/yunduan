@@ -8,6 +8,7 @@ from src.core.errors import ConflictError, NotFoundError
 from src.db.models.part import Part
 from src.repositories.part_repository import PartRepository
 from src.schemas.part import PartCreateRequest, PartUpdateRequest
+from src.services.part_identity import normalize_part_category, normalize_part_display_name
 
 
 class PartService:
@@ -36,6 +37,7 @@ class PartService:
         """
 
         self.part_repository.delete_unused_simulated_parts(company_id=company_id)
+        self._normalize_legacy_part_identity(company_id=company_id)
         self.db.commit()
 
         total, items = self.part_repository.list_parts(
@@ -47,6 +49,40 @@ class PartService:
         )
         self._attach_usage_summary(company_id=company_id, items=items)
         return total, items
+
+    def _normalize_legacy_part_identity(self, *, company_id: int) -> None:
+        """修正历史零件主数据中的显示名和大类文案。
+
+        主要流程:
+            1. 读取当前公司内的全部零件主数据。
+            2. 按统一映射修正历史训练标签，例如 gasket 应显示为波形垫圈。
+            3. 只在值确实变化时保存，避免无意义写库。
+        """
+
+        _total, parts = self.part_repository.list_parts(
+            company_id=company_id,
+            keyword=None,
+            is_active=None,
+            skip=0,
+            limit=1000,
+        )
+
+        for part in parts:
+            normalized_name = normalize_part_display_name(
+                part_code=part.part_code,
+                raw_name=part.name,
+            )
+            normalized_category = normalize_part_category(
+                part_code=part.part_code,
+                raw_category=part.category,
+            )
+
+            if part.name == normalized_name and part.category == normalized_category:
+                continue
+
+            part.name = normalized_name
+            part.category = normalized_category
+            self.part_repository.save(part)
 
     def _attach_usage_summary(self, *, company_id: int, items: list[Part]) -> None:
         """为零件类型对象补充检测使用情况，便于前端展示活跃度。"""

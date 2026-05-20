@@ -472,3 +472,78 @@ The current app already pairs colors with text in `StatusTag` and alert content.
 | Using `label` as the selected radio value | Produces deprecation warnings and weak form contracts |
 | Letting one inspection image fill the full card width with `object-fit: cover` | Makes evidence previews look oversized and can crop the exact defect contour users need to inspect |
 | Adding route-level fixed stage heights to avoid browser scrolling | The app may stop being long, but sections can overlap or become unreachable; keep `.page-grid` as the route scroll owner instead |
+
+---
+
+## Convention: MP157 Part Category And Detail Text Display
+
+### Scope / Trigger
+
+- Trigger: pages render MP157 part master data, record detail review text, board sync errors, model diagnostics, or long operator reasons.
+- Affected pages include `PartsPage`, `RecordsPage`, `RecordDetailPage`, and statistics/gallery routes that display part filters or review detail.
+
+### Signatures
+
+| UI / Function | Required Behavior |
+|---|---|
+| `normalizePartCategoryLabel(category)` | Normalizes washer category aliases to `垫圈类` |
+| `normalizePartDisplayName(partCode, rawName)` or equivalent mapper | Shows legacy `gasket` as `波形垫圈` |
+| `groupPartsByCategory(parts)` | Groups by category while preserving each physical part row |
+| Long text detail surface | Uses dialog/detail drawer/scroll area, not a clipped table cell only |
+
+### Contracts
+
+| Boundary | Contract |
+|---|---|
+| Category vs part | `垫圈类` is a grouping entry; it must not replace the actual part type. `波形垫圈`, `平垫圈`, and `弹性垫圈` remain separate rows. |
+| Legacy model code | `gasket` and `gasket_good/gasket_bad` display as `波形垫圈`, never as `垫片`. |
+| Outcome suffix | `_good` and `_bad` change the detection result, not the part name or category. |
+| Long detail text | Cloud review reason, board sync error, model explanation, and raw output may be summarized in cards/tables, but the full value must be accessible in a scrollable detail view. |
+| Gallery/filter navigation | Opening a category gallery should pass the normalized category (`垫圈类`) while opening a part gallery should pass the specific part name/code. |
+
+### Validation & Error Matrix
+
+| Check | Good Result | Bad Result |
+|---|---|---|
+| Parts category rail | One `垫圈类` category contains distinct wave/flat/spring washer rows | Category card is mistaken for one concrete part |
+| Part display name | `gasket` row shows `波形垫圈` | `gasket` row shows `垫片` |
+| Flat washer display | `washer` row shows `平垫圈` inside `垫圈类` | `washer` is merged into `gasket` |
+| Long cloud reason | Table/card shows concise text and detail view shows full text | Text is permanently clipped with ellipsis and no detail path |
+
+### Tests Required
+
+- `partCategories.test.ts` must assert washer aliases normalize to `垫圈类`.
+- Frontend mapper tests must assert backend category aliases do not leak as `垫片`.
+- Page tests for `PartsPage` must assert selecting a category does not remove individual part rows.
+- Record/detail UI tests should use a long cloud reason or board sync error and assert a full scrollable view is reachable.
+
+### Wrong vs Correct
+
+#### Wrong
+
+```ts
+const partName = dto.part_code === "gasket" ? "垫片" : dto.name;
+```
+
+#### Correct
+
+```ts
+const partName = normalizePartDisplayName(dto.part_code, dto.name);
+```
+
+#### Wrong
+
+```vue
+<ElTableColumn prop="cloud_reason" show-overflow-tooltip />
+```
+
+This may expose only a browser tooltip and is not enough for long production review text.
+
+#### Correct
+
+```vue
+<ElTableColumn prop="cloud_reason" />
+<ElButton @click="openReviewDetail(row)">查看详情</ElButton>
+```
+
+The detail dialog/drawer owns the scrollable full text.

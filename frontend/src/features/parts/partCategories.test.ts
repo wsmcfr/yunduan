@@ -7,6 +7,7 @@ import {
   buildPartCategoryKey,
   groupPartsByCategory,
   normalizePartCategoryLabel,
+  resolvePartDisplayName,
 } from "./partCategories";
 
 /**
@@ -39,13 +40,24 @@ describe("part category helpers", () => {
     expect(normalizePartCategoryLabel(null)).toBe(UNCATEGORIZED_PART_CATEGORY_LABEL);
   });
 
+  it("历史垫圈分类文案会归一成零件大类", () => {
+    expect(normalizePartCategoryLabel("垫圈")).toBe("垫圈类");
+    expect(normalizePartCategoryLabel("washer-family")).toBe("垫圈类");
+    expect(normalizePartCategoryLabel("弹性垫圈")).toBe("垫圈类");
+  });
+
+  it("gasket 历史训练标签展示为波形垫圈而不是垫片", () => {
+    expect(resolvePartDisplayName("gasket", "垫片")).toBe("波形垫圈");
+    expect(resolvePartDisplayName("washer", "washer")).toBe("平垫圈");
+  });
+
   it("会按分类聚合零件类型并保留最新来源设备", () => {
     const entries = groupPartsByCategory([
       createPart({
         id: 1,
-        partCode: "PART-001",
-        name: "垫片 A",
-        category: "垫片",
+        partCode: "gasket",
+        name: "垫片",
+        category: "垫圈",
         recordCount: 3,
         imageCount: 6,
         latestUploadedAt: "2026-04-20T10:00:00Z",
@@ -57,9 +69,9 @@ describe("part category helpers", () => {
       }),
       createPart({
         id: 2,
-        partCode: "PART-002",
-        name: "垫片 B",
-        category: "垫片",
+        partCode: "washer",
+        name: "平垫圈",
+        category: "垫圈",
         recordCount: 2,
         imageCount: 4,
         latestUploadedAt: "2026-04-20T12:00:00Z",
@@ -82,8 +94,8 @@ describe("part category helpers", () => {
 
     expect(entries).toHaveLength(2);
     expect(entries[0]).toMatchObject({
-      key: buildPartCategoryKey("垫片"),
-      label: "垫片",
+      key: buildPartCategoryKey("垫圈类"),
+      label: "垫圈类",
       totalParts: 2,
       activeParts: 2,
       recordCount: 5,
@@ -93,7 +105,10 @@ describe("part category helpers", () => {
         deviceCode: "MP157-02",
       },
     });
-    expect(entries[0]?.parts.map((item) => item.partCode)).toEqual(["PART-002", "PART-001"]);
+    expect(entries[0]?.parts.map((item) => [item.partCode, item.name])).toEqual([
+      ["washer", "平垫圈"],
+      ["gasket", "波形垫圈"],
+    ]);
   });
 
   it("空列表时返回空数组", () => {

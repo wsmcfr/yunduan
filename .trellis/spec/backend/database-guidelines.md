@@ -817,3 +817,97 @@ NEW_V1_URL = "https://www.micuapi.ai"
 ```py
 NEW_V1_URL = "https://www.micuapi.ai/v1"
 ```
+
+---
+
+## Scenario: MP157 Part Identity Normalization
+
+### 1. Scope / Trigger
+
+- Trigger: STM32MP157 uploads detection records with model labels such as `gasket_good`, `gasket_bad`, `washer_good`, `splitwasher_bad`, or `wave_washer`.
+- Trigger: old training data used `gasket` for a physical wave washer, so literal English translation would mislabel it as `垫片`.
+- Affected backend services: `src/services/part_identity.py`, `src/services/part_service.py`, and `src/services/record_service.py`.
+
+### 2. Signatures
+
+```py
+normalize_part_display_name(*, part_code: str, raw_name: str | None) -> str
+normalize_part_category(*, part_code: str, raw_category: str | None) -> str | None
+RecordService._resolve_record_part(payload, company_id) -> Part
+PartService.list_parts(...) -> list[Part]
+```
+
+| Input Code / Label | Real Part | Category |
+|---|---|---|
+| `gasket`, `gasket_good`, `gasket_bad` | `波形垫圈` | `垫圈类` |
+| `wave_washer` | `波形垫圈` | `垫圈类` |
+| `washer`, `washer_good`, `washer_bad` | `平垫圈` | `垫圈类` |
+| `splitwasher`, `splitwasher_good`, `splitwasher_bad` | `弹性垫圈` | `垫圈类` |
+
+### 3. Contracts
+
+| Boundary | Contract |
+|---|---|
+| Part identity | A part row represents a physical part type, not a good/bad model outcome. |
+| Label split | Suffixes such as `_good` and `_bad` affect detection result only; they must not create separate part master rows. |
+| Legacy `gasket` | In this project, `gasket` is a legacy code for `波形垫圈`, not a generic gasket/pad displayed as `垫片`. |
+| Washer category | `垫圈`, `垫片`, `washer-family`, and `washer_family` category aliases normalize to `垫圈类` for display and grouping. |
+| Auto-create path | If `part_id` is absent and `part_code` exists, lookup by normalized physical code; if not found and `auto_create_part=true`, create one normalized master row. |
+| List output | Listing parts must normalize historical rows before returning them so frontend pages, records, and category summaries agree. |
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected Behavior | Failure Meaning |
+|---|---|---|
+| `gasket_good` then `gasket_bad` uploads | Both records reference the same `gasket` / `波形垫圈` part | Model outcome leaked into part identity |
+| `washer_good` uploads after `gasket_*` | Creates or reuses a distinct `washer` / `平垫圈` part | Different physical parts were merged |
+| Existing row has name `垫片` for `gasket` | Response displays `波形垫圈` | Legacy row is not being normalized |
+| Category is `垫片` or `washer-family` | Response category displays `垫圈类` | Category aliases leak into UI grouping |
+| Missing `part_id`, no `part_code` | Reject with `part_not_found` or equivalent validation error | Backend cannot identify a physical part |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example | Expected Result |
+|---|---|---|
+| Good wave washer | Upload `class_label=gasket_bad`, `part_code=gasket` | Record is bad, part is `波形垫圈`, category is `垫圈类` |
+| Good flat washer | Upload `class_label=washer_good`, `part_code=washer` | Record is good, part is `平垫圈`, category is `垫圈类` |
+| Base unknown physical part | Upload `part_code=custom_part`, `auto_create_part=true` | Create a master row from provided `part_name/category` |
+| Bad outcome-as-part | Create `gasket_good` and `gasket_bad` as two part rows | Parts page shows fake part types |
+| Bad literal translation | Display `gasket` as `垫片` | User believes the wrong physical object was detected |
+
+### 6. Tests Required
+
+- Backend unit tests for `normalize_part_display_name()` and `normalize_part_category()`.
+- `RecordService` tests proving `gasket_good/gasket_bad` resolve to one physical part and `washer_good` resolves to a distinct one.
+- `PartService.list_parts(...)` tests proving legacy stored names/categories are normalized in responses.
+- Detection record model tests proving `device_context.class_label` can keep the raw model label while `records.part_id` points to the physical part.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+part_code = class_label  # "gasket_bad"
+part_name = "垫片"
+```
+
+#### Correct
+
+```py
+part_code = "gasket"
+part_name = normalize_part_display_name(part_code=part_code, raw_name=None)  # "波形垫圈"
+part_category = normalize_part_category(part_code=part_code, raw_category="垫片")  # "垫圈类"
+```
+
+#### Wrong
+
+```text
+垫圈类 is itself the detected part.
+```
+
+#### Correct
+
+```text
+垫圈类 is only the grouping category.
+波形垫圈、平垫圈、弹性垫圈 are separate physical part types within that category.
+```
