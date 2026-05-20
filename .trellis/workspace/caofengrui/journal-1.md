@@ -860,3 +860,52 @@ Updated STM32MP157 cloud upload contract with verified F4-side hardware fields f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: Cloud records auto-create MP157 parts
+
+**Date**: 2026-05-20
+**Task**: Cloud records auto-create MP157 parts
+**Branch**: `main`
+
+### Summary
+
+记录云端检测记录按 MP157 part_code 自动创建或复用零件的实现、测试和文档同步。
+
+### Main Changes
+
+| 项目 | 内容 |
+|---|---|
+| 本次目标 | 云端支持 STM32MP157 上传检测记录时按 `part_code` 自动创建零件，解决没有预置零件时图片上传链路中断的问题。 |
+| 请求模型 | `DetectionRecordCreateRequest` 将 `part_id` 调整为可选，并新增 `part_code`、`part_name`、`part_category`、`auto_create_part`。 |
+| 服务逻辑 | `RecordService._resolve_record_part()` 优先兼容旧的 `part_id`；没有 `part_id` 时按 `part_code` 查找零件，存在则复用，不存在且 `auto_create_part=true` 时创建零件。 |
+| 错误契约 | 未传 `part_id/part_code` 返回 `part_identity_required`；未知 `part_code` 且未允许自动创建返回 `part_not_found`。 |
+| 测试覆盖 | 新增/更新 `test_detection_record_model.py`、`test_record_service.py` 覆盖只传 `part_code`、复用已有零件、拒绝未知零件、缺少零件身份四类路径。 |
+| 文档同步 | 更新 `docs/stm32mp157-cloud-upload-data-contract.md` 和 `docs/stm32mp157-board-review-sync-adaptation.md`，写清 MP157 必传字段和云端自动创建逻辑。 |
+
+**验证记录**:
+- `python -m unittest tests.test_record_service tests.test_detection_record_model`：10 tests OK。
+- `python -m unittest discover -s tests`：97 tests OK。
+- `git diff --cached --check`：通过。
+
+**注意事项**:
+- `.playwright-cli/`、`.tmp/` 是云端目录里的未跟踪临时目录，本次没有提交。
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3afce1b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
