@@ -1007,3 +1007,43 @@ Updated STM32MP157 cloud upload contract with verified F4-side hardware fields f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: AI streaming and model selection alignment
+
+**Date**: 2026-05-20
+**Task**: AI streaming and model selection alignment
+**Branch**: `main`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+| Item | Summary |
+|------|---------|
+| Statistics AI model gate | Required an enabled runtime model before statistics analysis or follow-up can start; no selected model now blocks the request and does not call the SSE API. |
+| Record detail streaming | Fixed OpenClaudeCode/Micu Responses metadata path to keep upstream `stream=True`, emit provider deltas immediately, and extract `provider_response_id` from `response.completed`. |
+| Code-spec updates | Documented the AI streaming contract and explicit model-selection precondition in backend and frontend Trellis specs. |
+| Verification | Backend tests: 120 passed. Frontend tests: 14 files / 54 tests passed. Frontend build passed. Production backend deployed and `/health` returned ok. |
+| GitHub | Main code commit `85409f0` was pushed to `origin/main`. |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `85409f0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
