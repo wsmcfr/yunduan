@@ -66,6 +66,7 @@ describe("management page pagination and resource refresh contracts", () => {
     ["设备管理页", "src/pages/DevicesPage.vue"],
     ["零件管理页", "src/pages/PartsPage.vue"],
     ["检测记录页", "src/pages/RecordsPage.vue"],
+    ["系统设置页", "src/pages/SettingsPage.vue"],
   ])("%s 的操作列使用紧凑横向按钮组", (_name, path) => {
     /**
      * 操作列是管理表格最容易显得拥挤的位置。
@@ -76,5 +77,17 @@ describe("management page pagination and resource refresh contracts", () => {
     expect(source).toContain("table-action-button");
     expect(source).toContain("flex-wrap: nowrap;");
     expect(source).toContain(".table-actions :deep(.el-button + .el-button)");
+  });
+
+  it("AI 网关模型操作列保持一行紧凑按钮", () => {
+    /**
+     * AI 网关模型表一行有“编辑 / 停用 / 删除”三个短动作。
+     * 这里锁住列宽和统一按钮类，避免按钮被窄列挤成两行，形成截图里的竖向堆叠问题。
+     */
+    const source = readPageSource("src/pages/SettingsPage.vue");
+
+    expect(source).toContain('<ElTableColumn label="操作" min-width="204" align="center"');
+    expect(source).toContain('class="table-action-button" text type="primary"');
+    expect(source).toContain('class="table-action-button" text type="danger"');
   });
 });

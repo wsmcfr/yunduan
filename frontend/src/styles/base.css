@@ -432,6 +432,108 @@ a {
   background: linear-gradient(135deg, var(--app-primary), var(--app-copper));
 }
 
+/**
+ * 管理表格中的行级动作统一使用暗底描边胶囊。
+ * Element Plus 的 text 按钮默认像裸文字，放在窄操作列里容易松散或换行；这里把视觉收敛成截图里的紧凑按钮形态。
+ */
+.table-actions {
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: max-content;
+}
+
+.table-action-button.el-button {
+  height: 28px;
+  min-width: 42px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.46);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.table-action-button.el-button.is-text {
+  padding: 0 10px;
+}
+
+.table-action-button.el-button:hover,
+.table-action-button.el-button:focus-visible {
+  border-color: rgba(255, 138, 31, 0.5);
+  background: rgba(255, 138, 31, 0.12);
+}
+
+.table-action-button.el-button--primary,
+.table-action-button.el-button--warning,
+.table-action-button.el-button--success {
+  color: var(--app-primary);
+  border-color: rgba(255, 138, 31, 0.38);
+}
+
+.table-action-button.el-button--danger {
+  color: var(--app-danger);
+  border-color: rgba(255, 90, 79, 0.34);
+}
+
+.table-action-button.el-button--danger:hover,
+.table-action-button.el-button--danger:focus-visible {
+  border-color: rgba(255, 90, 79, 0.5);
+  background: rgba(255, 90, 79, 0.1);
+}
+
+.table-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+/**
+ * 状态类标签统一改成暗底描边胶囊。
+ * 文字仍保留语义颜色，避免大面积亮色实心标签在深色表格中形成刺眼色块。
+ */
+.el-tag {
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.el-tag.el-tag--dark,
+.el-tag.el-tag--plain {
+  --el-tag-bg-color: rgba(15, 23, 42, 0.46);
+  --el-tag-border-color: rgba(148, 163, 184, 0.28);
+  --el-tag-text-color: var(--app-text-secondary);
+  background: var(--el-tag-bg-color);
+  border-color: var(--el-tag-border-color);
+  color: var(--el-tag-text-color);
+}
+
+.el-tag.el-tag--dark.el-tag--success,
+.el-tag.el-tag--plain.el-tag--success {
+  --el-tag-bg-color: rgba(57, 217, 138, 0.12);
+  --el-tag-border-color: rgba(57, 217, 138, 0.42);
+  --el-tag-text-color: #5df0a3;
+}
+
+.el-tag.el-tag--dark.el-tag--danger,
+.el-tag.el-tag--plain.el-tag--danger {
+  --el-tag-bg-color: rgba(255, 90, 79, 0.12);
+  --el-tag-border-color: rgba(255, 90, 79, 0.44);
+  --el-tag-text-color: #ff786f;
+}
+
+.el-tag.el-tag--dark.el-tag--warning,
+.el-tag.el-tag--plain.el-tag--warning {
+  --el-tag-bg-color: rgba(255, 209, 102, 0.12);
+  --el-tag-border-color: rgba(255, 209, 102, 0.44);
+  --el-tag-text-color: #ffd166;
+}
+
+.el-tag.el-tag--dark.el-tag--primary,
+.el-tag.el-tag--plain.el-tag--primary {
+  --el-tag-bg-color: rgba(63, 167, 255, 0.12);
+  --el-tag-border-color: rgba(63, 167, 255, 0.42);
+  --el-tag-text-color: #6dbbff;
+}
+
 @media (max-width: 1200px) {
   .page-grid.two-col,
   .page-grid.three-col {

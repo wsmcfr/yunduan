@@ -47,7 +47,7 @@ const tagType = computed(() => typeMap[props.value]);
 
 <style scoped>
 .status-tag {
-  border: none;
+  border: 1px solid var(--el-tag-border-color);
   font-weight: 600;
 }
 </style>

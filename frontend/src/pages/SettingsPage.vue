@@ -2117,6 +2117,7 @@ watch(gatewayDialogVisible, (visible) => {
               <template #default="{ row }">
                 <div class="table-actions">
                   <ElButton
+                    class="table-action-button"
                     v-if="hasPendingPasswordChangeRequest(row)"
                     text
                     type="primary"
@@ -2126,6 +2127,7 @@ watch(gatewayDialogVisible, (visible) => {
                     批准
                   </ElButton>
                   <ElButton
+                    class="table-action-button"
                     v-if="hasPendingPasswordChangeRequest(row)"
                     text
                     type="warning"
@@ -2135,6 +2137,7 @@ watch(gatewayDialogVisible, (visible) => {
                     拒绝
                   </ElButton>
                   <ElButton
+                    class="table-action-button"
                     text
                     type="primary"
                     :disabled="isCurrentUserRow(row) || isUserActionPending(row.id)"
@@ -2143,6 +2146,7 @@ watch(gatewayDialogVisible, (visible) => {
                     重置密码
                   </ElButton>
                   <ElButton
+                    class="table-action-button"
                     text
                     :disabled="isCurrentUserRow(row) || isUserActionPending(row.id)"
                     @click="handleToggleUserStatus(row)"
@@ -2150,6 +2154,7 @@ watch(gatewayDialogVisible, (visible) => {
                     {{ row.isActive ? "停用" : "启用" }}
                   </ElButton>
                   <ElButton
+                    class="table-action-button"
                     text
                     type="danger"
                     :disabled="isCurrentUserRow(row) || isUserActionPending(row.id)"
@@ -2274,10 +2279,10 @@ watch(gatewayDialogVisible, (visible) => {
               <template #default="{ row }">
                 <div class="table-actions">
                   <template v-if="row.adminApplicationStatus === 'pending'">
-                    <ElButton text type="primary" @click="handleApproveApplication(row)">
+                    <ElButton class="table-action-button" text type="primary" @click="handleApproveApplication(row)">
                       批准
                     </ElButton>
-                    <ElButton text type="danger" @click="handleRejectApplication(row)">
+                    <ElButton class="table-action-button" text type="danger" @click="handleRejectApplication(row)">
                       拒绝
                     </ElButton>
                   </template>
@@ -2402,6 +2407,7 @@ watch(gatewayDialogVisible, (visible) => {
               <template #default="{ row }">
                 <div class="table-actions">
                   <ElButton
+                    class="table-action-button"
                     text
                     :disabled="row.isSystemReserved || !row.isActive"
                     @click="handleDeactivateCompany(row)"
@@ -2409,6 +2415,7 @@ watch(gatewayDialogVisible, (visible) => {
                     停用
                   </ElButton>
                   <ElButton
+                    class="table-action-button"
                     text
                     type="danger"
                     :disabled="row.isSystemReserved || row.isActive"
@@ -2723,16 +2730,21 @@ watch(gatewayDialogVisible, (visible) => {
                         </ElTag>
                       </template>
                     </ElTableColumn>
-                    <ElTableColumn label="操作" min-width="160">
+                    <ElTableColumn label="操作" min-width="204" align="center">
                       <template #default="{ row }">
                         <div class="table-actions">
-                          <ElButton text type="primary" @click="openEditModelDialog(activeGateway.id, row)">
+                          <ElButton
+                            class="table-action-button"
+                            text
+                            type="primary"
+                            @click="openEditModelDialog(activeGateway.id, row)"
+                          >
                             编辑
                           </ElButton>
-                          <ElButton text @click="toggleModelStatus(row)">
+                          <ElButton class="table-action-button" text @click="toggleModelStatus(row)">
                             {{ row.isEnabled ? "停用" : "启用" }}
                           </ElButton>
-                          <ElButton text type="danger" @click="handleDeleteModel(row)">
+                          <ElButton class="table-action-button" text type="danger" @click="handleDeleteModel(row)">
                             删除
                           </ElButton>
                         </div>
@@ -2845,6 +2857,27 @@ watch(gatewayDialogVisible, (visible) => {
 .gateway-summary__tags,
 .filter-grid__actions {
   flex-wrap: wrap;
+}
+
+/* 管理表格操作列固定为单行胶囊按钮组，避免 AI 网关的“编辑 / 停用 / 删除”被窄列挤成上下两行。 */
+.table-actions {
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: max-content;
+}
+
+/* 行级动作按钮沿用全局暗底描边样式，这里保留类名契约，便于源码测试锁住管理表格视觉规范。 */
+.table-action-button {
+  height: 28px;
+  min-width: 42px;
+  padding: 0 10px;
+}
+
+/* 覆盖 Element Plus 相邻按钮默认 margin，让操作按钮间距只由 flex gap 控制。 */
+.table-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .settings-tabs {
