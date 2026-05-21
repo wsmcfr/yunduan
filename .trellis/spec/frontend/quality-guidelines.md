@@ -119,6 +119,10 @@ The web app should preserve those strengths.
 | Repeating status text and badge logic in every page | Causes inconsistent UI behavior |
 | Shipping real production credentials in login helper copy | Exposes operator secrets through public frontend assets |
 | Letting one sparse side panel stretch to the full height of a dense detail area without meaningful filler content | Creates a large empty block that users perceive as unfinished or visually broken |
+| Making a public auth page look like a contest poster or temporary helper screen | Users cannot tell this is the production cloud inspection system entry; use product and operations language such as `云端检测系统` and `运营态势总览` |
+| Using unequal desktop columns for a first-screen auth layout | The login and intro panels look like unrelated blocks instead of one balanced entry workspace |
+| Letting Element Plus `ElTabs` content be compressed by a parent grid row | Lower helper modules can overlap the form because the tab pane no longer owns its natural height |
+| Adding bordered pseudo-elements behind auth hero cards | The extra frame reads as an accidental background box, especially behind the last process card |
 | Switching `body` back to `overflow-y: auto` to reveal clipped content | Fixes one screenshot by making the whole app a long page; use the internal `.page-grid` scroll contract instead |
 | Adding `height="100%"` to route-level tables inside compressed grid rows | The table can shrink into a tiny pane and make pagination or bottom rows look cut off |
 | Treating a table refresh as enough after delete/create/update on pages that also show category cards or resource summaries | The row list updates but the visible resource cards keep old counts and timestamps |
@@ -138,6 +142,7 @@ Required visual QA pass:
 - verify repeated cards or action panels align consistently when they are presented as one group
 - verify management table operation columns scan as a compact horizontal control group, not as a tall vertical slab
 - verify sparse panels do not leave abnormal empty slabs beside dense panels
+- verify public auth pages use two equal desktop panels, no form/helper overlap, no contest wording, and no stray decorative frames
 - verify the page uses an aesthetic appropriate to the scenario:
   - dashboards should emphasize hierarchy and storytelling
   - settings/admin pages should emphasize order, symmetry, and scan speed

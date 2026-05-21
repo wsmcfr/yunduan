@@ -10,7 +10,6 @@ import {
 } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 
-import ContestAiLogo from "@/components/branding/ContestAiLogo.vue";
 import PageHeader from "@/components/common/PageHeader.vue";
 import {
   fetchAuthRuntimeOptionsRequest,
@@ -123,6 +122,150 @@ const REGISTER_STEP_OPTIONS: Array<{
     name: "security",
     title: "安全确认",
     description: "密码策略与最终提交",
+  },
+];
+
+/**
+ * 登录页左侧检测流程。
+ * 这些步骤不参与业务计算，只用于填充首屏顶部空白并说明系统从现场到追溯的主链路。
+ */
+const LOGIN_PROCESS_STEPS = [
+  {
+    title: "现场采集",
+    description: "设备端完成拍摄与检测结果上报。",
+  },
+  {
+    title: "云端归档",
+    description: "记录、图片和上下文统一入库。",
+  },
+  {
+    title: "复核判定",
+    description: "人工复核结合 AI 建议确认风险。",
+  },
+  {
+    title: "统计追溯",
+    description: "按公司、设备、零件和日期复盘。",
+  },
+];
+
+/**
+ * 登录页左侧平台覆盖范围。
+ * 使用静态短标签展示登录后的主要工作面，避免底部只剩大块装饰留白。
+ */
+const LOGIN_COVERAGE_ITEMS = [
+  "检测记录",
+  "样本图库",
+  "设备管理",
+  "零件台账",
+  "统计分析",
+  "系统设置",
+];
+
+/**
+ * 登录页左侧运行快照。
+ * 这些是入口页的静态示意指标，目的是解释进入系统后会优先看到哪些运行信息。
+ */
+const LOGIN_SNAPSHOT_ITEMS = [
+  {
+    label: "今日检测",
+    value: "实时",
+    description: "设备上传后自动进入记录池。",
+  },
+  {
+    label: "风险记录",
+    value: "优先",
+    description: "不良和待确认记录置顶处理。",
+  },
+  {
+    label: "待审核",
+    value: "闭环",
+    description: "人工复核与 AI 建议并行辅助。",
+  },
+  {
+    label: "样本覆盖",
+    value: "归档",
+    description: "良品与缺陷图片沉淀到图库。",
+  },
+];
+
+/**
+ * 登录页左侧能力卡。
+ * 每张卡用短说明加具体工作项填充，保证桌面高屏或矮屏拉伸时卡片内部仍有可扫读内容。
+ */
+const LOGIN_HIGHLIGHT_ITEMS = [
+  {
+    title: "统一检测入口",
+    description: "集中查看设备上传的检测记录、样本图片和零件基础信息。",
+    actions: ["记录筛选", "样本留档", "零件关联"],
+  },
+  {
+    title: "审核闭环",
+    description: "风险记录进入人工复核与 AI 辅助研判，减少漏判和重复追查。",
+    actions: ["人工复核", "AI 建议", "结果改判"],
+  },
+  {
+    title: "数据留痕",
+    description: "按公司、设备、零件和时间沉淀统计数据，为追溯和复盘提供依据。",
+    actions: ["公司维度", "设备维度", "趋势复盘"],
+  },
+];
+
+/**
+ * 认证卡底部工作区预览。
+ * 这里不做跳转，避免未登录状态下出现无效入口，只作为登录后可见能力的说明。
+ */
+const LOGIN_WORKSPACE_PREVIEW_ITEMS = [
+  {
+    title: "仪表盘",
+    description: "先看检测规模、风险热点和审核闭环。",
+  },
+  {
+    title: "检测记录",
+    description: "进入单条记录查看图片、上下文和复核结果。",
+  },
+  {
+    title: "样本图库",
+    description: "按零件类型沉淀良品与缺陷样本。",
+  },
+  {
+    title: "统计分析",
+    description: "追踪趋势、缺陷结构和设备风险排行。",
+  },
+];
+
+/**
+ * 认证卡内的账号路径说明。
+ * 它填补表单与工作区预览之间的空白，同时解释当前三个认证标签页各自适合的场景。
+ */
+const LOGIN_AUTH_PATH_ITEMS = [
+  {
+    title: "公司成员入口",
+    description: "使用用户名或邮箱进入已授权公司的检测控制台。",
+  },
+  {
+    title: "新成员加入",
+    description: "通过管理员发放的邀请码绑定公司与账号角色。",
+  },
+  {
+    title: "账号恢复",
+    description: "邮件通道开启后使用一次性令牌重置密码。",
+  },
+];
+
+/**
+ * 登录表单下方的上下文信息。
+ * 这些内容用于填充宽屏表单区，说明登录后的默认落点和主要处理对象。
+ */
+const LOGIN_SIGNIN_CONTEXT_ITEMS = [
+  {
+    label: "默认入口",
+    value: "运营态势总览",
+    description: "先查看检测规模、风险热点和审核闭环。",
+  },
+  {
+    label: "优先处理",
+    value: "待复核记录",
+    description: "从风险记录进入图片证据和人工复核。",
   },
 ];
 
@@ -499,30 +642,87 @@ onMounted(() => {
 <template>
   <div class="login-page">
     <section class="login-page__hero">
-      <div class="login-page__contest">
-        <p class="login-page__contest-title">第九届嵌入式芯片与系统设计竞赛</p>
-        <ContestAiLogo class="login-page__contest-logo" />
+      <div class="login-page__process-strip" aria-label="检测处理流程">
+        <div
+          v-for="(item, index) in LOGIN_PROCESS_STEPS"
+          :key="item.title"
+          class="login-page__process-item"
+        >
+          <span>0{{ index + 1 }}</span>
+          <strong>{{ item.title }}</strong>
+          <small>{{ item.description }}</small>
+        </div>
       </div>
 
-      <span class="login-page__eyebrow">Industrial Defect Detection</span>
-      <h1 class="login-page__title">云端检测系统</h1>
-      <p class="login-page__description">
-        认证入口已经切换为正式多租户模式。普通成员通过邀请码加入现有公司，新公司负责人通过审批创建独立空间；
-        登录态由服务端 `HttpOnly Cookie` 托管，密码与密钥等敏感信息都只留在后端。
-      </p>
+      <div class="login-page__hero-main">
+        <div class="login-page__hero-copy">
+          <div class="login-page__system-card">
+            <span class="login-page__system-kicker">Cloud Console</span>
+            <strong>工业缺陷检测云端控制台</strong>
+            <p>从采集上传到复核归档，所有关键检测数据在同一个入口处理。</p>
+          </div>
 
-      <div class="login-page__highlights">
-        <div class="login-page__highlight app-panel">
-          <strong>双注册路径</strong>
-          <span>普通成员走邀请码入司，新公司负责人走平台审批建公司。</span>
+          <span class="login-page__eyebrow">Industrial Defect Detection</span>
+          <h1 class="login-page__title">云端检测系统</h1>
+          <p class="login-page__description">
+            面向工业缺陷检测现场的云端控制台，统一管理检测记录、样本图库、设备状态、零件台账与统计分析。
+            系统支持人工复核与 AI 辅助研判，帮助管理员快速定位风险记录、追踪处理闭环并沉淀可追溯数据。
+          </p>
         </div>
-        <div class="login-page__highlight app-panel">
-          <strong>服务端会话</strong>
-          <span>浏览器不再保存可读 Token，刷新后仍可恢复登录状态。</span>
-        </div>
-        <div class="login-page__highlight app-panel">
-          <strong>密码加固</strong>
-          <span>采用慢哈希、随机盐与服务端 pepper，降低数据库泄露后的破解风险。</span>
+
+        <section class="login-page__support-grid" aria-label="系统入口信息">
+          <div class="login-page__snapshot" aria-label="运行快照">
+            <div class="login-page__snapshot-header">
+              <span>Runtime Snapshot</span>
+              <strong>运行快照</strong>
+            </div>
+
+            <div class="login-page__snapshot-grid">
+              <article
+                v-for="item in LOGIN_SNAPSHOT_ITEMS"
+                :key="item.label"
+                class="login-page__snapshot-item"
+              >
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+                <small>{{ item.description }}</small>
+              </article>
+            </div>
+          </div>
+
+          <div class="login-page__coverage" aria-label="平台覆盖范围">
+            <div class="login-page__coverage-header">
+              <span>Platform Scope</span>
+              <strong>平台覆盖范围</strong>
+            </div>
+            <div class="login-page__coverage-grid">
+              <span
+                v-for="item in LOGIN_COVERAGE_ITEMS"
+                :key="item"
+              >
+                {{ item }}
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <div class="login-page__highlights">
+          <article
+            v-for="item in LOGIN_HIGHLIGHT_ITEMS"
+            :key="item.title"
+            class="login-page__highlight app-panel"
+          >
+            <strong>{{ item.title }}</strong>
+            <span>{{ item.description }}</span>
+            <ul class="login-page__highlight-list">
+              <li
+                v-for="action in item.actions"
+                :key="action"
+              >
+                {{ action }}
+              </li>
+            </ul>
+          </article>
         </div>
       </div>
     </section>
@@ -606,7 +806,11 @@ onMounted(() => {
             :description="registerSuccessNotice"
           />
 
-          <ElForm class="login-page__form" label-position="top" @submit.prevent="handleLogin">
+          <ElForm
+            class="login-page__form login-page__login-grid"
+            label-position="top"
+            @submit.prevent="handleLogin"
+          >
             <ElFormItem label="账号">
               <ElInput
                 v-model="loginFormState.account"
@@ -626,7 +830,7 @@ onMounted(() => {
             </ElFormItem>
 
             <ElButton
-              class="login-page__submit"
+              class="login-page__submit login-page__login-submit"
               color="var(--app-primary)"
               native-type="submit"
               :loading="loginLoading"
@@ -634,6 +838,18 @@ onMounted(() => {
             >
               进入系统
             </ElButton>
+
+            <div class="login-page__signin-context" aria-label="登录后处理重点">
+              <article
+                v-for="item in LOGIN_SIGNIN_CONTEXT_ITEMS"
+                :key="item.label"
+                class="login-page__signin-context-item"
+              >
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+                <small>{{ item.description }}</small>
+              </article>
+            </div>
           </ElForm>
         </ElTabPane>
 
@@ -674,8 +890,14 @@ onMounted(() => {
             >
               <div class="login-page__mode-switch">
                 <ElRadioGroup v-model="registerFormState.registerMode" size="large">
-                  <ElRadioButton value="invite_join">邀请码加入公司</ElRadioButton>
-                  <ElRadioButton value="company_admin_request">申请新公司管理员</ElRadioButton>
+                  <ElRadioButton value="invite_join">
+                    <strong>邀请码加入公司</strong>
+                    <small>已有公司成员，拿到邀请码后直接绑定公司。</small>
+                  </ElRadioButton>
+                  <ElRadioButton value="company_admin_request">
+                    <strong>申请新公司管理员</strong>
+                    <small>新公司负责人，提交资料后等待平台审批。</small>
+                  </ElRadioButton>
                 </ElRadioGroup>
                 <p class="login-page__mode-note">{{ registerModeSummary }}</p>
               </div>
@@ -875,6 +1097,42 @@ onMounted(() => {
           </template>
         </ElTabPane>
       </ElTabs>
+
+      <section class="login-page__auth-paths" aria-label="账号路径说明">
+        <div class="login-page__auth-paths-header">
+          <span>Account Paths</span>
+          <strong>账号路径说明</strong>
+        </div>
+
+        <div class="login-page__auth-paths-grid">
+          <article
+            v-for="item in LOGIN_AUTH_PATH_ITEMS"
+            :key="item.title"
+            class="login-page__auth-path"
+          >
+            <strong>{{ item.title }}</strong>
+            <span>{{ item.description }}</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="login-page__workspace-preview" aria-label="登录后工作区预览">
+        <div class="login-page__workspace-preview-header">
+          <span>Workspace Preview</span>
+          <strong>登录后工作区预览</strong>
+        </div>
+
+        <div class="login-page__workspace-grid">
+          <article
+            v-for="item in LOGIN_WORKSPACE_PREVIEW_ITEMS"
+            :key="item.title"
+            class="login-page__workspace-item"
+          >
+            <strong>{{ item.title }}</strong>
+            <span>{{ item.description }}</span>
+          </article>
+        </div>
+      </section>
     </section>
   </div>
 </template>
@@ -882,17 +1140,16 @@ onMounted(() => {
 <style scoped>
 .login-page {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(380px, 560px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 28px;
   height: 100dvh;
   min-height: 100dvh;
   padding: 28px;
-  max-width: 1520px;
-  margin: 0 auto;
+  width: 100%;
   position: relative;
   align-items: stretch;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: hidden;
 }
 
 .login-page::before,
@@ -924,8 +1181,11 @@ onMounted(() => {
 .login-page__hero {
   position: relative;
   display: grid;
-  align-content: center;
-  gap: 22px;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  gap: clamp(12px, 1.65vh, 18px);
+  height: calc(100dvh - 56px);
+  min-height: calc(100dvh - 56px);
   padding: clamp(34px, 4vw, 52px);
   border: 1px solid rgba(149, 184, 223, 0.14);
   border-radius: 34px;
@@ -936,21 +1196,49 @@ onMounted(() => {
   overflow: hidden;
 }
 
-.login-page__hero::before,
+.login-page__process-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.login-page__process-item {
+  display: grid;
+  gap: 5px;
+  min-height: 104px;
+  padding: 14px 16px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+    rgba(8, 19, 33, 0.28);
+}
+
+.login-page__process-item span {
+  color: var(--app-copper);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.login-page__process-item strong {
+  color: var(--app-text);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.login-page__process-item small {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .login-page__hero::after {
   content: "";
   position: absolute;
-  border: 1px solid rgba(149, 184, 223, 0.08);
-  border-radius: 28px;
   pointer-events: none;
-}
-
-.login-page__hero::before {
-  top: 18px;
-  right: 18px;
-  width: 220px;
-  height: 120px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent);
 }
 
 .login-page__hero::after {
@@ -962,30 +1250,57 @@ onMounted(() => {
   background: radial-gradient(circle, rgba(255, 138, 31, 0.1), transparent 70%);
 }
 
-.login-page__contest {
+.login-page__system-card {
   display: grid;
   gap: 12px;
-  width: min(100%, 640px);
-  padding: 18px 20px;
+  width: min(100%, 620px);
+  padding: 18px 22px;
+  position: relative;
+  z-index: 1;
   border: 1px solid rgba(149, 184, 223, 0.1);
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.03);
   backdrop-filter: blur(10px);
 }
 
-.login-page__contest-title {
+.login-page__hero-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  grid-template-rows: max-content minmax(max-content, 1fr);
+  gap: 18px;
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+}
+
+.login-page__hero-copy {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  min-width: 0;
+}
+
+.login-page__system-card strong {
   margin: 0;
   color: #e4eef8;
   font-size: clamp(22px, 2.6vw, 32px);
   font-weight: 700;
-  letter-spacing: 0.06em;
   line-height: 1.2;
 }
 
-.login-page__contest-logo {
-  display: block;
-  width: min(100%, 420px);
-  filter: drop-shadow(0 16px 30px rgba(8, 18, 37, 0.24));
+.login-page__system-card p {
+  margin: 0;
+  color: var(--app-text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.login-page__system-kicker {
+  color: var(--app-primary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .login-page__eyebrow {
@@ -994,14 +1309,18 @@ onMounted(() => {
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
+  position: relative;
+  z-index: 1;
 }
 
 .login-page__title {
   margin: 0;
-  max-width: 720px;
-  font-size: clamp(50px, 5.5vw, 78px);
-  line-height: 0.92;
+  max-width: 620px;
+  font-size: clamp(32px, 3.2vw, 48px);
+  line-height: 1.08;
   text-wrap: balance;
+  position: relative;
+  z-index: 1;
 }
 
 .login-page__description {
@@ -1009,20 +1328,26 @@ onMounted(() => {
   color: var(--app-text-secondary);
   font-size: 16px;
   line-height: 1.95;
+  position: relative;
+  z-index: 1;
 }
 
 .login-page__highlights {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  margin-top: 6px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .login-page__highlight {
   display: grid;
-  gap: 10px;
-  padding: 20px 22px;
-  border-radius: 22px;
+  align-content: start;
+  gap: 8px;
+  padding: 15px 16px;
+  border-radius: 18px;
   border: 1px solid rgba(149, 184, 223, 0.12);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
@@ -1031,22 +1356,174 @@ onMounted(() => {
 }
 
 .login-page__highlight:first-child {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
 .login-page__highlight span {
   color: var(--app-text-secondary);
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.login-page__highlight-list {
+  display: grid;
+  gap: 7px;
+  margin: auto 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.login-page__highlight-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--app-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.login-page__highlight-list li::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--app-primary);
+  box-shadow: 0 0 12px rgba(74, 212, 154, 0.36);
+}
+
+.login-page__coverage {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
+    rgba(8, 19, 33, 0.24);
+}
+
+.login-page__snapshot {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.01)),
+    rgba(8, 19, 33, 0.24);
+}
+
+.login-page__support-grid {
+  display: grid;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+  align-content: start;
+  min-width: 0;
+}
+
+.login-page__coverage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.login-page__coverage-header span,
+.login-page__snapshot-header span,
+.login-page__auth-paths-header span,
+.login-page__workspace-preview-header span {
+  color: var(--app-primary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.login-page__coverage-header strong,
+.login-page__snapshot-header strong,
+.login-page__auth-paths-header strong,
+.login-page__workspace-preview-header strong {
+  color: var(--app-text);
+  font-size: 15px;
+}
+
+.login-page__snapshot-header,
+.login-page__coverage-grid {
+  display: grid;
+}
+
+.login-page__snapshot-header,
+.login-page__auth-paths-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.login-page__snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.login-page__snapshot-item {
+  display: grid;
+  gap: 5px;
+  min-height: 66px;
+  padding: 10px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.login-page__snapshot-item span {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+}
+
+.login-page__snapshot-item strong {
+  color: var(--app-text);
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.login-page__snapshot-item small {
+  color: var(--app-text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.login-page__coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.login-page__coverage-grid span {
+  display: inline-grid;
+  min-height: 34px;
+  place-items: center;
+  padding: 0 10px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 12px;
+  color: var(--app-text-secondary);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .login-page__form-card {
   position: relative;
-  align-self: center;
-  justify-self: end;
-  width: min(100%, 560px);
-  min-height: min(820px, calc(100vh - 56px));
-  max-height: calc(100vh - 56px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  align-self: stretch;
+  justify-self: stretch;
+  height: calc(100dvh - 56px);
+  min-height: calc(100dvh - 56px);
+  max-height: calc(100dvh - 56px);
   padding: 34px 32px;
   border-radius: 30px;
   border: 1px solid rgba(149, 184, 223, 0.14);
@@ -1066,11 +1543,164 @@ onMounted(() => {
 }
 
 .login-page__tabs {
-  margin-top: 18px;
+  flex: 0 0 auto;
+  min-height: 0;
+  margin-top: 0;
+}
+
+.login-page__tabs :deep(.el-tabs__content) {
+  display: block;
+  overflow: visible;
+}
+
+.login-page__tabs :deep(.el-tab-pane) {
+  min-width: 0;
 }
 
 .login-page__form {
-  margin-top: 18px;
+  margin-top: 14px;
+}
+
+.login-page__login-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+  align-items: end;
+  padding: 16px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.login-page__login-grid :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.login-page__login-submit {
+  grid-column: 1 / -1;
+}
+
+.login-page__signin-context {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.login-page__signin-context-item {
+  display: grid;
+  gap: 5px;
+  min-height: 78px;
+  padding: 12px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.login-page__signin-context-item span {
+  color: var(--app-copper);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.login-page__signin-context-item strong {
+  color: var(--app-text);
+  font-size: 14px;
+}
+
+.login-page__signin-context-item small {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.login-page__workspace-preview {
+  display: grid;
+  flex: 1 0 auto;
+  gap: 14px;
+  min-height: 0;
+  align-self: stretch;
+  padding: 18px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.01)),
+    rgba(8, 19, 33, 0.28);
+}
+
+.login-page__auth-paths {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0.01)),
+    rgba(8, 19, 33, 0.24);
+}
+
+.login-page__auth-paths-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.login-page__auth-path {
+  display: grid;
+  gap: 6px;
+  min-height: 80px;
+  padding: 12px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.024);
+}
+
+.login-page__auth-path strong {
+  color: var(--app-text);
+  font-size: 13px;
+}
+
+.login-page__auth-path span {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.login-page__workspace-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.login-page__workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.login-page__workspace-item {
+  display: grid;
+  gap: 6px;
+  min-height: 84px;
+  padding: 14px;
+  border: 1px solid rgba(149, 184, 223, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.login-page__workspace-item strong {
+  color: var(--app-text);
+  font-size: 14px;
+}
+
+.login-page__workspace-item span {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .login-page__alert {
@@ -1090,6 +1720,49 @@ onMounted(() => {
   border: 1px solid rgba(149, 184, 223, 0.12);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.02);
+}
+
+.login-page__mode-switch :deep(.el-radio-group) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.login-page__mode-switch :deep(.el-radio-button) {
+  width: 100%;
+}
+
+.login-page__mode-switch :deep(.el-radio-button__inner) {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  width: 100%;
+  min-height: 92px;
+  padding: 14px;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.45;
+}
+
+.login-page__mode-switch :deep(.el-radio-button__inner strong),
+.login-page__mode-switch :deep(.el-radio-button__inner small) {
+  display: block;
+}
+
+.login-page__mode-switch :deep(.el-radio-button__inner strong) {
+  color: var(--app-text);
+  font-size: 14px;
+}
+
+.login-page__mode-switch :deep(.el-radio-button__inner small) {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+}
+
+.login-page__mode-switch :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner strong),
+.login-page__mode-switch :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner small) {
+  color: #1b1208;
 }
 
 .login-page__mode-note {
@@ -1158,7 +1831,6 @@ onMounted(() => {
 .login-page__step-page {
   display: grid;
   gap: 14px;
-  min-height: 292px;
   align-content: start;
 }
 
@@ -1208,16 +1880,289 @@ onMounted(() => {
 
 @media (max-width: 1360px) {
   .login-page {
-    grid-template-columns: minmax(0, 1fr) minmax(360px, 500px);
     gap: 22px;
   }
 
   .login-page__hero {
-    padding: 34px 30px;
+    gap: 12px;
+    padding: 28px 30px;
+  }
+
+  .login-page__process-strip {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .login-page__process-item {
+    min-height: 78px;
+    padding: 10px 11px;
+  }
+
+  .login-page__process-item small {
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .login-page__system-card {
+    gap: 8px;
+    padding: 14px 16px;
+  }
+
+  .login-page__hero-main {
+    grid-template-columns: minmax(0, 1fr) minmax(250px, 0.8fr);
+    gap: 12px;
+  }
+
+  .login-page__hero-copy {
+    gap: 12px;
+  }
+
+  .login-page__system-card strong {
+    font-size: 24px;
   }
 
   .login-page__title {
-    font-size: clamp(46px, 5vw, 64px);
+    font-size: clamp(34px, 3.8vw, 46px);
+  }
+
+  .login-page__description {
+    font-size: 14px;
+    line-height: 1.65;
+  }
+
+  .login-page__highlights {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .login-page__highlight,
+  .login-page__highlight:first-child {
+    grid-column: auto;
+  }
+
+  .login-page__highlight {
+    gap: 7px;
+    padding: 13px 14px;
+    border-radius: 16px;
+  }
+
+  .login-page__highlight span {
+    display: none;
+  }
+
+  .login-page__highlight-list {
+    gap: 8px;
+  }
+
+  .login-page__highlight-list li {
+    font-size: 11px;
+  }
+
+  .login-page__coverage {
+    gap: 10px;
+    padding: 13px 14px;
+    border-radius: 18px;
+  }
+
+  .login-page__snapshot {
+    gap: 10px;
+    padding: 13px 14px;
+  }
+
+  .login-page__support-grid {
+    gap: 10px;
+  }
+
+  .login-page__snapshot-grid {
+    gap: 8px;
+  }
+
+  .login-page__snapshot-item {
+    min-height: 66px;
+    padding: 10px;
+  }
+
+  .login-page__snapshot-item strong {
+    font-size: 16px;
+  }
+
+  .login-page__snapshot-item small {
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .login-page__coverage-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .login-page__coverage-grid span {
+    min-height: 32px;
+    padding: 0 6px;
+    font-size: 12px;
+  }
+
+  .login-page__form-card {
+    gap: 14px;
+    padding: 28px 28px;
+  }
+
+  .login-page__workspace-preview {
+    padding: 14px;
+  }
+
+  .login-page__auth-paths {
+    padding: 14px;
+  }
+
+  .login-page__auth-path {
+    min-height: 72px;
+    padding: 10px;
+  }
+
+  .login-page__workspace-item {
+    min-height: 76px;
+    padding: 12px;
+  }
+}
+
+@media (max-width: 1360px) and (max-height: 760px) {
+  .login-page {
+    gap: 18px;
+    padding: 20px;
+  }
+
+  .login-page__hero,
+  .login-page__form-card {
+    height: calc(100dvh - 40px);
+    min-height: calc(100dvh - 40px);
+    max-height: calc(100dvh - 40px);
+  }
+
+  .login-page__hero {
+    gap: 10px;
+    padding: 20px 22px;
+  }
+
+  .login-page__process-strip {
+    gap: 6px;
+  }
+
+  .login-page__process-item {
+    min-height: 58px;
+    padding: 8px 10px;
+  }
+
+  .login-page__process-item strong {
+    font-size: 13px;
+  }
+
+  .login-page__process-item small {
+    display: none;
+  }
+
+  .login-page__hero-main {
+    gap: 10px;
+    grid-template-columns: minmax(0, 1fr) minmax(226px, 0.76fr);
+    grid-template-rows: max-content minmax(max-content, 1fr);
+  }
+
+  .login-page__hero-copy {
+    gap: 10px;
+  }
+
+  .login-page__system-card {
+    gap: 6px;
+    padding: 12px 14px;
+  }
+
+  .login-page__system-card strong {
+    font-size: 21px;
+  }
+
+  .login-page__system-card p {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .login-page__title {
+    font-size: 40px;
+    line-height: 1;
+  }
+
+  .login-page__description {
+    font-size: 13px;
+    line-height: 1.48;
+  }
+
+  .login-page__support-grid {
+    gap: 8px;
+  }
+
+  .login-page__snapshot,
+  .login-page__coverage {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .login-page__snapshot-grid,
+  .login-page__coverage-grid {
+    gap: 6px;
+  }
+
+  .login-page__snapshot-item {
+    min-height: 44px;
+    gap: 2px;
+    padding: 7px 8px;
+  }
+
+  .login-page__snapshot-item span {
+    font-size: 11px;
+  }
+
+  .login-page__snapshot-item strong {
+    font-size: 14px;
+  }
+
+  .login-page__snapshot-item small {
+    display: none;
+  }
+
+  .login-page__coverage-grid span {
+    min-height: 28px;
+    font-size: 11px;
+  }
+
+  .login-page__highlights {
+    gap: 8px;
+  }
+
+  .login-page__highlight {
+    min-height: 68px;
+    gap: 4px;
+    padding: 9px 10px;
+  }
+
+  .login-page__highlight strong {
+    font-size: 13px;
+  }
+
+  .login-page__highlight span {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .login-page__highlight-list {
+    gap: 5px;
+  }
+
+  .login-page__highlight-list li {
+    font-size: 10px;
+  }
+
+  .login-page__form-card {
+    gap: 12px;
+    padding: 22px;
   }
 }
 
@@ -1231,6 +2176,22 @@ onMounted(() => {
     overflow-y: auto;
   }
 
+  .login-page__hero {
+    height: auto;
+    min-height: auto;
+    grid-template-rows: none;
+  }
+
+  .login-page__process-strip,
+  .login-page__coverage-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .login-page__hero-main,
+  .login-page__support-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .login-page__highlights {
     grid-template-columns: 1fr;
   }
@@ -1242,6 +2203,7 @@ onMounted(() => {
   .login-page__form-card {
     justify-self: stretch;
     width: 100%;
+    height: auto;
     min-height: auto;
     max-height: none;
     overflow: visible;
@@ -1257,16 +2219,12 @@ onMounted(() => {
     padding: 28px 22px;
   }
 
-  .login-page__contest {
+  .login-page__system-card {
     width: 100%;
   }
 
-  .login-page__contest-logo {
-    width: min(100%, 360px);
-  }
-
   .login-page__title {
-    font-size: 42px;
+    font-size: 38px;
   }
 
   .login-page__form-card {
@@ -1280,7 +2238,8 @@ onMounted(() => {
 
   .login-page__stepper,
   .login-page__field-grid,
-  .login-page__step-actions {
+  .login-page__step-actions,
+  .login-page__workspace-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1299,12 +2258,12 @@ onMounted(() => {
     border-radius: 24px;
   }
 
-  .login-page__contest {
+  .login-page__system-card {
     padding: 16px;
     border-radius: 20px;
   }
 
-  .login-page__contest-title {
+  .login-page__system-card strong {
     font-size: 20px;
   }
 

@@ -286,6 +286,150 @@ Why:
 - context-specific density prevents admin screens from looking like dashboards and prevents dashboards from feeling lifeless
 - natural-height side panels avoid the common “large empty column” defect that users read as broken design instead of deliberate whitespace
 
+## Scenario: Public Auth Page Visual Balance And Element Plus Tabs Flow
+
+Public auth pages such as `LoginPage.vue` are first-screen product surfaces. They must read as a cloud inspection system entry, not as a contest poster, temporary helper page, or decorative empty frame.
+
+### 1. Scope / Trigger
+
+| Trigger | Required response |
+|---|---|
+| Changing login, registration, forgot-password, or public auth copy | Re-check the public auth page copy against production cloud inspection terminology. |
+| Changing `.login-page` desktop layout | Preserve two equal desktop panels that fill the first viewport. |
+| Changing Element Plus tabs inside the auth card | Verify tab content is not compressed by a parent grid row and does not overlap helper sections below. |
+| Adding decorative layers to the hero panel | Verify they do not look like stray background boxes behind process cards. |
+| Adding or removing filler modules | Keep empty areas filled with useful system context, not ornamental space. |
+
+### 2. Signatures
+
+| Selector / source contract | Required signature |
+|---|---|
+| `.login-page` | Desktop grid uses `grid-template-columns: repeat(2, minmax(0, 1fr))`. |
+| `.login-page__hero` and `.login-page__form-card` | Both stretch to the same viewport-derived height, for example `height: calc(100dvh - 56px)` and `min-height: calc(100dvh - 56px)`. |
+| `.login-page__title` | Title text is `云端检测系统`; desktop size is capped with `font-size: clamp(32px, 3.2vw, 48px)`. |
+| `.login-page__process-strip` | Four-step business flow stays visible in the left panel. |
+| `.login-page__form-card` | Uses `display: flex` and `flex-direction: column`; do not use a compressed parent grid for the full auth card. |
+| `.login-page__tabs :deep(.el-tabs__content)` | Uses `overflow: visible` so Element Plus tab panes keep natural height. |
+| `.login-page__login-grid` | Desktop login form uses `grid-template-columns: repeat(2, minmax(0, 1fr))`; the submit button spans `grid-column: 1 / -1`. |
+| `.login-page__mode-switch :deep(.el-radio-group)` | Registration mode choices fill the card width in two equal columns. |
+| `.login-page__auth-paths` | Explains account paths with business language, not security-feature marketing. |
+| `.login-page__workspace-preview` | Uses `flex: 1 0 auto` or equivalent to absorb right-panel remaining height with useful workspace context. |
+| `.login-page__hero::before` | Forbidden for bordered decorative frames behind process cards; use only non-box-like ambience such as `.login-page__hero::after` when needed. |
+
+### 3. Contracts
+
+| Contract | Required behavior |
+|---|---|
+| Product naming | Public title is `云端检测系统`; avoid `检测云控台` unless explicitly requested, and never use contest names on production pages. |
+| Dashboard wording | Dashboard page title uses operating-console semantics such as `运营态势总览`, not `比赛项目总览` or placeholder-copy language. |
+| Desktop panel geometry | Left and right panels are visually equal-width, equal-height, and fill the first viewport. |
+| Left-panel content | The hero panel includes workflow, run snapshot, coverage, and capability blocks so bottom/top gaps carry useful inspection-system meaning. |
+| Right-panel content | Login/register controls are sized for the half-screen card, and remaining height is filled by account paths and workspace preview. |
+| Element Plus tab flow | Tabs participate in normal document flow inside the form card. Helper sections below tabs must move down naturally instead of covering forms. |
+| Decorative layers | A pseudo-element must not create a visible bordered rectangle behind cards; users read that as a broken layout frame. |
+| Short desktop height | Around `1280x720` and `1360x768`, keep the two-column layout but tighten copy, cards, and secondary text so the left panel is not clipped. |
+
+### 4. Validation & Error Matrix
+
+| Check | Failure signal | Required fix |
+|---|---|---|
+| Public copy scan | Mentions `比赛`, `第九届`, `占位`, or temporary helper framing | Replace with cloud inspection operations language. |
+| Panel equality | Left and right panel widths or heights differ on desktop | Restore equal `1fr` columns and shared viewport-derived card height. |
+| Title scale | `云端检测系统` looks like a poster headline or exceeds the intended cap | Restore the title clamp and short-height override. |
+| Tabs layout | `.login-page__auth-paths` or `.login-page__workspace-preview` overlaps form fields | Remove compressed grid rows from `.login-page__form-card`; keep tab content `overflow: visible`. |
+| Empty slabs | A panel has large unused space below sparse text | Add or rebalance business modules such as snapshots, account paths, or workspace preview. |
+| Decorative frame | A bordered pseudo-element appears behind the fourth process card or hero content | Remove `.login-page__hero::before` and avoid box-like background frames. |
+| Short viewport | Left capability cards or bottom content are cut off at `1280x720` | Add short-height media rules that reduce density without changing product copy. |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Expected result |
+|---|---|
+| Good | `1920x1028`, `1360x768`, and `1280x720` show two equal panels, no overlap, no body scroll, title capped, and business modules filling both sides. |
+| Base | Narrow layouts collapse to a single column with readable auth flow and no clipped form controls. |
+| Bad | A right-side form card uses only a narrow column inside a half-screen panel, leaving an empty box-like area. |
+| Bad | Left hero has a big title plus sparse copy and a decorative rectangle behind process cards. |
+| Bad | A parent grid uses `1fr` rows around `ElTabs`, causing tab content to be squeezed and lower sections to cover the form. |
+
+### 6. Tests Required
+
+| Test type | Assertion points |
+|---|---|
+| Source contract test | Assert `DashboardPage.vue` title is `运营态势总览` and does not contain contest or placeholder wording. |
+| Source contract test | Assert `LoginPage.vue` title is `云端检测系统`, title clamp is present, and contest copy is absent. |
+| Source contract test | Assert `.login-page` equal columns, shared viewport height, and stretched panels are present. |
+| Source contract test | Assert `.login-page__form-card` is flex column and `.login-page__tabs :deep(.el-tabs__content)` uses `overflow: visible`. |
+| Source contract test | Assert login grid, registration mode grid, process strip, snapshot, coverage, account paths, and workspace preview selectors exist. |
+| Source contract test | Assert `.login-page__hero::before` is absent and `.login-page__hero::after` may remain only as non-box ambience. |
+| Browser visual probe | At `1920x1028`, `1360x768`, and `1280x720`, assert left/right panel bounding boxes are equal, no key sections overlap, and body overflow remains locked. |
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```vue
+<style scoped>
+.login-page {
+  /* 错误：右侧固定宽度会让两块主面板大小不一致。 */
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 560px);
+}
+
+.login-page__form-card {
+  /* 错误：父级网格行压缩 Element Plus tabs，容易让下方模块覆盖表单。 */
+  display: grid;
+  grid-template-rows: auto auto auto minmax(max-content, 1fr);
+}
+
+.login-page__tabs :deep(.el-tabs__content) {
+  /* 错误：裁切 tab 内容会隐藏表单高度，后续模块无法正确避让。 */
+  overflow: hidden;
+}
+
+.login-page__hero::before {
+  /* 错误：边框型伪元素会被误读成多余背景框。 */
+  content: "";
+  position: absolute;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+}
+</style>
+```
+
+#### Correct
+
+```vue
+<style scoped>
+.login-page {
+  /* 正确：桌面端左右均分，两个主面板像同一个入口工作台。 */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.login-page__hero,
+.login-page__form-card {
+  /* 正确：左右主面板使用相同的首屏高度契约。 */
+  min-height: calc(100dvh - 56px);
+  height: calc(100dvh - 56px);
+  justify-self: stretch;
+}
+
+.login-page__form-card {
+  /* 正确：认证卡按自然流纵向排列，避免压缩 Element Plus tabs。 */
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.login-page__tabs :deep(.el-tabs__content) {
+  /* 正确：tab 面板自然撑开，账号路径和工作区预览跟随下移。 */
+  overflow: visible;
+}
+
+.login-page__workspace-preview {
+  /* 正确：用工作区信息吸收剩余高度，而不是留下空白。 */
+  flex: 1 0 auto;
+}
+</style>
+```
+
 ### Convention: Compact Management Table Row Actions
 
 Management tables such as `RecordsPage`, `PartsPage`, and `DevicesPage` should render row actions as a compact horizontal action group, not as loose Element Plus text buttons stacked inside a narrow column.

@@ -337,8 +337,8 @@ function stepWorkspacePage(direction: -1 | 1): void {
   <div class="page-grid dashboard-page">
     <PageHeader
       eyebrow="Overview"
-      title="比赛项目总览"
-      description="首页不再只放几个占位表格，而是把当前窗口的检测规模、风险热点、审核闭环和图库覆盖统一放到一个总览页里。需要深入追查时，再进入统计分析、样本图库或检测记录继续处理。"
+      title="运营态势总览"
+      description="把当前窗口的检测规模、风险热点、审核闭环和图库覆盖统一收拢到仪表盘。需要深入追查时，再进入统计分析、样本图库或检测记录继续处理。"
     />
 
     <ElAlert
