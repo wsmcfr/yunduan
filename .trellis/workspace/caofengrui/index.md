@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 24
+- **Total Sessions**: 25
 - **Last Active**: 2026-05-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1162 | Active |
+| `journal-1.md` | ~1220 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 25 | 2026-05-21 | 记录公共登录页 UI 修复 | `40a716c` | `main` |
 | 24 | 2026-05-21 | 管理表格按钮与状态标签统一样式 | `a1c31f6` | `main` |
 | 23 | 2026-05-21 | 优化管理界面响应式布局与操作列样式 | `43cabc9` | `main` |
 | 22 | 2026-05-20 | AI streaming and model selection alignment | `85409f0` | `main` |

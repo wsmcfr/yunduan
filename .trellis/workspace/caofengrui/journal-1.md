@@ -1163,3 +1163,60 @@ Updated STM32MP157 cloud upload contract with verified F4-side hardware fields f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: 记录公共登录页 UI 修复
+
+**Date**: 2026-05-21
+**Task**: 记录公共登录页 UI 修复
+**Branch**: `main`
+
+### Summary
+
+完成公共登录页与仪表盘 UI 语义修复，并将本次视觉布局问题沉淀为前端规范与源码回归测试。核心目标是避免页面再次退回比赛展示语气、左右栏不均分、认证表单重叠、空白区域无意义和装饰背景框误读等问题。
+
+### Main Changes
+
+| 项目 | 内容 |
+|---|---|
+| UI 修复 | 将仪表盘从“比赛项目总览”改为“运营态势总览”，去掉比赛/占位语气。 |
+| 登录页定位 | 公共登录页统一命名为“云端检测系统”，文案聚焦工业缺陷检测云端控制台，不再使用比赛项目、临时 helper 或安全技术卖点作为主介绍。 |
+| 登录页布局 | 桌面端左右两栏改为等宽等高并填满首屏；左侧补检测流程、运行快照、覆盖范围和能力清单；右侧补登录后处理重点、账号路径说明和工作区预览。 |
+| 重叠修复 | 右侧认证卡从压缩 grid 改为纵向 flex flow，并让 Element Plus Tabs 内容 `overflow: visible`，避免账号路径/工作区预览覆盖登录或注册表单。 |
+| 视觉 bug 修复 | 删除左侧 hero 的 `.login-page__hero::before` 边框伪元素，避免流程卡后方出现误读为多余背景框的装饰框。 |
+| 回归测试 | 新增 `frontend/src/pages/publicConsoleCopy.test.ts`，锁定登录页文案、两栏布局、标题字号、空白填充模块、Tabs flow、矮屏压缩规则和仪表盘命名。 |
+| 规范沉淀 | 更新 `.trellis/spec/frontend/component-guidelines.md` 与 `.trellis/spec/frontend/quality-guidelines.md`，记录公共认证页视觉平衡、Element Plus Tabs 自然流、禁止装饰背景框等可执行契约。 |
+| 部署 | 本次 UI 已部署到 `yunfuwu-prod`，服务器 Nginx root 为 `/opt/yunduan/frontend/dist`；此前验证公网登录页返回 200。 |
+
+**验证结果**:
+
+| 命令 | 结果 |
+|---|---|
+| `git diff --check` | 通过，仅有 LF/CRLF 换行提示。 |
+| `npm run build` | 通过，包含 `vue-tsc --noEmit` 与 Vite 生产构建。 |
+| `npm run test` | 通过，16 个测试文件、74 条用例全部通过。 |
+
+**关键提交**:
+
+- `40a716c fix frontend public login layout`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `40a716c` | (see git log) |
+
+### Testing
+
+- [OK] `git diff --check`
+- [OK] `npm run build`
+- [OK] `npm run test`，16 个测试文件、74 条用例全部通过
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
