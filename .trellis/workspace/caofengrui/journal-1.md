@@ -1110,3 +1110,56 @@ Updated STM32MP157 cloud upload contract with verified F4-side hardware fields f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: 管理表格按钮与状态标签统一样式
+
+**Date**: 2026-05-21
+**Task**: 管理表格按钮与状态标签统一样式
+**Branch**: `main`
+
+### Summary
+
+统一了深色管理后台中的表格操作按钮与状态标签视觉样式，解决检测记录、零件、设备、用户、公司和 AI 网关模型等管理表格中按钮形态不一致、状态标签过亮，以及 AI 网关模型操作列按钮换行堆叠的问题。变更已完成本地验证、生产静态资源部署和 GitHub 推送。
+
+### Main Changes
+
+| 项目 | 内容 |
+|------|------|
+| UI 统一 | 将管理表格行级操作统一为暗底描边胶囊按钮，覆盖记录、零件、设备、系统设置与 AI 网关模型等管理表格场景。 |
+| AI 网关修复 | 调整 AI 网关模型表操作列宽度为 204 并居中，强制“编辑 / 停用 / 删除”保持一行，避免窄列中上下堆叠。 |
+| 状态标签 | 统一 Element Plus 状态标签为暗底描边胶囊样式，并让 StatusTag 保留全局标签描边变量，减少深色表格中的大面积亮色块。 |
+| 测试 | 扩展 managementPages.test.ts，将 SettingsPage 纳入管理表格操作列契约，并新增 AI 网关模型操作列单行按钮断言。 |
+| 部署 | 已构建并部署前端 dist 到生产服务器，旧 dist 备份为 /opt/yunduan/deploy_backups/dist_backup_20260521_203154，生产入口 HTML 与 Nginx 服务入口均指向新 bundle。 |
+| 验证 | npm run test 通过 15 个测试文件 / 63 个测试；npm run build 通过；生产后端 health 返回 {"status":"ok"}；提交已推送到 GitHub main。 |
+
+**提交**:
+- `a1c31f6 fix(ui): 统一管理表格按钮和状态标签样式`
+
+**关键文件**:
+- `frontend/src/styles/base.css`
+- `frontend/src/pages/SettingsPage.vue`
+- `frontend/src/components/common/StatusTag.vue`
+- `frontend/src/pages/managementPages.test.ts`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a1c31f6` | (see git log) |
+
+### Testing
+
+- [OK] `cd frontend; npm run test`，共 15 个测试文件、63 个测试通过
+- [OK] `cd frontend; npm run build`，包含 `vue-tsc --noEmit` 与 Vite 生产构建
+- [OK] 生产部署后校验 `/opt/yunduan/frontend/dist/index.html` 与 Nginx 返回首页均指向 `index-DR7L7pRv.js` / `index-Cmcymxz9.css`
+- [OK] 生产后端健康检查 `curl http://127.0.0.1:8000/health` 返回 `{"status":"ok"}`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
