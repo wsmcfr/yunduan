@@ -1220,3 +1220,52 @@ Updated STM32MP157 cloud upload contract with verified F4-side hardware fields f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 26: Migrate cloud deployment to Huawei Cloud
+
+**Date**: 2026-06-04
+**Task**: Migrate cloud deployment to Huawei Cloud
+**Branch**: `main`
+
+### Summary
+
+完成云端服务到华为云新服务器的热迁移：旧生产服务器保持在线，新服务器已导入应用、配置和 MySQL 快照，并启动后端、Nginx、MySQL；华为云安全组放行 `TCP:80` 后，公网健康检查和用户浏览器验证均已通过。
+
+### Main Changes
+
+| 工作项 | 结果 |
+|---|---|
+| SSH 配置恢复 | 从 VS Code History 恢复 `C:\Users\caofengrui\.ssh\config`，恢复 `cfr`、`yunfuwu-prod`、`cfr-vm`、`sub2api`、`hwy` 等别名，并验证 `ssh hwy` 可连接新华为云服务器。 |
+| 新华为云服务器 | 使用 `hwy` 连接新华为云服务器，创建 `ubuntu` 用户和 `/opt/yunduan` 部署目录。 |
+| 旧服务器热迁移 | 保持旧服务器 `yunfuwu-prod` 在线，导出 `/opt/yunduan` 应用文件、Nginx 配置、systemd 服务和 MySQL 数据快照。 |
+| 数据迁移 | 使用 `mysqldump --single-transaction --no-tablespaces` 导出并导入新服务器 MySQL，验证 `users=3`、`detection_records=94`、`file_objects=295`。 |
+| 运行环境 | 在新服务器安装 Nginx、MySQL、Python 3.11、WeasyPrint/ReportLab 系统依赖，复用旧服务器后端 `.venv` 并验证 FastAPI 和 PDF renderer 可导入。 |
+| 服务启动 | 新服务器启用并启动 `mysql`、`nginx`、`yunduan-backend.service`，后端监听 `127.0.0.1:8000`，Nginx 监听 `80`。 |
+| 验证结果 | 新服务器内部 `curl http://127.0.0.1:8000/health` 和 `curl http://127.0.0.1/health` 均返回 `{"status":"ok"}`，首页 HTML 可由 Nginx 返回。 |
+| 公网验证 | 华为云安全组已放行 `TCP:80`，公网健康检查返回 `{"status":"ok"}`，用户确认浏览器访问可正常运行。 |
+
+**注意**：本次是热迁移快照，旧服务器未停止。如果旧服务器在迁移后继续产生新用户、检测记录或文件元数据，正式切换前需要再做一次最终数据库同步，最好在确认无人操作或短暂停写时执行。
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b3aa55d` | (see git log) |
+
+### Testing
+
+- [OK] `ssh hwy "hostname; whoami"` 可连接新华为云服务器并返回 root 会话。
+- [OK] 新服务器后端导入检查通过：`from src.app import create_app` 成功，PDF renderer 的 `reportlab` 加载成功。
+- [OK] 新服务器数据库导入后统计为 `users=3`、`detection_records=94`、`file_objects=295`。
+- [OK] 新服务器内部 `curl http://127.0.0.1:8000/health` 和 Nginx 代理 `curl http://127.0.0.1/health` 均返回 `{"status":"ok"}`。
+- [OK] 华为云安全组放行 `TCP:80` 后，公网 `/health` 验证返回 `{"status":"ok"}`，用户确认页面可正常运行。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 正式切换域名或停用旧服务器前，再做一次最终数据库同步，避免热迁移后旧服务器新增数据遗漏。
