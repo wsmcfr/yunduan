@@ -14,3 +14,4 @@ output/
 ziliao/
 .playwright-cli/
 .tmp/
+.worktrees/
