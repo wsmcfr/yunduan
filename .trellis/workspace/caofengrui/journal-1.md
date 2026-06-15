@@ -1269,3 +1269,50 @@ Updated STM32MP157 cloud upload contract with verified F4-side hardware fields f
 ### Next Steps
 
 - 正式切换域名或停用旧服务器前，再做一次最终数据库同步，避免热迁移后旧服务器新增数据遗漏。
+
+
+## Session 27: 记录云端检测模型上传与云端复检增强
+
+**Date**: 2026-06-15
+**Task**: 记录云端检测模型上传与云端复检增强
+**Branch**: `feature/cloud-detection-context`
+
+### Summary
+
+记录本次将未删减 ONNX 检测模型上传到 hwy 云端，并增强云端自动检测、手动复检、COS 结果图展示和 AI 可读上下文的完整会话。
+
+### Main Changes
+
+| 项目 | 记录 |
+|---|---|
+| 云端模型上传 | 已将两个未删减 ONNX 模型上传到 `ssh hwy` 新服务器，路径为 `/opt/yunduan/model_picture/checkpoints_classify/defect_classifier.onnx` 和 `/opt/yunduan/model_picture/checkpoints_unet_test/defect_unet_test.onnx`，分类标签文件同步放在 `checkpoints_classify/defect_classifier_labels.json`。 |
+| 云端自动检测 | 板端上传记录图片后，云端按需启动分类和 UNet 检测模型，不常驻运行；检测结果写入 `cloud_detection_context`，用于和板端 `vision/sensor/decision/device` 上下文对比。 |
+| 手动复检 | 记录详情页新增“重新进行云端检测”按钮，点击后调用 `/api/v1/records/{record_id}/cloud-detection` 重新运行云端模型并刷新当前记录详情。 |
+| COS 结果图 | 云端生成的 UNet 叠加图、mask 图、MobileNetV3-Small 分类结果图上传 COS，并在详情页“云端检测生成图”区域展示。 |
+| 覆盖策略 | 同一记录同一产物使用固定 COS key：`detections/{record_no}/cloud_detection/{artifact_type}.{extension}`；每次手动重跑会覆盖当前图片并更新已有 `FileObject` 元数据，不制造历史图片堆积。 |
+| AI 上下文 | AI 复核上下文和紧凑提示词加入 `cloud_detection_context`，包含云端摘要、板端/云端对比、分类/分割信号和生成图 object_key/preview_url，方便大模型基于云端检测结果分析。 |
+| 前端展示 | 详情页新增云端模型检测上下文面板、云端检测生成图展示区、复检按钮；记录列表和 mapper/type 补齐云端检测字段。 |
+| 部署验证 | 已部署到 `ssh hwy`，后端健康检查正常；`POST /api/v1/records/1/cloud-detection` 未登录返回 `401` 证明路由存在；数据库字段 `cloud_detection_context` 存在；前端 dist 包含“重新进行云端检测”和“云端模型检测上下文”。 |
+| 测试验证 | 后端在 SQLite/JWT 测试环境下 `134 passed`；前端 `vitest` 为 `18 passed / 79 passed`；前端 `npm run build` 成功。 |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ae1603e` | (see git log) |
+| `a9071c4` | (see git log) |
+| `7d2a50e` | (see git log) |
+| `de9e237` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

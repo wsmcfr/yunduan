@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 26
-- **Last Active**: 2026-06-04
+- **Total Sessions**: 27
+- **Last Active**: 2026-06-15
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1267 | Active |
+| `journal-1.md` | ~1318 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 27 | 2026-06-15 | 记录云端检测模型上传与云端复检增强 | `ae1603e`, `a9071c4`, `7d2a50e`, `de9e237` | `feature/cloud-detection-context` |
 | 26 | 2026-06-04 | Migrate cloud deployment to Huawei Cloud | `b3aa55d` | `main` |
 | 25 | 2026-05-21 | 记录公共登录页 UI 修复 | `40a716c` | `main` |
 | 24 | 2026-05-21 | 管理表格按钮与状态标签统一样式 | `a1c31f6` | `main` |
