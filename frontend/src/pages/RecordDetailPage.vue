@@ -1272,7 +1272,7 @@ watch(
 }
 
 .detail-section--cloud-generated {
-  height: 640px;
+  height: 560px;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
@@ -1439,8 +1439,8 @@ watch(
   width: 100%;
   height: 100%;
   aspect-ratio: 4 / 3;
-  min-height: 220px;
-  max-height: 320px;
+  min-height: 180px;
+  max-height: 260px;
   overflow: hidden;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);

@@ -45,7 +45,8 @@ describe("record detail cloud detection contracts", () => {
     expect(source).toContain("previewUrl");
     expect(source).toContain("cloud-generated-pager");
     expect(source).toContain("detail-section--cloud-generated");
-    expect(source).toContain("height: 640px;");
+    expect(source).toMatch(/\.detail-section--cloud-generated\s*\{\s*height:\s*560px;/);
+    expect(source).toMatch(/\.detail-section--context\s*\{\s*height:\s*560px;/);
     expect(source).toContain("grid-template-rows: auto minmax(0, 1fr);");
     expect(source).toContain("max-height: 100%;");
     expect(source).toContain("height: 100%;");
