@@ -37,4 +37,33 @@ describe("record detail cloud detection contracts", () => {
     expect(source).toContain("generated_files");
     expect(source).toContain("previewUrl");
   });
+
+  it("上下文卡片固定尺寸，长内容只能在卡片内部分页查看", () => {
+    const source = readRecordDetailSource();
+
+    expect(source).toContain("CONTEXT_VALUE_PAGE_SIZE");
+    expect(source).toContain("contextValuePageState");
+    expect(source).toContain("getContextValuePage");
+    expect(source).toContain("changeContextValuePage");
+    expect(source).toContain("上一页");
+    expect(source).toContain("下一页");
+    expect(source).toContain("detail-context__item--paged");
+    expect(source).toContain("grid-auto-rows: 1fr;");
+    expect(source).toContain("min-height: 176px;");
+    expect(source).toContain("max-height: 176px;");
+    expect(source).toContain("overflow: hidden;");
+  });
+
+  it("复核工作区操作按钮使用高对比专用样式", () => {
+    const source = readRecordDetailSource();
+
+    expect(source).toContain("detail-action-button");
+    expect(source).toContain("detail-action-button--ai");
+    expect(source).toContain("detail-action-button--cloud");
+    expect(source).toContain("detail-action-button--board");
+    expect(source).toContain("detail-action-button--refresh");
+    expect(source).toContain("background: #38bdf8");
+    expect(source).toContain("background: #f97316");
+    expect(source).toContain("background: #facc15");
+  });
 });

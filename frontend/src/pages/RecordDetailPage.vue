@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
+import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
 
 import PageHeader from "@/components/common/PageHeader.vue";
 import StatusTag from "@/components/common/StatusTag.vue";
@@ -38,8 +39,20 @@ interface RecordContextPanel {
   key: string;
   title: string;
   description: string;
-  entries: ReturnType<typeof flattenStructuredContext>;
+  entries: PagedStructuredContextEntry[];
 }
+
+type StructuredContextEntry = ReturnType<typeof flattenStructuredContext>[number];
+
+interface PagedStructuredContextEntry extends StructuredContextEntry {
+  pageStateKey: string;
+  visibleValueText: string;
+  currentPage: number;
+  totalPages: number;
+  isPaged: boolean;
+}
+
+const CONTEXT_VALUE_PAGE_SIZE = 180;
 
 const route = useRoute();
 const authStore = useAuthStore();
@@ -53,6 +66,7 @@ const boardSyncReason = ref("");
 const error = ref("");
 const record = ref<DetectionRecordModel | null>(null);
 const aiDialogVisible = ref(false);
+const contextValuePageState = ref<Record<string, number>>({});
 
 /**
  * 从路由里读取检测记录编号。
@@ -153,6 +167,143 @@ const cloudGeneratedFiles = computed<CloudGeneratedFile[]>(() => {
 });
 
 /**
+ * 生成上下文卡片的分页状态键。
+ *
+ * 参数:
+ *   panelKey: 当前上下文分组，例如云端检测、视觉检测。
+ *   entryKeyPath: 拍平后的字段路径。
+ *
+ * 返回:
+ *   稳定的卡片分页状态键；同名字段出现在不同分组时不会互相串页。
+ */
+function getContextEntryStateKey(panelKey: string, entryKeyPath: string): string {
+  return `${panelKey}:${entryKeyPath}`;
+}
+
+/**
+ * 将长上下文文本切成多个卡片内页面。
+ *
+ * 主要流程:
+ * 1. 短文本直接作为单页展示；
+ * 2. 长文本优先按换行切分，避免 JSON 每页都被硬截断到难读；
+ * 3. 单行仍然过长时，再按固定字符预算切成多页。
+ *
+ * 参数:
+ *   valueText: 需要展示的上下文值。
+ *
+ * 返回:
+ *   每一项都是一个固定卡片内可展示的文本页。
+ */
+function splitContextValuePages(valueText: string): string[] {
+  if (valueText.length <= CONTEXT_VALUE_PAGE_SIZE) {
+    return [valueText];
+  }
+
+  const pages: string[] = [];
+  let currentPageText = "";
+
+  for (const line of valueText.split("\n")) {
+    const nextPageText = currentPageText ? `${currentPageText}\n${line}` : line;
+    if (nextPageText.length <= CONTEXT_VALUE_PAGE_SIZE) {
+      currentPageText = nextPageText;
+      continue;
+    }
+
+    if (currentPageText) {
+      pages.push(currentPageText);
+      currentPageText = "";
+    }
+
+    for (let index = 0; index < line.length; index += CONTEXT_VALUE_PAGE_SIZE) {
+      const chunk = line.slice(index, index + CONTEXT_VALUE_PAGE_SIZE);
+      if (chunk.length === CONTEXT_VALUE_PAGE_SIZE) {
+        pages.push(chunk);
+      } else {
+        currentPageText = chunk;
+      }
+    }
+  }
+
+  if (currentPageText) {
+    pages.push(currentPageText);
+  }
+
+  return pages.length > 0 ? pages : [valueText];
+}
+
+/**
+ * 读取单个上下文卡片当前应该展示的页码。
+ *
+ * 参数:
+ *   pageStateKey: 当前卡片自己的分页状态键。
+ *   totalPages: 当前卡片一共有多少页。
+ *
+ * 返回:
+ *   返回限制在合法范围内的页码，防止数据刷新后旧页码超过新的总页数。
+ */
+function getContextValuePage(pageStateKey: string, totalPages: number): number {
+  return Math.min(
+    Math.max(contextValuePageState.value[pageStateKey] ?? 0, 0),
+    Math.max(totalPages - 1, 0),
+  );
+}
+
+/**
+ * 给上下文条目追加当前页文本和分页元数据。
+ *
+ * 参数:
+ *   panelKey: 当前上下文分组键。
+ *   entries: 原始拍平上下文条目。
+ *
+ * 返回:
+ *   前端模板可直接渲染的分页条目列表。
+ */
+function buildPagedContextEntries(
+  panelKey: string,
+  entries: StructuredContextEntry[],
+): PagedStructuredContextEntry[] {
+  return entries.map((entry) => {
+    const pageStateKey = getContextEntryStateKey(panelKey, entry.keyPath);
+    const pages = splitContextValuePages(entry.valueText);
+    const currentPage = getContextValuePage(pageStateKey, pages.length);
+
+    return {
+      ...entry,
+      pageStateKey,
+      visibleValueText: pages[currentPage] ?? entry.valueText,
+      currentPage,
+      totalPages: pages.length,
+      isPaged: pages.length > 1,
+    };
+  });
+}
+
+/**
+ * 切换单个上下文卡片内部的文本页。
+ *
+ * 参数:
+ *   entry: 当前上下文卡片条目。
+ *   direction: `-1` 表示上一页，`1` 表示下一页。
+ *
+ * 返回:
+ *   无返回值；只更新当前卡片自己的分页状态。
+ */
+function changeContextValuePage(entry: PagedStructuredContextEntry, direction: -1 | 1): void {
+  if (entry.totalPages <= 1) {
+    return;
+  }
+
+  const nextPage = Math.min(
+    Math.max(entry.currentPage + direction, 0),
+    entry.totalPages - 1,
+  );
+  contextValuePageState.value = {
+    ...contextValuePageState.value,
+    [entry.pageStateKey]: nextPage,
+  };
+}
+
+/**
  * 将四类结构化上下文整理成统一的页面板块配置。
  * 这样模板层只负责渲染，不再散落大量字段判断。
  */
@@ -161,31 +312,34 @@ const contextPanels = computed<RecordContextPanel[]>(() => [
     key: "vision",
     title: "视觉检测上下文",
     description: "展示边缘侧视觉模型、通道结果、局部判定和图像侧依据。",
-    entries: flattenStructuredContext(record.value?.visionContext),
+    entries: buildPagedContextEntries("vision", flattenStructuredContext(record.value?.visionContext)),
   },
   {
     key: "sensor",
     title: "传感器上下文",
     description: "展示 F4 或其他传感器上传的原始值、阈值、计算结果和越界信息。",
-    entries: flattenStructuredContext(record.value?.sensorContext),
+    entries: buildPagedContextEntries("sensor", flattenStructuredContext(record.value?.sensorContext)),
   },
   {
     key: "decision",
     title: "判定依据上下文",
     description: "展示最终为什么会判成良品、不良或待确认，而不是只给一个结果。",
-    entries: flattenStructuredContext(record.value?.decisionContext),
+    entries: buildPagedContextEntries("decision", flattenStructuredContext(record.value?.decisionContext)),
   },
   {
     key: "device",
     title: "设备上传上下文",
     description: "展示设备任务号、批次号、固件版本、采集参数等运行信息。",
-    entries: flattenStructuredContext(record.value?.deviceContext),
+    entries: buildPagedContextEntries("device", flattenStructuredContext(record.value?.deviceContext)),
   },
   {
     key: "cloud-detection",
     title: "云端模型检测上下文",
     description: "展示云端 ONNX 复检摘要、分类/分割结果、与板端初检的对比以及生成图路径。",
-    entries: flattenStructuredContext(record.value?.cloudDetectionContext as StructuredContextBlock | null),
+    entries: buildPagedContextEntries(
+      "cloud-detection",
+      flattenStructuredContext(record.value?.cloudDetectionContext as StructuredContextBlock | null),
+    ),
   },
 ]);
 
@@ -651,11 +805,35 @@ watch(
         <div v-else class="detail-context">
           <article
             v-for="entry in panel.entries"
-            :key="entry.keyPath"
+            :key="entry.pageStateKey"
             class="detail-context__item"
+            :class="{ 'detail-context__item--paged': entry.isPaged }"
           >
             <span class="detail-context__label">{{ entry.label }}</span>
-            <strong class="detail-context__value">{{ entry.valueText }}</strong>
+            <strong class="detail-context__value">{{ entry.visibleValueText }}</strong>
+            <div v-if="entry.isPaged" class="detail-context__pager">
+              <ElButton
+                class="detail-context__pager-button"
+                :icon="ArrowLeft"
+                :disabled="entry.currentPage === 0"
+                circle
+                aria-label="上一页"
+                title="上一页"
+                @click="changeContextValuePage(entry, -1)"
+              />
+              <span class="detail-context__pager-count">
+                {{ entry.currentPage + 1 }} / {{ entry.totalPages }}
+              </span>
+              <ElButton
+                class="detail-context__pager-button"
+                :icon="ArrowRight"
+                :disabled="entry.currentPage >= entry.totalPages - 1"
+                circle
+                aria-label="下一页"
+                title="下一页"
+                @click="changeContextValuePage(entry, 1)"
+              />
+            </div>
           </article>
         </div>
       </section>
@@ -696,6 +874,7 @@ watch(
 
             <div class="detail-review-workspace__assistant-actions">
               <ElButton
+                class="detail-action-button detail-action-button--ai"
                 type="primary"
                 plain
                 :disabled="!canUseAiAnalysis"
@@ -704,6 +883,7 @@ watch(
                 打开 AI 对话分析
               </ElButton>
               <ElButton
+                class="detail-action-button detail-action-button--cloud"
                 type="warning"
                 plain
                 :loading="cloudDetectionSubmitting"
@@ -712,6 +892,7 @@ watch(
                 重新进行云端检测
               </ElButton>
               <ElButton
+                class="detail-action-button detail-action-button--board"
                 type="warning"
                 plain
                 :loading="boardSyncSubmitting"
@@ -719,7 +900,13 @@ watch(
               >
                 修正板端结果
               </ElButton>
-              <ElButton @click="loadRecordDetail" :loading="loading">刷新详情</ElButton>
+              <ElButton
+                class="detail-action-button detail-action-button--refresh"
+                :loading="loading"
+                @click="loadRecordDetail"
+              >
+                刷新详情
+              </ElButton>
             </div>
 
             <ElAlert
@@ -979,6 +1166,7 @@ watch(
 
 .detail-context {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-auto-rows: 1fr;
 }
 
 .detail-context__label {
@@ -987,9 +1175,52 @@ watch(
 }
 
 .detail-context__value {
+  min-height: 0;
+  overflow: hidden;
   line-height: 1.8;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.detail-context__item {
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 176px;
+  max-height: 176px;
+  overflow: hidden;
+}
+
+.detail-context__item--paged {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.detail-context__pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(149, 184, 223, 0.12);
+}
+
+.detail-context__pager-button {
+  width: 34px;
+  height: 34px;
+  color: #ffffff;
+  border-color: rgba(56, 189, 248, 0.46);
+  background: rgba(56, 189, 248, 0.18);
+}
+
+.detail-context__pager-button:not(.is-disabled):hover {
+  color: #ffffff;
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.34);
+}
+
+.detail-context__pager-count {
+  color: var(--app-text);
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
 .detail-review-workspace {
@@ -1009,6 +1240,51 @@ watch(
 .detail-review-workspace__assistant p {
   margin: 0;
   line-height: 1.8;
+}
+
+.detail-action-button {
+  min-width: 138px;
+  min-height: 40px;
+  border-width: 1px;
+  border-radius: 8px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.detail-action-button + .detail-action-button {
+  margin-left: 0;
+}
+
+.detail-action-button--ai,
+.detail-action-button--ai:hover,
+.detail-action-button--ai:focus {
+  color: #082f49;
+  border-color: #7dd3fc;
+  background: #38bdf8;
+}
+
+.detail-action-button--cloud,
+.detail-action-button--cloud:hover,
+.detail-action-button--cloud:focus {
+  color: #ffffff;
+  border-color: #fdba74;
+  background: #f97316;
+}
+
+.detail-action-button--board,
+.detail-action-button--board:hover,
+.detail-action-button--board:focus {
+  color: #422006;
+  border-color: #fde68a;
+  background: #facc15;
+}
+
+.detail-action-button--refresh,
+.detail-action-button--refresh:hover,
+.detail-action-button--refresh:focus {
+  color: #f8fafc;
+  border-color: rgba(203, 213, 225, 0.62);
+  background: rgba(15, 23, 42, 0.92);
 }
 
 .board-sync-status {
