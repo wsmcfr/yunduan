@@ -58,6 +58,7 @@ interface PagedStructuredContextEntry extends StructuredContextEntry {
 
 const CONTEXT_VALUE_PAGE_SIZE = 180;
 const CONTEXT_PANEL_PAGE_SIZE = 4;
+const CLOUD_GENERATED_IMAGE_PAGE_SIZE = 2;
 
 const route = useRoute();
 const authStore = useAuthStore();
@@ -73,6 +74,7 @@ const record = ref<DetectionRecordModel | null>(null);
 const aiDialogVisible = ref(false);
 const contextValuePageState = ref<Record<string, number>>({});
 const contextPanelPageState = ref<Record<string, number>>({});
+const cloudGeneratedImagePageState = ref(0);
 
 /**
  * 从路由里读取检测记录编号。
@@ -170,6 +172,51 @@ const cloudGeneratedFiles = computed<CloudGeneratedFile[]>(() => {
       };
     })
     .filter((item) => item.objectKey || item.previewUrl);
+});
+
+/**
+ * 计算云端生成图总页数。
+ *
+ * 主要流程:
+ * 1. 按固定页容量统计总页数；
+ * 2. 即使没有图片也保留 1 页，避免模板里出现 0/0 的不可读页码。
+ *
+ * 返回:
+ *   当前云端生成图区域一共可翻多少组。
+ */
+const cloudGeneratedImageTotalPages = computed(() =>
+  Math.max(Math.ceil(cloudGeneratedFiles.value.length / CLOUD_GENERATED_IMAGE_PAGE_SIZE), 1),
+);
+
+/**
+ * 读取云端生成图当前页码。
+ *
+ * 返回:
+ *   被限制在合法范围内的页码；手动重新检测覆盖图片后，旧页码不会越界。
+ */
+const cloudGeneratedImageCurrentPage = computed(() =>
+  Math.min(
+    Math.max(cloudGeneratedImagePageState.value, 0),
+    cloudGeneratedImageTotalPages.value - 1,
+  ),
+);
+
+/**
+ * 当前页应该展示的云端生成图。
+ *
+ * 主要流程:
+ * 1. 根据当前页码计算起始下标；
+ * 2. 只截取一页图片给模板渲染，保证生成图区域始终是一行固定数量。
+ *
+ * 返回:
+ *   当前可见的一组云端生成图。
+ */
+const visibleCloudGeneratedFiles = computed<CloudGeneratedFile[]>(() => {
+  const startIndex = cloudGeneratedImageCurrentPage.value * CLOUD_GENERATED_IMAGE_PAGE_SIZE;
+  return cloudGeneratedFiles.value.slice(
+    startIndex,
+    startIndex + CLOUD_GENERATED_IMAGE_PAGE_SIZE,
+  );
 });
 
 /**
@@ -394,6 +441,26 @@ function changeContextPanelPage(panel: RecordContextPanel, direction: -1 | 1): v
 }
 
 /**
+ * 切换云端生成图展示组。
+ *
+ * 参数:
+ *   direction: `-1` 表示上一组，`1` 表示下一组。
+ *
+ * 返回:
+ *   无返回值；只更新当前生成图区域自己的分页状态。
+ */
+function changeCloudGeneratedImagePage(direction: -1 | 1): void {
+  if (cloudGeneratedImageTotalPages.value <= 1) {
+    return;
+  }
+
+  cloudGeneratedImagePageState.value = Math.min(
+    Math.max(cloudGeneratedImageCurrentPage.value + direction, 0),
+    cloudGeneratedImageTotalPages.value - 1,
+  );
+}
+
+/**
  * 将四类结构化上下文整理成统一的页面板块配置。
  * 这样模板层只负责渲染，不再散落大量字段判断。
  */
@@ -445,6 +512,7 @@ async function loadRecordDetail(): Promise<void> {
   try {
     const response = await fetchRecordDetail(recordId.value);
     record.value = mapDetectionRecordDetailDto(response);
+    cloudGeneratedImagePageState.value = 0;
   } catch (caughtError) {
     error.value = caughtError instanceof Error ? caughtError.message : "记录详情加载失败";
   } finally {
@@ -496,6 +564,7 @@ async function handleRunCloudDetection(): Promise<void> {
   try {
     const response = await runCloudDetection(record.value.id);
     record.value = mapDetectionRecordDetailDto(response);
+    cloudGeneratedImagePageState.value = 0;
     const cloudContext = record.value.cloudDetectionContext;
     if (cloudContext?.status === "success") {
       ElMessage.success("云端模型检测已完成");
@@ -579,6 +648,13 @@ watch(
     void loadRecordDetail();
   },
   { immediate: true },
+);
+
+watch(
+  () => [record.value?.id ?? null, cloudGeneratedFiles.value.length] as const,
+  () => {
+    cloudGeneratedImagePageState.value = 0;
+  },
 );
 </script>
 
@@ -832,40 +908,66 @@ watch(
           description="当前记录还没有云端检测生成图。上传板端图片后会自动触发一次，也可以点击重新进行云端检测。"
         />
 
-        <div v-else class="cloud-generated-grid">
-          <article
-            v-for="file in cloudGeneratedFiles"
-            :key="file.objectKey || file.artifactType"
-            class="cloud-generated-card"
-          >
-            <div class="detail-preview__meta-head">
-              <strong>{{ file.displayName }}</strong>
-              <ElTag effect="dark" round>{{ formatDateTime(file.uploadedAt) }}</ElTag>
-            </div>
-
-            <ElImage
-              v-if="file.previewUrl"
-              :src="file.previewUrl"
-              :alt="file.displayName"
-              fit="contain"
-              class="cloud-generated-card__image"
+        <div v-else class="cloud-generated-gallery">
+          <div class="cloud-generated-grid">
+            <article
+              v-for="file in visibleCloudGeneratedFiles"
+              :key="file.objectKey || file.artifactType"
+              class="cloud-generated-card"
             >
-              <template #error>
-                <div class="detail-preview__fallback">
-                  <strong>{{ file.displayName }}</strong>
-                  <p>云端生成图已登记到 COS，但当前浏览器无法直接预览。</p>
-                  <code>{{ file.objectKey }}</code>
-                </div>
-              </template>
-            </ElImage>
+              <div class="detail-preview__meta-head">
+                <strong>{{ file.displayName }}</strong>
+                <ElTag effect="dark" round>{{ formatDateTime(file.uploadedAt) }}</ElTag>
+              </div>
 
-            <div v-else class="detail-preview__fallback">
-              <strong>{{ file.displayName }}</strong>
-              <p>云端生成图缺少可直接访问的预览地址。</p>
-            </div>
+              <ElImage
+                v-if="file.previewUrl"
+                :src="file.previewUrl"
+                :alt="file.displayName"
+                fit="contain"
+                class="cloud-generated-card__image"
+              >
+                <template #error>
+                  <div class="detail-preview__fallback">
+                    <strong>{{ file.displayName }}</strong>
+                    <p>云端生成图已登记到 COS，但当前浏览器无法直接预览。</p>
+                    <code>{{ file.objectKey }}</code>
+                  </div>
+                </template>
+              </ElImage>
 
-            <code>{{ file.objectKey }}</code>
-          </article>
+              <div v-else class="detail-preview__fallback">
+                <strong>{{ file.displayName }}</strong>
+                <p>云端生成图缺少可直接访问的预览地址。</p>
+              </div>
+
+              <code>{{ file.objectKey }}</code>
+            </article>
+          </div>
+
+          <div class="cloud-generated-pager">
+            <ElButton
+              class="detail-context__pager-button"
+              :icon="ArrowLeft"
+              :disabled="cloudGeneratedImageCurrentPage === 0"
+              circle
+              aria-label="上一组"
+              title="上一组"
+              @click="changeCloudGeneratedImagePage(-1)"
+            />
+            <span class="detail-context__pager-count">
+              第 {{ cloudGeneratedImageCurrentPage + 1 }} / {{ cloudGeneratedImageTotalPages }} 组
+            </span>
+            <ElButton
+              class="detail-context__pager-button"
+              :icon="ArrowRight"
+              :disabled="cloudGeneratedImageCurrentPage >= cloudGeneratedImageTotalPages - 1"
+              circle
+              aria-label="下一组"
+              title="下一组"
+              @click="changeCloudGeneratedImagePage(1)"
+            />
+          </div>
         </div>
       </section>
 
@@ -1200,6 +1302,7 @@ watch(
 .detail-preview__meta-list,
 .detail-preview__mobile-list,
 .detail-preview__print-list,
+.cloud-generated-gallery,
 .cloud-generated-grid,
 .detail-context,
 .detail-review-workspace,
@@ -1250,7 +1353,25 @@ watch(
 }
 
 .cloud-generated-grid {
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cloud-generated-gallery {
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.cloud-generated-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 38px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(149, 184, 223, 0.12);
 }
 
 .detail-section__context-body {
@@ -1289,6 +1410,9 @@ watch(
 
 .cloud-generated-card {
   min-width: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .cloud-generated-card code {

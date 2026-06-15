@@ -33,9 +33,16 @@ describe("record detail cloud detection contracts", () => {
     const source = readRecordDetailSource();
 
     expect(source).toContain("cloudGeneratedFiles");
+    expect(source).toContain("visibleCloudGeneratedFiles");
+    expect(source).toContain("CLOUD_GENERATED_IMAGE_PAGE_SIZE");
+    expect(source).toContain("cloudGeneratedImagePageState");
+    expect(source).toContain("changeCloudGeneratedImagePage");
     expect(source).toContain("云端检测生成图");
     expect(source).toContain("generated_files");
     expect(source).toContain("previewUrl");
+    expect(source).toContain("cloud-generated-pager");
+    expect(source).toContain("grid-template-columns: repeat(2, minmax(0, 1fr));");
+    expect(source).toContain("grid-auto-rows: 1fr;");
   });
 
   it("上下文卡片固定尺寸，长内容只能在卡片内部分页查看", () => {

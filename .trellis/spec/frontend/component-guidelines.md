@@ -229,6 +229,51 @@ Why:
 - browser zoom changes expose the problem quickly: the page shrinks, but the evidence image still feels oversized
 - `contain` preserves the whole part shape, which is more important than edge-to-edge filling for review and audit pages
 
+### Convention: Cloud Generated Image Gallery Pagination
+
+Record detail pages may show cloud-generated model artifacts such as UNet overlays, masks, and MobileNetV3-Small classification result images. These images are comparison evidence, so the gallery must stay visually balanced instead of auto-wrapping into a sparse second row.
+
+Implementation contract:
+
+- derive the gallery from `record.cloudDetectionContext.generated_files`, not from raw JSON rendered directly in the context panel
+- expose a page-size constant such as `CLOUD_GENERATED_IMAGE_PAGE_SIZE`, a page state such as `cloudGeneratedImagePageState`, a visible list such as `visibleCloudGeneratedFiles`, and a handler such as `changeCloudGeneratedImagePage(...)`
+- desktop galleries must render one fixed row per page; for two-up layouts use `grid-template-columns: repeat(2, minmax(0, 1fr))`, `grid-auto-rows: 1fr`, and `overflow: hidden`
+- do not use `auto-fit` or `auto-fill` for cloud-generated artifacts when more than two images can exist, because three images will become a visually broken `2 + 1` layout with empty space beside the last card
+- place previous/next controls inside a dedicated footer such as `.cloud-generated-pager`; use visible labels/tooltips such as `上一组` and `下一组`
+- reset the image page state after record reload or manual cloud rerun, because rerun output overwrites the previous COS images for the same record
+- narrow layouts may collapse to one column to avoid horizontal overflow, but the same internal pagination contract still limits how many images render at once
+
+Validation & error matrix:
+
+| Symptom | Likely Cause | Required Fix |
+|---|---|---|
+| Third generated image drops to a second row and leaves a large blank area to the right | Gallery uses `repeat(auto-fit, minmax(...))` and renders all files | Render `visibleCloudGeneratedFiles` and add a pager. |
+| Manual rerun keeps the gallery on an old later page | Page state is not reset after replacing record details | Set `cloudGeneratedImagePageState` back to `0` after reload/rerun or when file count changes. |
+| COS object keys stretch cards taller than neighboring images | Card rows are not bounded and long text owns layout height | Keep image cards in equal rows, use `minmax(0, 1fr)`, and break long object keys inside the card. |
+
+Tests required:
+
+- source contract tests for `RecordDetailPage.vue` should assert `visibleCloudGeneratedFiles`, `CLOUD_GENERATED_IMAGE_PAGE_SIZE`, `cloudGeneratedImagePageState`, `changeCloudGeneratedImagePage`, and `.cloud-generated-pager`
+- CSS contract tests should assert `grid-template-columns: repeat(2, minmax(0, 1fr));` and `grid-auto-rows: 1fr;`
+
+Wrong:
+
+```css
+.cloud-generated-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+```
+
+Correct:
+
+```css
+.cloud-generated-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  overflow: hidden;
+}
+```
+
 ### Convention: Visual Balance and Context-Specific Aesthetics
 
 Production pages must optimize for human visual comfort, not only for data density.
