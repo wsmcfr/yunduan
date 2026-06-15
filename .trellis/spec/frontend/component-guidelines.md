@@ -236,7 +236,9 @@ Production pages must optimize for human visual comfort, not only for data densi
 Implementation contract:
 
 - keep a clear visual axis in each section; cards in the same row should align by top edge and usually by bottom action area as well
+- when two same-level panels are placed side by side for comparison, give their outer containers the same explicit height or shared size token; do not let one panel use a different fixed height because its current content looks taller
 - avoid accidental asymmetry caused by one card growing with text while neighboring cards keep short content; use equal-height cards, clamped text, or separated header/body/footer regions when the cards are meant to look like one set
+- pagination, long text, generated images, COS paths, and metadata must be constrained inside the panel body/footer; switching pages must never change the outer panel bounding box
 - do not stretch a sparse summary column to the full height of a dense detail pane unless that extra height is intentionally filled with overview metrics, helper copy, or secondary navigation
 - pick the aesthetic language by scenario instead of forcing one layout style everywhere:
   - dashboards may be more expressive and visual
@@ -277,14 +279,51 @@ Example:
 .gateway-list {
   align-content: start;
 }
+
+.record-detail-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.record-detail-panel,
+.record-detail-context-panel {
+  /* Same-row comparison panels share one outer-frame contract. */
+  height: 560px;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.record-detail-panel__body {
+  min-height: 0;
+  overflow: hidden;
+}
 </style>
 ```
+
+Wrong:
+
+```css
+.record-detail-panel {
+  height: 640px;
+}
+
+.record-detail-context-panel {
+  height: 560px;
+}
+```
+
+Why wrong:
+
+- the two panels may both be individually bounded, but they no longer align as a pair
+- users read the mismatched bottom edge as a broken layout, especially in review screens where evidence and context are compared side by side
+- pagination can look like it is changing the layout even when only the inner content changed
 
 Why:
 
 - symmetry makes repeated management cards feel intentional rather than patched together
 - context-specific density prevents admin screens from looking like dashboards and prevents dashboards from feeling lifeless
 - natural-height side panels avoid the common “large empty column” defect that users read as broken design instead of deliberate whitespace
+- fixed comparison panels must be fixed as a set, not as isolated boxes; the visual contract is the row alignment, not only each panel's internal overflow behavior
 
 ## Scenario: Public Auth Page Visual Balance And Element Plus Tabs Flow
 

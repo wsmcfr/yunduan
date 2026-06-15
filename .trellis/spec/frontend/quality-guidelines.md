@@ -29,6 +29,7 @@ The web app should preserve those strengths.
 | Empty/error/loading states | Every data-driven page handles them deliberately |
 | Reuse | Shared labels, routes, statuses, and endpoint paths are not duplicated blindly |
 | Visual balance | The page looks intentional at common zoom levels, without broken symmetry, oversized blank zones, or mismatched card/action alignment |
+| Same-row panel alignment | Same-level comparison panels in one row share the same outer bounding-box height and keep pagination inside the frame |
 | Management pagination | Server-paginated management pages expose page-size selection whenever they send `limit` to the backend |
 | Mutation refresh scope | Create/delete/update actions refresh every visible server-derived resource, not just the table row list |
 
@@ -127,6 +128,7 @@ The web app should preserve those strengths.
 | Adding `height="100%"` to route-level tables inside compressed grid rows | The table can shrink into a tiny pane and make pagination or bottom rows look cut off |
 | Treating a table refresh as enough after delete/create/update on pages that also show category cards or resource summaries | The row list updates but the visible resource cards keep old counts and timestamps |
 | Leaving management row actions as raw text buttons in a narrow operation column | Buttons such as edit/delete/review can stack vertically and look like a broken fixed column; use the compact action-button contract in `component-guidelines.md` |
+| Giving side-by-side comparison panels different fixed heights | The content may be bounded, but the row still looks visually broken because the panel bottoms do not align |
 
 ### Convention: Visual QA Is Part of Done
 
@@ -140,6 +142,7 @@ Required visual QA pass:
 - verify long records, detail, statistics, and gallery content scroll inside the right `.page-grid` panel
 - verify there is no competing full-page nested scroll container under `.page-grid`
 - verify repeated cards or action panels align consistently when they are presented as one group
+- verify same-row comparison panels have equal outer `getBoundingClientRect().height` values and that previous/next pagination does not change those values
 - verify management table operation columns scan as a compact horizontal control group, not as a tall vertical slab
 - verify sparse panels do not leave abnormal empty slabs beside dense panels
 - verify public auth pages use two equal desktop panels, no form/helper overlap, no contest wording, and no stray decorative frames
@@ -162,6 +165,11 @@ const pageGrid = document.querySelector(".page-grid") as HTMLElement;
 expect(document.documentElement.scrollHeight).toBe(document.documentElement.clientHeight);
 expect(getComputedStyle(document.body).overflow).toBe("hidden");
 expect(getComputedStyle(pageGrid).overflowY).toBe("auto");
+
+const leftPanel = document.querySelector(".detail-section--cloud-generated") as HTMLElement;
+const rightPanel = document.querySelector(".detail-section--context") as HTMLElement;
+
+expect(leftPanel.getBoundingClientRect().height).toBe(rightPanel.getBoundingClientRect().height);
 ```
 
 ---
