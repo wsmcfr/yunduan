@@ -29,6 +29,8 @@ The web app should preserve those strengths.
 | Empty/error/loading states | Every data-driven page handles them deliberately |
 | Reuse | Shared labels, routes, statuses, and endpoint paths are not duplicated blindly |
 | Visual balance | The page looks intentional at common zoom levels, without broken symmetry, oversized blank zones, or mismatched card/action alignment |
+| Bounded dense panels | Repeated detail/context panels keep a bounded outer frame and paginate internally instead of stretching the page |
+| Button contrast | Action buttons remain readable in the dark shell, including foreground text, border, hover, focus, loading, and disabled states |
 | Management pagination | Server-paginated management pages expose page-size selection whenever they send `limit` to the backend |
 | Mutation refresh scope | Create/delete/update actions refresh every visible server-derived resource, not just the table row list |
 
@@ -127,6 +129,8 @@ The web app should preserve those strengths.
 | Adding `height="100%"` to route-level tables inside compressed grid rows | The table can shrink into a tiny pane and make pagination or bottom rows look cut off |
 | Treating a table refresh as enough after delete/create/update on pages that also show category cards or resource summaries | The row list updates but the visible resource cards keep old counts and timestamps |
 | Leaving management row actions as raw text buttons in a narrow operation column | Buttons such as edit/delete/review can stack vertically and look like a broken fixed column; use the compact action-button contract in `component-guidelines.md` |
+| Letting repeated context/detail panels grow with every JSON field | Long model output or metadata makes the whole section visually dominate the page; bound the panel and paginate inside it |
+| Styling dark-surface buttons with default pale `plain` colors only | The button may exist technically, but operators cannot read its text; set explicit foreground/background/border colors and verify states |
 
 ### Convention: Visual QA Is Part of Done
 
@@ -140,6 +144,9 @@ Required visual QA pass:
 - verify long records, detail, statistics, and gallery content scroll inside the right `.page-grid` panel
 - verify there is no competing full-page nested scroll container under `.page-grid`
 - verify repeated cards or action panels align consistently when they are presented as one group
+- verify dense context/detail panels have bounded outer frames and internal pagination when their item count can grow
+- verify long JSON, COS paths, model diagnostics, and generated-file metadata cannot resize their parent panel
+- verify action button text is readable on its actual background in normal, hover, focus, loading, and disabled states
 - verify management table operation columns scan as a compact horizontal control group, not as a tall vertical slab
 - verify sparse panels do not leave abnormal empty slabs beside dense panels
 - verify public auth pages use two equal desktop panels, no form/helper overlap, no contest wording, and no stray decorative frames

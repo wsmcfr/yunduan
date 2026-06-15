@@ -286,6 +286,128 @@ Why:
 - context-specific density prevents admin screens from looking like dashboards and prevents dashboards from feeling lifeless
 - natural-height side panels avoid the common “large empty column” defect that users read as broken design instead of deliberate whitespace
 
+### Convention: Bounded Detail Panels And Readable Action Buttons
+
+Dense detail panels must limit their own frame size instead of letting long data stretch the page into an uneven wall of cards.
+
+#### Scope / Trigger
+
+- Trigger: a page renders repeated detail cards, structured context, JSON diagnostics, model output, AI evidence, sensor traces, or cloud-generated metadata.
+- Trigger: a page introduces or restyles action buttons on a dark/industrial surface.
+- Applies especially to `RecordDetailPage.vue` sections such as `视觉检测上下文`, `传感器上下文`, `判定依据上下文`, `设备上传上下文`, and `云端模型检测上下文`.
+
+#### Signatures
+
+| Selector / Source Contract | Required Behavior |
+|---|---|
+| `.detail-section--context` or equivalent | The outer context panel has a fixed or clamped height, uses `overflow: hidden`, and owns its own internal pagination/footer. |
+| `.detail-section__context-body` or equivalent | Uses `grid-template-rows: minmax(0, 1fr) auto` so content and pager stay inside the panel. |
+| `CONTEXT_PANEL_PAGE_SIZE` or equivalent | Limits how many repeated field cards render in one outer panel page. |
+| `CONTEXT_VALUE_PAGE_SIZE` or equivalent | Limits long value text inside each field card. |
+| Panel pager controls | Uses visible previous/next controls such as `上一组` / `下一组`; disabled states remain readable. |
+| Value pager controls | Uses visible previous/next controls such as `上一页` / `下一页` for long text inside a card. |
+| Action buttons | Use explicit foreground, border, and background colors; do not rely on default `plain` Element Plus colors on dark cards. |
+
+#### Contracts
+
+| Boundary | Contract |
+|---|---|
+| Outer panel size | A repeated-data panel must not grow with every field. If the field count exceeds the panel capacity, paginate inside the panel. |
+| Inner card size | A field card must not grow with long JSON or object storage paths. If text exceeds the card budget, paginate inside the card or open a dedicated detail view. |
+| Pagination discoverability | Use clear text labels/tooltips such as `上一组`, `下一组`, `上一页`, and `下一页`; arrows alone are not enough for unfamiliar operators. |
+| Layout stability | The outer panel pager belongs inside the panel footer, not below a stretched section. Adjacent panels should keep comparable size. |
+| Button readability | Button foreground text must be readable against its background in the dark shell. Verify normal, hover, focus, loading, and disabled states. |
+| Semantic color | Keep action meaning clear: primary analysis can use blue, cloud/model rerun can use high-contrast orange, board correction can use warning yellow, refresh can use a restrained dark outline. |
+
+#### Validation & Error Matrix
+
+| Symptom | Likely Cause | Required Fix |
+|---|---|---|
+| One context section becomes several screens tall | Outer panel has no height contract and renders all field cards at once | Add a bounded outer panel and panel-level pagination. |
+| A JSON/object-key field makes one card much taller than nearby cards | Only `white-space: pre-wrap` is used; no value-size budget exists | Add a fixed card height and value-level pagination or detail drawer. |
+| Operators cannot find old fields after pagination | Pagination controls only use unlabeled icons | Add visible labels/tooltips and page counters. |
+| Buttons look pale or unreadable on dark cards | Element Plus `plain` button defaults have low contrast on custom dark backgrounds | Add explicit class-based foreground/background/border colors. |
+| Hover/loading state becomes unreadable | Only base state was styled | Style hover/focus/loading/disabled states or verify the component-library state remains readable. |
+
+#### Good / Base / Bad Cases
+
+| Case | Expected Result |
+|---|---|
+| Good | `云端模型检测上下文` keeps the same outer panel height even when 30+ fields exist; users page through groups inside the panel. |
+| Good | A `generated_files` JSON field stays inside its card and can be paged without stretching the card. |
+| Base | A short context panel shows `第 1 / 1 组` or no active pager while keeping the same frame size as dense panels. |
+| Bad | The panel grows until it visually dominates the detail page, pushing AI review and history far below. |
+| Bad | A button uses light text on pale yellow/orange, or muted orange text on a dark translucent background that is hard to read. |
+
+#### Tests Required
+
+- Add or update a source contract test for detail pages that render bounded context panels.
+- Assert the page source includes the outer panel class, panel page-size constant, panel pager state, and `上一组` / `下一组`.
+- Assert long value cards include a value page-size constant and `上一页` / `下一页`.
+- Assert action buttons use dedicated classes and explicit `background` / `color` styles instead of relying only on `type="warning" plain`.
+
+Current example assertion points:
+
+```ts
+expect(source).toContain("CONTEXT_PANEL_PAGE_SIZE");
+expect(source).toContain("contextPanelPageState");
+expect(source).toContain("detail-section--context");
+expect(source).toContain("上一组");
+expect(source).toContain("下一组");
+expect(source).toContain("CONTEXT_VALUE_PAGE_SIZE");
+expect(source).toContain("detail-action-button--cloud");
+expect(source).toContain("background: #f97316");
+```
+
+#### Wrong vs Correct
+
+Wrong:
+
+```vue
+<section class="app-panel detail-section">
+  <div class="detail-context">
+    <article v-for="entry in panel.entries" class="detail-context__item">
+      <strong>{{ entry.valueText }}</strong>
+    </article>
+  </div>
+</section>
+```
+
+Why wrong:
+
+- every reported field is rendered at once
+- long JSON can stretch both the field card and the outer section
+- adjacent sections no longer align, so the page looks visually broken
+
+Correct:
+
+```vue
+<section class="app-panel detail-section detail-section--context">
+  <div class="detail-section__context-body">
+    <div class="detail-context">
+      <article v-for="entry in panel.visibleEntries" class="detail-context__item">
+        <strong>{{ entry.visibleValueText }}</strong>
+      </article>
+    </div>
+    <div class="detail-section__context-pager">上一组 / 下一组</div>
+  </div>
+</section>
+```
+
+```css
+.detail-section--context {
+  height: 560px;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.detail-context__item {
+  min-height: 176px;
+  max-height: 176px;
+  overflow: hidden;
+}
+```
+
 ## Scenario: Public Auth Page Visual Balance And Element Plus Tabs Flow
 
 Public auth pages such as `LoginPage.vue` are first-screen product surfaces. They must read as a cloud inspection system entry, not as a contest poster, temporary helper page, or decorative empty frame.
