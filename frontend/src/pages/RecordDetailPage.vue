@@ -40,6 +40,10 @@ interface RecordContextPanel {
   title: string;
   description: string;
   entries: PagedStructuredContextEntry[];
+  visibleEntries: PagedStructuredContextEntry[];
+  currentPage: number;
+  totalPages: number;
+  isPaged: boolean;
 }
 
 type StructuredContextEntry = ReturnType<typeof flattenStructuredContext>[number];
@@ -53,6 +57,7 @@ interface PagedStructuredContextEntry extends StructuredContextEntry {
 }
 
 const CONTEXT_VALUE_PAGE_SIZE = 180;
+const CONTEXT_PANEL_PAGE_SIZE = 4;
 
 const route = useRoute();
 const authStore = useAuthStore();
@@ -67,6 +72,7 @@ const error = ref("");
 const record = ref<DetectionRecordModel | null>(null);
 const aiDialogVisible = ref(false);
 const contextValuePageState = ref<Record<string, number>>({});
+const contextPanelPageState = ref<Record<string, number>>({});
 
 /**
  * 从路由里读取检测记录编号。
@@ -249,6 +255,24 @@ function getContextValuePage(pageStateKey: string, totalPages: number): number {
 }
 
 /**
+ * 读取上下文大面板当前显示第几组小卡片。
+ *
+ * 参数:
+ *   panelKey: 当前上下文大面板键。
+ *   totalEntries: 大面板里全部小卡片数量。
+ *
+ * 返回:
+ *   返回限制在合法范围内的页码，避免数据刷新后旧页码越界。
+ */
+function getContextPanelPage(panelKey: string, totalEntries: number): number {
+  const totalPages = Math.max(Math.ceil(totalEntries / CONTEXT_PANEL_PAGE_SIZE), 1);
+  return Math.min(
+    Math.max(contextPanelPageState.value[panelKey] ?? 0, 0),
+    totalPages - 1,
+  );
+}
+
+/**
  * 给上下文条目追加当前页文本和分页元数据。
  *
  * 参数:
@@ -279,6 +303,47 @@ function buildPagedContextEntries(
 }
 
 /**
+ * 构造上下文大面板配置，并给面板自身追加分页信息。
+ *
+ * 主要流程:
+ * 1. 先给每个字段小卡片追加内容分页信息；
+ * 2. 再按固定数量切分小卡片列表；
+ * 3. 只把当前组小卡片交给模板渲染，防止外层大框被大量字段撑高。
+ *
+ * 参数:
+ *   key: 当前上下文大面板键。
+ *   title: 面板标题。
+ *   description: 面板说明。
+ *   entries: 原始拍平字段列表。
+ *
+ * 返回:
+ *   可直接渲染的大面板配置。
+ */
+function buildContextPanel(
+  key: string,
+  title: string,
+  description: string,
+  entries: StructuredContextEntry[],
+): RecordContextPanel {
+  const pagedEntries = buildPagedContextEntries(key, entries);
+  const currentPage = getContextPanelPage(key, pagedEntries.length);
+  const totalPages = Math.max(Math.ceil(pagedEntries.length / CONTEXT_PANEL_PAGE_SIZE), 1);
+  const startIndex = currentPage * CONTEXT_PANEL_PAGE_SIZE;
+  const visibleEntries = pagedEntries.slice(startIndex, startIndex + CONTEXT_PANEL_PAGE_SIZE);
+
+  return {
+    key,
+    title,
+    description,
+    entries: pagedEntries,
+    visibleEntries,
+    currentPage,
+    totalPages,
+    isPaged: totalPages > 1,
+  };
+}
+
+/**
  * 切换单个上下文卡片内部的文本页。
  *
  * 参数:
@@ -304,43 +369,65 @@ function changeContextValuePage(entry: PagedStructuredContextEntry, direction: -
 }
 
 /**
+ * 切换上下文大面板内部的小卡片组。
+ *
+ * 参数:
+ *   panel: 当前上下文大面板。
+ *   direction: `-1` 表示上一组，`1` 表示下一组。
+ *
+ * 返回:
+ *   无返回值；只更新当前大面板自己的分页状态。
+ */
+function changeContextPanelPage(panel: RecordContextPanel, direction: -1 | 1): void {
+  if (panel.totalPages <= 1) {
+    return;
+  }
+
+  const nextPage = Math.min(
+    Math.max(panel.currentPage + direction, 0),
+    panel.totalPages - 1,
+  );
+  contextPanelPageState.value = {
+    ...contextPanelPageState.value,
+    [panel.key]: nextPage,
+  };
+}
+
+/**
  * 将四类结构化上下文整理成统一的页面板块配置。
  * 这样模板层只负责渲染，不再散落大量字段判断。
  */
 const contextPanels = computed<RecordContextPanel[]>(() => [
-  {
-    key: "vision",
-    title: "视觉检测上下文",
-    description: "展示边缘侧视觉模型、通道结果、局部判定和图像侧依据。",
-    entries: buildPagedContextEntries("vision", flattenStructuredContext(record.value?.visionContext)),
-  },
-  {
-    key: "sensor",
-    title: "传感器上下文",
-    description: "展示 F4 或其他传感器上传的原始值、阈值、计算结果和越界信息。",
-    entries: buildPagedContextEntries("sensor", flattenStructuredContext(record.value?.sensorContext)),
-  },
-  {
-    key: "decision",
-    title: "判定依据上下文",
-    description: "展示最终为什么会判成良品、不良或待确认，而不是只给一个结果。",
-    entries: buildPagedContextEntries("decision", flattenStructuredContext(record.value?.decisionContext)),
-  },
-  {
-    key: "device",
-    title: "设备上传上下文",
-    description: "展示设备任务号、批次号、固件版本、采集参数等运行信息。",
-    entries: buildPagedContextEntries("device", flattenStructuredContext(record.value?.deviceContext)),
-  },
-  {
-    key: "cloud-detection",
-    title: "云端模型检测上下文",
-    description: "展示云端 ONNX 复检摘要、分类/分割结果、与板端初检的对比以及生成图路径。",
-    entries: buildPagedContextEntries(
-      "cloud-detection",
-      flattenStructuredContext(record.value?.cloudDetectionContext as StructuredContextBlock | null),
-    ),
-  },
+  buildContextPanel(
+    "vision",
+    "视觉检测上下文",
+    "展示边缘侧视觉模型、通道结果、局部判定和图像侧依据。",
+    flattenStructuredContext(record.value?.visionContext),
+  ),
+  buildContextPanel(
+    "sensor",
+    "传感器上下文",
+    "展示 F4 或其他传感器上传的原始值、阈值、计算结果和越界信息。",
+    flattenStructuredContext(record.value?.sensorContext),
+  ),
+  buildContextPanel(
+    "decision",
+    "判定依据上下文",
+    "展示最终为什么会判成良品、不良或待确认，而不是只给一个结果。",
+    flattenStructuredContext(record.value?.decisionContext),
+  ),
+  buildContextPanel(
+    "device",
+    "设备上传上下文",
+    "展示设备任务号、批次号、固件版本、采集参数等运行信息。",
+    flattenStructuredContext(record.value?.deviceContext),
+  ),
+  buildContextPanel(
+    "cloud-detection",
+    "云端模型检测上下文",
+    "展示云端 ONNX 复检摘要、分类/分割结果、与板端初检的对比以及生成图路径。",
+    flattenStructuredContext(record.value?.cloudDetectionContext as StructuredContextBlock | null),
+  ),
 ]);
 
 /**
@@ -785,7 +872,7 @@ watch(
       <section
         v-for="panel in contextPanels"
         :key="panel.key"
-        class="app-panel detail-section"
+        class="app-panel detail-section detail-section--context"
       >
         <div class="detail-section__header">
           <div>
@@ -802,39 +889,68 @@ watch(
           description="当前设备还没有上报这部分结构化上下文。"
         />
 
-        <div v-else class="detail-context">
-          <article
-            v-for="entry in panel.entries"
-            :key="entry.pageStateKey"
-            class="detail-context__item"
-            :class="{ 'detail-context__item--paged': entry.isPaged }"
-          >
-            <span class="detail-context__label">{{ entry.label }}</span>
-            <strong class="detail-context__value">{{ entry.visibleValueText }}</strong>
-            <div v-if="entry.isPaged" class="detail-context__pager">
-              <ElButton
-                class="detail-context__pager-button"
-                :icon="ArrowLeft"
-                :disabled="entry.currentPage === 0"
-                circle
-                aria-label="上一页"
-                title="上一页"
-                @click="changeContextValuePage(entry, -1)"
-              />
-              <span class="detail-context__pager-count">
-                {{ entry.currentPage + 1 }} / {{ entry.totalPages }}
-              </span>
-              <ElButton
-                class="detail-context__pager-button"
-                :icon="ArrowRight"
-                :disabled="entry.currentPage >= entry.totalPages - 1"
-                circle
-                aria-label="下一页"
-                title="下一页"
-                @click="changeContextValuePage(entry, 1)"
-              />
-            </div>
-          </article>
+        <div v-else class="detail-section__context-body">
+          <div class="detail-context">
+            <article
+              v-for="entry in panel.visibleEntries"
+              :key="entry.pageStateKey"
+              class="detail-context__item"
+              :class="{ 'detail-context__item--paged': entry.isPaged }"
+            >
+              <span class="detail-context__label">{{ entry.label }}</span>
+              <strong class="detail-context__value">{{ entry.visibleValueText }}</strong>
+              <div v-if="entry.isPaged" class="detail-context__pager">
+                <ElButton
+                  class="detail-context__pager-button"
+                  :icon="ArrowLeft"
+                  :disabled="entry.currentPage === 0"
+                  circle
+                  aria-label="上一页"
+                  title="上一页"
+                  @click="changeContextValuePage(entry, -1)"
+                />
+                <span class="detail-context__pager-count">
+                  {{ entry.currentPage + 1 }} / {{ entry.totalPages }}
+                </span>
+                <ElButton
+                  class="detail-context__pager-button"
+                  :icon="ArrowRight"
+                  :disabled="entry.currentPage >= entry.totalPages - 1"
+                  circle
+                  aria-label="下一页"
+                  title="下一页"
+                  @click="changeContextValuePage(entry, 1)"
+                />
+              </div>
+            </article>
+          </div>
+
+          <div v-if="panel.isPaged" class="detail-section__context-pager">
+            <ElButton
+              class="detail-context__pager-button"
+              :icon="ArrowLeft"
+              :disabled="panel.currentPage === 0"
+              circle
+              aria-label="上一组"
+              title="上一组"
+              @click="changeContextPanelPage(panel, -1)"
+            />
+            <span class="detail-context__pager-count">
+              第 {{ panel.currentPage + 1 }} / {{ panel.totalPages }} 组
+            </span>
+            <ElButton
+              class="detail-context__pager-button"
+              :icon="ArrowRight"
+              :disabled="panel.currentPage >= panel.totalPages - 1"
+              circle
+              aria-label="下一组"
+              title="下一组"
+              @click="changeContextPanelPage(panel, 1)"
+            />
+          </div>
+          <div v-else class="detail-section__context-pager detail-section__context-pager--placeholder">
+            <span class="detail-context__pager-count">第 1 / 1 组</span>
+          </div>
         </div>
       </section>
 
@@ -1047,6 +1163,12 @@ watch(
   grid-column: 1 / -1;
 }
 
+.detail-section--context {
+  height: 560px;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
 .detail-section__header,
 .detail-section__header-tags,
 .detail-preview__meta-head,
@@ -1131,6 +1253,28 @@ watch(
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+.detail-section__context-body {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px;
+  overflow: hidden;
+}
+
+.detail-section__context-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 38px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(149, 184, 223, 0.12);
+}
+
+.detail-section__context-pager--placeholder {
+  opacity: 0.72;
+}
+
 .detail-preview__meta-card,
 .detail-preview__print-card,
 .cloud-generated-card,
@@ -1167,6 +1311,8 @@ watch(
 .detail-context {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   grid-auto-rows: 1fr;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .detail-context__label {

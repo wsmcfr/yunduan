@@ -42,13 +42,24 @@ describe("record detail cloud detection contracts", () => {
     const source = readRecordDetailSource();
 
     expect(source).toContain("CONTEXT_VALUE_PAGE_SIZE");
+    expect(source).toContain("CONTEXT_PANEL_PAGE_SIZE");
     expect(source).toContain("contextValuePageState");
+    expect(source).toContain("contextPanelPageState");
     expect(source).toContain("getContextValuePage");
+    expect(source).toContain("getContextPanelPage");
     expect(source).toContain("changeContextValuePage");
+    expect(source).toContain("changeContextPanelPage");
     expect(source).toContain("上一页");
     expect(source).toContain("下一页");
+    expect(source).toContain("上一组");
+    expect(source).toContain("下一组");
+    expect(source).toContain("detail-section--context");
+    expect(source).toContain("detail-section__context-body");
+    expect(source).toContain("detail-section__context-pager");
     expect(source).toContain("detail-context__item--paged");
     expect(source).toContain("grid-auto-rows: 1fr;");
+    expect(source).toContain("height: 560px;");
+    expect(source).toContain("grid-template-rows: auto minmax(0, 1fr) auto;");
     expect(source).toContain("min-height: 176px;");
     expect(source).toContain("max-height: 176px;");
     expect(source).toContain("overflow: hidden;");
