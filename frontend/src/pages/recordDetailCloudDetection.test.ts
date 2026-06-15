@@ -38,9 +38,19 @@ describe("record detail cloud detection contracts", () => {
     expect(source).toContain("cloudGeneratedImagePageState");
     expect(source).toContain("changeCloudGeneratedImagePage");
     expect(source).toContain("云端检测生成图");
+    expect(source).toContain(
+      '<section class="app-panel detail-section detail-section--cloud-generated">\n        <div class="detail-section__header">\n          <div>\n            <strong>云端检测生成图</strong>',
+    );
     expect(source).toContain("generated_files");
     expect(source).toContain("previewUrl");
     expect(source).toContain("cloud-generated-pager");
+    expect(source).toContain("detail-section--cloud-generated");
+    expect(source).toContain("height: 640px;");
+    expect(source).toContain("grid-template-rows: auto minmax(0, 1fr);");
+    expect(source).toContain("max-height: 100%;");
+    expect(source).toContain("height: 100%;");
+    expect(source).toContain("min-height: 42px;");
+    expect(source).toContain("max-height: 42px;");
     expect(source).toContain("grid-template-columns: repeat(2, minmax(0, 1fr));");
     expect(source).toContain("grid-auto-rows: 1fr;");
   });

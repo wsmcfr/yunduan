@@ -890,7 +890,7 @@ watch(
         </div>
       </section>
 
-      <section class="app-panel detail-section">
+      <section class="app-panel detail-section detail-section--cloud-generated">
         <div class="detail-section__header">
           <div>
             <strong>云端检测生成图</strong>
@@ -1271,6 +1271,12 @@ watch(
   overflow: hidden;
 }
 
+.detail-section--cloud-generated {
+  height: 640px;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
 .detail-section__header,
 .detail-section__header-tags,
 .detail-preview__meta-head,
@@ -1355,13 +1361,16 @@ watch(
 .cloud-generated-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-auto-rows: 1fr;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
 
 .cloud-generated-gallery {
+  max-height: 100%;
   min-height: 0;
   grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 
 .cloud-generated-pager {
@@ -1410,6 +1419,7 @@ watch(
 
 .cloud-generated-card {
   min-width: 0;
+  height: 100%;
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
   overflow: hidden;
@@ -1417,6 +1427,9 @@ watch(
 
 .cloud-generated-card code {
   max-width: 100%;
+  min-height: 42px;
+  max-height: 42px;
+  overflow: hidden;
   white-space: normal;
   word-break: break-all;
   color: var(--app-text);
@@ -1424,6 +1437,7 @@ watch(
 
 .cloud-generated-card__image {
   width: 100%;
+  height: 100%;
   aspect-ratio: 4 / 3;
   min-height: 220px;
   max-height: 320px;
