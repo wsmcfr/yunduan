@@ -26,6 +26,7 @@ from src.db.models.file_object import FileObject
 from src.db.models.part import Part
 from src.db.models.review_record import ReviewRecord
 from src.schemas.detection_record import DetectionRecordCreateRequest
+from src.schemas.upload import FileObjectCreateRequest
 from src.services.record_service import RecordService
 
 
@@ -55,6 +56,62 @@ class FakeCosClient:
         """
 
         return f"https://{bucket_name}.cos.{region}.myqcloud.com/{object_key}"
+
+
+class FakeCloudDetectionService:
+    """模拟云端检测服务，避免记录服务测试加载真实 ONNX 模型。"""
+
+    def __init__(self) -> None:
+        """初始化调用记录列表。"""
+
+        self.calls: list[dict[str, object]] = []
+
+    def run_for_record(self, *, record: DetectionRecord, trigger: str) -> dict:
+        """返回固定云端检测上下文，并携带一张云端结果图元数据。
+
+        参数:
+            record: 记录服务传入的检测记录，测试会校验它能拿到当前文件列表。
+            trigger: 触发来源，自动上传或手动重跑。
+
+        返回:
+            返回可直接写入 DetectionRecord.cloud_detection_context 的字典。
+        """
+
+        self.calls.append({"record_id": record.id, "trigger": trigger, "file_count": len(record.files)})
+        return {
+            "status": "success",
+            "trigger": trigger,
+            "source_file": {
+                "file_id": record.files[0].id if record.files else None,
+                "file_kind": record.files[0].file_kind.value if record.files else None,
+                "object_key": record.files[0].object_key if record.files else None,
+            },
+            "classification": {"predicted_result": "bad", "predicted_label": "washer_bad"},
+            "segmentation": {"predicted_result": "bad", "defect_pixels": 1432},
+            "comparison": {
+                "mp157_result": record.result.value,
+                "cloud_result": "bad",
+                "is_conflict": record.result != DetectionResult.BAD,
+                "suggested_action": "建议人工复核，并考虑修正板端结果。",
+            },
+            "generated_files": [
+                {
+                    "artifact_type": "cloud_unet_overlay",
+                    "display_name": "云端 UNet 缺陷叠加图",
+                    "file_kind": "annotated",
+                    "storage_provider": "cos",
+                    "bucket_name": "demo-bucket",
+                    "region": "ap-shanghai",
+                    "object_key": f"detections/{record.record_no}/cloud_detection/overlay.jpg",
+                    "content_type": "image/jpeg",
+                    "size_bytes": 4096,
+                    "etag": "overlay-etag",
+                    "preview_url": f"https://demo-bucket.cos.ap-shanghai.myqcloud.com/detections/{record.record_no}/cloud_detection/overlay.jpg",
+                }
+            ],
+            "summary_text": "云端模型检测完成：MobileNetV3-Small 与 UNet 均倾向不良。",
+            "error_message": None,
+        }
 
 
 class RecordServiceTestCase(unittest.TestCase):
@@ -465,6 +522,110 @@ class RecordServiceTestCase(unittest.TestCase):
             self.service.delete_record(company_id=self.company.id, record_id=999)
 
         self.assertEqual(caught.exception.code, "record_not_found")
+
+    def test_create_file_object_runs_cloud_detection_after_source_upload(self) -> None:
+        """登记 source 图片后，应自动运行云端检测并保存上下文和云端结果图元数据。"""
+
+        record = self._create_detection_record(record_no="REC-CLOUD-AUTO-0001")
+        fake_cloud_detection_service = FakeCloudDetectionService()
+        service = RecordService(
+            self.db,
+            cos_client=self.cos_client,
+            cloud_detection_service=fake_cloud_detection_service,
+        )
+
+        file_object = service.create_file_object(
+            company_id=self.company.id,
+            record_id=record.id,
+            payload=FileObjectCreateRequest(
+                file_kind=FileKind.SOURCE,
+                storage_provider=StorageProvider.COS,
+                bucket_name="demo-bucket",
+                region="ap-shanghai",
+                object_key="detections/REC-CLOUD-AUTO-0001/source/raw.jpg",
+                content_type="image/jpeg",
+                size_bytes=2048,
+                uploaded_at=datetime(2026, 6, 15, 10, 0, 0, tzinfo=timezone.utc),
+            ),
+        )
+
+        self.db.refresh(record)
+        generated_file = self.db.scalar(
+            select(FileObject).where(
+                FileObject.detection_record_id == record.id,
+                FileObject.object_key == "detections/REC-CLOUD-AUTO-0001/cloud_detection/overlay.jpg",
+            )
+        )
+        self.assertEqual(file_object.file_kind, FileKind.SOURCE)
+        self.assertEqual(fake_cloud_detection_service.calls[0]["trigger"], "auto_after_upload")
+        self.assertEqual(fake_cloud_detection_service.calls[0]["file_count"], 1)
+        self.assertEqual(record.cloud_detection_context["status"], "success")
+        self.assertEqual(record.cloud_detection_context["trigger"], "auto_after_upload")
+        self.assertIsNotNone(generated_file)
+        self.assertEqual(generated_file.file_kind, FileKind.ANNOTATED)
+        self.assertEqual(generated_file.content_type, "image/jpeg")
+
+    def test_create_file_object_skips_cloud_detection_for_thumbnail(self) -> None:
+        """缩略图登记不应触发云端模型检测，避免重复跑模型。"""
+
+        record = self._create_detection_record(record_no="REC-CLOUD-THUMB-0001")
+        fake_cloud_detection_service = FakeCloudDetectionService()
+        service = RecordService(
+            self.db,
+            cos_client=self.cos_client,
+            cloud_detection_service=fake_cloud_detection_service,
+        )
+
+        service.create_file_object(
+            company_id=self.company.id,
+            record_id=record.id,
+            payload=FileObjectCreateRequest(
+                file_kind=FileKind.THUMBNAIL,
+                storage_provider=StorageProvider.COS,
+                bucket_name="demo-bucket",
+                region="ap-shanghai",
+                object_key="detections/REC-CLOUD-THUMB-0001/thumbnail/thumb.jpg",
+                content_type="image/jpeg",
+                size_bytes=512,
+            ),
+        )
+
+        self.db.refresh(record)
+        self.assertEqual(fake_cloud_detection_service.calls, [])
+        self.assertIsNone(record.cloud_detection_context)
+
+    def test_run_cloud_detection_updates_record_context_and_generated_files(self) -> None:
+        """手动重新检测应更新记录上下文，并把云端结果图登记为文件对象。"""
+
+        record = self._create_detection_record(record_no="REC-CLOUD-MANUAL-0001")
+        self._create_record_file(
+            record=record,
+            file_kind=FileKind.SOURCE,
+            object_key="detections/REC-CLOUD-MANUAL-0001/source/raw.jpg",
+        )
+        fake_cloud_detection_service = FakeCloudDetectionService()
+        service = RecordService(
+            self.db,
+            cos_client=self.cos_client,
+            cloud_detection_service=fake_cloud_detection_service,
+        )
+
+        updated_record = service.run_cloud_detection(
+            company_id=self.company.id,
+            record_id=record.id,
+            trigger="manual_rerun",
+        )
+
+        generated_file = self.db.scalar(
+            select(FileObject).where(
+                FileObject.detection_record_id == record.id,
+                FileObject.object_key == "detections/REC-CLOUD-MANUAL-0001/cloud_detection/overlay.jpg",
+            )
+        )
+        self.assertEqual(updated_record.cloud_detection_context["trigger"], "manual_rerun")
+        self.assertEqual(fake_cloud_detection_service.calls[0]["trigger"], "manual_rerun")
+        self.assertIsNotNone(generated_file)
+        self.assertTrue(any(item.object_key.endswith("overlay.jpg") for item in updated_record.files))
 
 
 if __name__ == "__main__":

@@ -34,6 +34,13 @@ class AppSmokeTestCase(unittest.TestCase):
 
         self.assertIn("/api/v1/records/{record_id}/ai-chat", route_paths)
 
+    def test_cloud_detection_route_is_mounted_under_record_detail_path(self) -> None:
+        """验证云端模型重新检测接口挂在当前记录详情路径下。"""
+
+        route_paths = {route.path for route in app.routes}
+
+        self.assertIn("/api/v1/records/{record_id}/cloud-detection", route_paths)
+
     def test_ai_gateway_discovery_route_is_mounted_under_settings_path(self) -> None:
         """验证模型自动探测接口已挂到 settings 路由下。"""
 

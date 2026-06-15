@@ -130,6 +130,29 @@ def create_file_object(
     return FileObjectResponse.model_validate(file_object)
 
 
+@router.post("/{record_id}/cloud-detection", response_model=DetectionRecordDetailResponse)
+def run_cloud_detection(
+    record_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_company_user),
+) -> DetectionRecordDetailResponse:
+    """重新运行云端本地模型检测。
+
+    主要流程:
+        1. 按当前公司边界加载检测记录和图片文件。
+        2. 调用云端检测服务下载图片、运行 UNet 与 MobileNetV3-Small。
+        3. 保存文字上下文和云端产物图文件对象。
+        4. 返回完整详情，方便前端直接刷新复核界面。
+    """
+
+    record = RecordService(db).run_cloud_detection(
+        company_id=current_user.company_id or 0,
+        record_id=record_id,
+        trigger="manual_rerun",
+    )
+    return DetectionRecordDetailResponse.model_validate(record)
+
+
 @router.post("/{record_id}/ai-review", response_model=AIReviewResponse)
 def request_ai_review(
     record_id: int,

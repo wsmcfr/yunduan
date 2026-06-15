@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Iterator
+from typing import Any, Iterator
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.core.errors import AppError, BadRequestError, ConflictError, NotFoundError
 from src.core.logging import get_logger
 from src.core.sse import build_sse_error_payload, format_sse_event
 from src.db.models.detection_record import DetectionRecord
-from src.db.models.enums import DetectionResult, FileKind, ReviewStatus
+from src.db.models.enums import DetectionResult, FileKind, ReviewStatus, StorageProvider
 from src.db.models.file_object import FileObject
 from src.db.models.part import Part
 from src.repositories.detection_record_repository import DetectionRecordRepository
@@ -22,6 +23,7 @@ from src.schemas.review import AIChatRequest, AIReviewRequest
 from src.schemas.upload import FileObjectCreateRequest
 from src.integrations.ai_review_client import AIReviewClient
 from src.integrations.cos_client import CosClient
+from src.services.cloud_detection_service import CloudDetectionService
 from src.services.ai_gateway_service import AIGatewayService
 from src.services.part_identity import normalize_part_category, normalize_part_display_name
 
@@ -44,6 +46,7 @@ class RecordService:
         db: Session,
         cos_client: CosClient | None = None,
         ai_review_client: AIReviewClient | None = None,
+        cloud_detection_service: CloudDetectionService | None = None,
     ) -> None:
         """初始化检测记录服务依赖。
 
@@ -51,6 +54,7 @@ class RecordService:
             db: 当前请求生命周期内的数据库会话。
             cos_client: 可选对象存储客户端；单元测试会注入假客户端，避免触发真实云端删除。
             ai_review_client: 可选 AI 复核客户端；仅 AI 路径需要，普通记录管理不应被其配置依赖阻塞。
+            cloud_detection_service: 可选云端模型检测服务；仅图片登记或手动重跑时需要，避免普通列表接口加载 ONNX。
         """
 
         self.db = db
@@ -59,6 +63,7 @@ class RecordService:
         self.device_repository = DeviceRepository(db)
         self.cos_client = cos_client or CosClient()
         self._ai_review_client = ai_review_client
+        self._cloud_detection_service = cloud_detection_service
 
     @property
     def ai_review_client(self) -> AIReviewClient:
@@ -72,6 +77,22 @@ class RecordService:
         if self._ai_review_client is None:
             self._ai_review_client = AIReviewClient()
         return self._ai_review_client
+
+    @property
+    def cloud_detection_service(self) -> CloudDetectionService:
+        """按需创建云端模型检测服务。
+
+        返回:
+            返回可运行本地 UNet 和 MobileNetV3-Small 的检测服务。
+
+        说明:
+            ONNX 模型体积较大，普通记录列表、详情和删除不应该初始化模型会话。
+            这里延迟到图片上传后自动检测或用户手动重跑时再创建服务。
+        """
+
+        if self._cloud_detection_service is None:
+            self._cloud_detection_service = CloudDetectionService(cos_client=self.cos_client)
+        return self._cloud_detection_service
 
     def _generate_record_no(self) -> str:
         """生成默认检测记录编号。"""
@@ -512,11 +533,236 @@ class RecordService:
                 record.storage_last_modified = payload.storage_last_modified
             self.record_repository.save(record)
 
+        if payload.file_kind in {FileKind.SOURCE, FileKind.ANNOTATED}:
+            # 先 flush 文件元数据，确保云端检测服务重新加载记录时能看到本次上传的图片。
+            self.db.flush()
+            detection_record = self.record_repository.get_by_id(
+                record_id,
+                company_id=company_id,
+                include_related=True,
+            )
+            if detection_record is not None:
+                # 当前会话里 record 可能已在文件登记前加载过，selectinload 不一定会重新刷新 files 集合。
+                # 这里显式把刚登记并 flush 出 id 的文件对象并入聚合，保证自动检测能看到本次上传的图片。
+                if all(item.id != file_object.id for item in detection_record.files):
+                    detection_record.files.append(file_object)
+                self._run_and_attach_cloud_detection(
+                    record=detection_record,
+                    trigger="auto_after_upload",
+                )
+
         self.db.commit()
         self.db.refresh(file_object)
         # 新建文件对象后立即补上预览地址，保证单条文件登记接口与详情接口的返回结构一致。
         file_object.preview_url = self._build_file_preview_url(file_object=file_object)
         return file_object
+
+    def run_cloud_detection(
+        self,
+        *,
+        company_id: int,
+        record_id: int,
+        trigger: str = "manual_rerun",
+    ) -> DetectionRecord:
+        """对指定记录执行云端模型检测并保存结果。
+
+        参数:
+            company_id: 当前用户所属公司，用于保证只能重跑本公司的记录。
+            record_id: 需要重新检测的记录 ID。
+            trigger: 触发来源，默认手动重跑。
+
+        返回:
+            返回已写入 ``cloud_detection_context`` 且包含最新文件列表的检测记录。
+        """
+
+        record = self.record_repository.get_by_id(
+            record_id,
+            company_id=company_id,
+            include_related=True,
+        )
+        if record is None:
+            raise NotFoundError(code="record_not_found", message="检测记录不存在。")
+
+        self._run_and_attach_cloud_detection(record=record, trigger=trigger)
+        self.db.commit()
+
+        updated_record = self.get_record_detail(company_id=company_id, record_id=record_id)
+        logger.info(
+            "record.cloud_detection_completed event=record.cloud_detection_completed record_id=%s trigger=%s status=%s",
+            record_id,
+            trigger,
+            (updated_record.cloud_detection_context or {}).get("status"),
+        )
+        return updated_record
+
+    def _run_and_attach_cloud_detection(self, *, record: DetectionRecord, trigger: str) -> None:
+        """运行云端检测并把结果写回 ORM 对象。
+
+        参数:
+            record: 已按公司边界加载且包含文件列表的检测记录。
+            trigger: 本次触发来源。
+
+        返回:
+            无返回值；函数会修改 ``record.cloud_detection_context``，并登记云端产物图文件对象。
+        """
+
+        try:
+            context = self.cloud_detection_service.run_for_record(record=record, trigger=trigger)
+        except AppError as exc:
+            context = self._build_cloud_detection_failure_context(
+                trigger=trigger,
+                message=exc.message,
+                error_code=exc.code,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "record.cloud_detection_unhandled event=record.cloud_detection_unhandled record_id=%s trigger=%s",
+                record.id,
+                trigger,
+            )
+            context = self._build_cloud_detection_failure_context(
+                trigger=trigger,
+                message=f"云端检测运行异常：{exc}",
+                error_code="cloud_detection_unhandled_error",
+            )
+
+        generated_files = self._register_cloud_detection_generated_files(
+            record=record,
+            context=context,
+        )
+        if generated_files:
+            # 将登记后的 file_id 和上传时间回填到上下文里，前端和 AI 可以直接定位到文件对象。
+            context["generated_files"] = generated_files
+        record.cloud_detection_context = context
+        self.record_repository.save(record)
+
+    def _build_cloud_detection_failure_context(
+        self,
+        *,
+        trigger: str,
+        message: str,
+        error_code: str,
+    ) -> dict[str, Any]:
+        """把云端检测异常转换成可展示的失败上下文。
+
+        参数:
+            trigger: 触发来源。
+            message: 可读错误摘要。
+            error_code: 稳定错误码。
+
+        返回:
+            返回能直接写入 ``cloud_detection_context`` 的失败结构。
+        """
+
+        now = datetime.now(timezone.utc).isoformat()
+        return {
+            "status": "failed",
+            "trigger": trigger,
+            "source_file": None,
+            "generated_files": [],
+            "summary_text": f"云端检测失败：{message}",
+            "started_at": now,
+            "finished_at": now,
+            "duration_ms": 0,
+            "error_code": error_code,
+            "error_message": message,
+        }
+
+    def _register_cloud_detection_generated_files(
+        self,
+        *,
+        record: DetectionRecord,
+        context: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """将云端模型生成图登记为记录文件对象。
+
+        参数:
+            record: 当前检测记录，要求处于当前数据库会话中。
+            context: 云端检测服务返回的上下文字典。
+
+        返回:
+            返回回填了 ``file_id``、``uploaded_at`` 和 ``preview_url`` 的产物图元数据。
+
+        说明:
+            这些图片仍然属于云端模型产物，不覆盖板端原图；登记成 FileObject 是为了复用详情页图片预览、
+            文件清单和 AI 多模态选图逻辑。
+        """
+
+        generated_files = context.get("generated_files")
+        if not isinstance(generated_files, list):
+            return []
+
+        registered_files: list[dict[str, Any]] = []
+        uploaded_at = datetime.now(timezone.utc)
+        existing_object_keys = {
+            item.object_key
+            for item in record.files
+            if item.object_key
+        }
+        for item in generated_files:
+            if not isinstance(item, dict):
+                continue
+
+            object_key = str(item.get("object_key") or "").strip()
+            bucket_name = str(item.get("bucket_name") or "").strip()
+            region = str(item.get("region") or "").strip()
+            if not object_key or not bucket_name or not region:
+                continue
+
+            file_kind = FileKind(str(item.get("file_kind") or FileKind.ANNOTATED.value))
+            storage_provider = StorageProvider(str(item.get("storage_provider") or StorageProvider.COS.value))
+
+            existed_file = None
+            if object_key in existing_object_keys:
+                existed_file = self.db.scalar(
+                    select(FileObject).where(
+                        FileObject.company_id == record.company_id,
+                        FileObject.detection_record_id == record.id,
+                        FileObject.object_key == object_key,
+                    )
+                )
+
+            if existed_file is None:
+                existed_file = FileObject(
+                    company_id=record.company_id,
+                    detection_record_id=record.id,
+                    file_kind=file_kind,
+                    storage_provider=storage_provider,
+                    bucket_name=bucket_name,
+                    region=region,
+                    object_key=object_key,
+                    content_type=item.get("content_type"),
+                    size_bytes=item.get("size_bytes"),
+                    etag=item.get("etag"),
+                    uploaded_at=uploaded_at,
+                    storage_last_modified=None,
+                )
+                self.record_repository.add_file_object(existed_file)
+                record.files.append(existed_file)
+                existing_object_keys.add(object_key)
+
+            self.db.flush()
+            preview_url = self._build_file_preview_url(file_object=existed_file)
+            existed_file.preview_url = preview_url
+            registered_item = dict(item)
+            registered_item.update(
+                {
+                    "file_id": existed_file.id,
+                    "file_kind": existed_file.file_kind.value,
+                    "storage_provider": existed_file.storage_provider.value,
+                    "bucket_name": existed_file.bucket_name,
+                    "region": existed_file.region,
+                    "object_key": existed_file.object_key,
+                    "content_type": existed_file.content_type,
+                    "size_bytes": existed_file.size_bytes,
+                    "etag": existed_file.etag,
+                    "uploaded_at": existed_file.uploaded_at.isoformat() if existed_file.uploaded_at else None,
+                    "preview_url": preview_url,
+                }
+            )
+            registered_files.append(registered_item)
+
+        return registered_files
 
     def delete_record(self, *, company_id: int, record_id: int) -> None:
         """删除单条检测记录及其文件、审核子记录。
