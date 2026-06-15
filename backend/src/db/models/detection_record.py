@@ -66,6 +66,9 @@ class DetectionRecord(Base, IdMixin, TimestampMixin):
     sensor_context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     decision_context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     device_context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # 云端模型检测上下文用于保存云端重新运行 UNet 和 MobileNetV3-Small 后得到的结果。
+    # 它必须独立于板端上报的四类上下文，详情页和 AI 才能清楚对比“板端结论”和“云端结论”。
+    cloud_detection_context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

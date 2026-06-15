@@ -127,3 +127,28 @@ class DetectionRecordModelTestCase(unittest.TestCase):
         self.assertEqual(payload.part_name, "波形垫圈")
         self.assertEqual(payload.part_category, "垫圈类")
         self.assertTrue(payload.auto_create_part)
+
+    def test_cloud_detection_context_can_be_attached_to_record(self) -> None:
+        """检测记录应能独立保存云端模型检测上下文，避免覆盖板端上报信息。"""
+
+        cloud_detection_context = {
+            "status": "success",
+            "summary_text": "云端模型检测完成。",
+            "classification": {
+                "predicted_label": "washer_bad",
+                "predicted_result": "bad",
+            },
+        }
+
+        record = DetectionRecord(
+            id=2,
+            record_no="REC-CLOUD-CTX-001",
+            part_id=1,
+            device_id=1,
+            result=DetectionResult.BAD,
+            review_status=ReviewStatus.PENDING,
+            cloud_detection_context=cloud_detection_context,
+            captured_at=datetime(2026, 6, 15, 10, 0, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(record.cloud_detection_context, cloud_detection_context)

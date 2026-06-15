@@ -37,6 +37,7 @@ class DetectionRecordCreateRequest(BaseModel):
     sensor_context: dict[str, Any] | None = None
     decision_context: dict[str, Any] | None = None
     device_context: dict[str, Any] | None = None
+    cloud_detection_context: dict[str, Any] | None = None
     captured_at: datetime
     detected_at: datetime | None = None
     uploaded_at: datetime | None = None
@@ -63,6 +64,7 @@ class DetectionRecordListItem(ORMBaseModel):
     sensor_context: dict[str, Any] | None
     decision_context: dict[str, Any] | None
     device_context: dict[str, Any] | None
+    cloud_detection_context: dict[str, Any] | None
     captured_at: datetime
     detected_at: datetime | None
     uploaded_at: datetime | None
