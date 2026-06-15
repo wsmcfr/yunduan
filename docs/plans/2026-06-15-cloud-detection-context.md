@@ -2,9 +2,9 @@
 
 > **For Codex:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add on-demand cloud-side model detection for images uploaded by STM32MP157, store the result as readable cloud detection context, show it in the review page, and include it in AI analysis prompts.
+**Goal:** Add on-demand cloud-side model detection for images uploaded by STM32MP157, store the result as readable cloud detection context, upload the generated cloud model result images to COS, show the text and images in the review page, and include them in AI analysis prompts.
 
-**Architecture:** The backend keeps board-uploaded context fields unchanged and adds a separate `cloud_detection_context` JSON field on `DetectionRecord`. A new cloud detection service downloads the best record image from COS, runs the local UNet and MobileNetV3 ONNX models from `D:\model_picture`, writes a structured and human-readable result, and exposes both automatic and manual trigger paths. The frontend maps this new field, renders it as a fifth context card, and adds a "重新进行云端检测" action that reloads the detail page after completion.
+**Architecture:** The backend keeps board-uploaded context fields unchanged and adds a separate `cloud_detection_context` JSON field on `DetectionRecord`. A new cloud detection service downloads the best record image from COS, runs the local UNet and MobileNetV3 ONNX models from `D:\model_picture`, uploads cloud-generated mask / overlay / classification result images back to COS, writes a structured and human-readable result, and exposes both automatic and manual trigger paths. The frontend maps this new field, renders it as a fifth context card, shows cloud-generated result images, and adds a "重新进行云端检测" action that reloads the detail page after completion.
 
 **Tech Stack:** FastAPI, SQLAlchemy, Alembic, Pydantic, onnxruntime, OpenCV, NumPy, Tencent COS SDK, Vue 3, TypeScript, Element Plus, Vitest, pytest.
 
@@ -28,10 +28,10 @@
 |---|---|---|
 | 1 | MP157 | Creates record and uploads/registers `source` or `annotated` image. |
 | 2 | Backend | After image registration, attempts cloud detection once if an eligible image exists. |
-| 3 | Cloud detection service | Downloads image bytes, decodes with OpenCV, runs classification and segmentation models. |
-| 4 | Backend | Writes `DetectionRecord.cloud_detection_context` with status, timestamps, raw scores, readable summary, and comparison to MP157 result. |
-| 5 | Frontend detail page | Shows a "云端模型检测上下文" card and a "重新进行云端检测" button. |
-| 6 | AI chat | Includes `cloud_detection_context` in `AIRecordContext`, compact prompts, and context snapshots. |
+| 3 | Cloud detection service | Downloads image bytes, decodes with OpenCV, runs classification and segmentation models, and creates cloud result images. |
+| 4 | Backend | Uploads generated cloud result images to COS, writes `DetectionRecord.cloud_detection_context` with status, timestamps, raw scores, readable summary, generated file metadata, and comparison to MP157 result. |
+| 5 | Frontend detail page | Shows a "云端模型检测上下文" card, cloud-generated result images, and a "重新进行云端检测" button. |
+| 6 | AI chat | Includes `cloud_detection_context` and cloud result image references in `AIRecordContext`, compact prompts, and context snapshots. |
 
 ## Cloud Detection Context Shape
 
@@ -66,6 +66,30 @@
       "scratch": 1432
     }
   },
+  "generated_files": [
+    {
+      "artifact_type": "cloud_unet_overlay",
+      "display_name": "云端 UNet 缺陷叠加图",
+      "file_kind": "annotated",
+      "bucket_name": "demo-bucket",
+      "region": "ap-shanghai",
+      "object_key": "detections/REC/source/cloud_detection/20260615T100001_unet_overlay.jpg",
+      "content_type": "image/jpeg",
+      "size_bytes": 45812,
+      "preview_url": "https://..."
+    },
+    {
+      "artifact_type": "cloud_unet_mask",
+      "display_name": "云端 UNet 缺陷 mask 图",
+      "file_kind": "annotated",
+      "bucket_name": "demo-bucket",
+      "region": "ap-shanghai",
+      "object_key": "detections/REC/source/cloud_detection/20260615T100001_unet_mask.png",
+      "content_type": "image/png",
+      "size_bytes": 9021,
+      "preview_url": "https://..."
+    }
+  ],
   "comparison": {
     "mp157_result": "good",
     "cloud_result": "bad",
@@ -221,6 +245,7 @@ Required tests:
 | source selection | prefers `source` over `annotated` |
 | summary generation | produces readable Chinese `summary_text` |
 | conflict detection | marks conflict when MP157 result differs from cloud result |
+| generated image upload | uploads cloud-generated result images to COS and records them in `generated_files` |
 | no image failure | writes `status="failed"` and a readable reason |
 
 Example:
@@ -317,6 +342,7 @@ Functions to implement:
 | `decode_image_bytes(data: bytes) -> np.ndarray` | `cv2.imdecode` bytes into BGR image. |
 | `CloudClassifier.predict(image_bgr) -> ClassificationPrediction` | Use `infer_classify.py` preprocessing rules. |
 | `CloudSegmenter.predict(image_bgr) -> SegmentationPrediction` | Use `infer_camera_onnx.py` preprocessing rules. |
+| `CloudDetectionService._upload_generated_images(...)` | Upload generated mask / overlay / classification images to COS and return metadata for DB registration and UI display. |
 | `resolve_result_from_label(label: str) -> DetectionResult` | label token containing `bad` means bad, `good` means good, else uncertain. |
 | `build_summary_text(...) -> str` | Human-readable Chinese output. |
 
@@ -431,6 +457,7 @@ Update `create_file_object()` after file metadata commit or before final commit:
 | file kind is `source` or `annotated` | attempt detection |
 | service raises expected integration/model error | store failed context but do not fail file registration |
 | file kind is `thumbnail` | skip automatic detection |
+| cloud service returns `generated_files` | create `FileObject` rows as `annotated` artifacts so detail image preview and AI image selection can reuse existing record file behavior |
 
 Use one DB commit after writing `cloud_detection_context`.
 
@@ -783,6 +810,7 @@ Use existing local or production-like data:
 | Open record detail with source image | cloud context card visible |
 | Click `重新进行云端检测` | button shows loading, then detail reloads |
 | Successful model run | `summary_text` appears in cloud context card |
+| Successful model run with generated artifacts | cloud mask / overlay / classification images are uploaded to COS and visible in the detail image area |
 | AI dialog meta/context | `cloud_detection_context` appears in the SSE `meta.context` payload |
 | Missing image record | cloud context shows failed status and readable reason |
 
@@ -806,6 +834,7 @@ Production must ensure:
 | model files exist on the cloud server | FastAPI process loads local ONNX paths |
 | backend Python environment has ONNX/OpenCV/NumPy | service imports these packages |
 | COS read permissions work from backend server | cloud detection downloads the uploaded image |
+| COS write permissions work from backend server | cloud detection uploads generated mask / overlay / classification result images |
 | detection is synchronous MVP | upload response may be slower; if it becomes too slow, move to background task later |
 
 **Step 6: Commit**
@@ -835,5 +864,5 @@ Do not implement this in the first pass unless synchronous upload becomes too sl
 | Auto trigger | Registering source/annotated image writes cloud detection context without breaking upload. |
 | Manual rerun | `POST /api/v1/records/{id}/cloud-detection` updates and returns detail. |
 | AI readable | AI context schema and prompt snapshot include `cloud_detection_context`. |
-| Frontend | Detail page shows fifth context panel and rerun button. |
+| Frontend | Detail page shows fifth context panel, cloud-generated result images, and rerun button. |
 | Verification | `python -m pytest -q`, `npm run test`, and `npm run build` pass. |

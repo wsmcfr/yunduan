@@ -51,6 +51,26 @@ class Settings(BaseSettings):
     cos_bucket: str = Field(default="", alias="COS_BUCKET")
     cos_public_base_url: str = Field(default="", alias="COS_PUBLIC_BASE_URL")
     cos_signed_url_expire_seconds: int = Field(default=3600, alias="COS_SIGNED_URL_EXPIRE_SECONDS")
+    # 云端复核检测开关。关闭后服务仍会写入可读的 skipped 上下文，避免接口静默无结果。
+    cloud_detection_enabled: bool = Field(default=True, alias="CLOUD_DETECTION_ENABLED")
+    # 模型根目录只作为部署说明和后续相对路径扩展使用；实际加载以两个模型路径字段为准。
+    cloud_detection_model_root: str = Field(default="D:\\model_picture", alias="CLOUD_DETECTION_MODEL_ROOT")
+    # MobileNetV3-Small 分类模型路径，默认指向模型项目中已验证的静态混合 INT8 模型。
+    cloud_detection_classifier_model_path: str = Field(
+        default="D:\\model_picture\\checkpoints_classify\\defect_classifier_static_mixed_int8.onnx",
+        alias="CLOUD_DETECTION_CLASSIFIER_MODEL_PATH",
+    )
+    # UNet-MobileNetV3 分割模型路径，默认指向模型项目中已验证的 decoder/head INT8 模型。
+    cloud_detection_segment_model_path: str = Field(
+        default="D:\\model_picture\\checkpoints_unet_test\\defect_unet_test_decoder_head_int8.onnx",
+        alias="CLOUD_DETECTION_SEGMENT_MODEL_PATH",
+    )
+    # UNet 输出类别数量：背景 + scratch/rust/dent/crack/burr。
+    cloud_detection_segment_num_classes: int = Field(default=6, alias="CLOUD_DETECTION_SEGMENT_NUM_CLASSES")
+    # UNet 非背景像素达到该阈值时判为疑似不良。
+    cloud_detection_defect_pixel_threshold: int = Field(default=80, alias="CLOUD_DETECTION_DEFECT_PIXEL_THRESHOLD")
+    # 单张图片下载大小上限，防止误把超大对象送入同步推理路径。
+    cloud_detection_max_image_bytes: int = Field(default=8 * 1024 * 1024, alias="CLOUD_DETECTION_MAX_IMAGE_BYTES")
     default_admin_username: str = Field(default="admin", alias="DEFAULT_ADMIN_USERNAME")
     # 默认管理员密码必须由部署环境显式提供，避免源码自带可预测口令。
     default_admin_password: str = Field(default="", alias="DEFAULT_ADMIN_PASSWORD")

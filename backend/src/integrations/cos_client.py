@@ -205,6 +205,89 @@ class CosClient:
             "data": response_bytes,
         }
 
+    def upload_file_bytes(
+        self,
+        *,
+        bucket_name: str,
+        region: str,
+        object_key: str,
+        data: bytes,
+        content_type: str,
+    ) -> dict[str, str | int | None]:
+        """把服务端生成的字节内容上传到 COS。
+
+        参数:
+            bucket_name: 目标 COS bucket 名称。
+            region: 目标 COS 地域。
+            object_key: 目标对象路径。
+            data: 已编码好的文件字节，例如 JPEG 或 PNG。
+            content_type: MIME 类型，前端预览和浏览器缓存会使用它。
+
+        返回:
+            返回对象存储元数据，调用方可据此登记 FileObject 或写入上下文。
+
+        说明:
+            云端模型检测会在后端生成 mask、overlay 和分类结果图，不能再走浏览器预签名上传。
+            这里统一通过 COS SDK 直接写入，保持服务端产物和板端上传图片都落在同一对象存储。
+        """
+
+        if not bucket_name or not region or not object_key:
+            raise IntegrationError(
+                code="cos_upload_invalid_target",
+                message="COS 上传目标信息不完整。",
+                details={
+                    "bucket_name": bucket_name,
+                    "region": region,
+                    "object_key": object_key,
+                },
+            )
+        if not self.is_configured():
+            # 本地联调环境可能没有 COS 凭据；返回占位元数据，便于服务和前端流程先跑通。
+            return {
+                "bucket_name": bucket_name,
+                "region": region,
+                "object_key": object_key,
+                "content_type": content_type,
+                "size_bytes": len(data),
+                "etag": None,
+            }
+
+        try:
+            client = self._get_sdk_client(region=region)
+            response = client.put_object(
+                Bucket=bucket_name,
+                Key=object_key,
+                Body=data,
+                ContentType=content_type,
+            )
+        except Exception as exc:
+            logger.warning(
+                "cos.upload_failed event=cos.upload_failed bucket=%s region=%s object_key=%s error=%s",
+                bucket_name,
+                region,
+                object_key,
+                str(exc),
+            )
+            raise IntegrationError(
+                code="cos_upload_failed",
+                message="COS 文件上传失败。",
+                details={
+                    "bucket_name": bucket_name,
+                    "region": region,
+                    "object_key": object_key,
+                },
+            ) from exc
+
+        etag = response.get("ETag") if isinstance(response, dict) else None
+        return {
+            "bucket_name": bucket_name,
+            "region": region,
+            "object_key": object_key,
+            "content_type": content_type,
+            "size_bytes": len(data),
+            "etag": str(etag).strip('"') if etag else None,
+        }
+
     def prepare_upload(
         self,
         *,
