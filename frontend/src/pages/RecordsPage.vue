@@ -83,7 +83,10 @@ const activePart = computed(() => {
 /**
  * 疑似样本提示文案。
  */
-const uncertainCount = computed(() => items.value.filter((item) => item.result === "uncertain").length);
+const uncertainCount = computed<number>(() => {
+  const recordItems: DetectionRecordModel[] = items.value;
+  return recordItems.filter((item) => item.result === "uncertain").length;
+});
 
 /**
  * 当前记录列表区域的标题。

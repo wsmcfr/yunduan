@@ -442,6 +442,7 @@ class RecordService:
             "sensor_context": record.sensor_context,
             "decision_context": record.decision_context,
             "device_context": record.device_context,
+            "cloud_detection_context": record.cloud_detection_context,
             "captured_at": record.captured_at,
             "detected_at": record.detected_at,
             "uploaded_at": record.uploaded_at,
@@ -740,6 +741,18 @@ class RecordService:
                 self.record_repository.add_file_object(existed_file)
                 record.files.append(existed_file)
                 existing_object_keys.add(object_key)
+            else:
+                # 同一云端产物 key 代表当前最新检测图。手动重跑时 COS 已覆盖远端对象，
+                # 这里同步更新 DB 元数据，避免详情页继续显示旧大小、旧 ETag 或旧上传时间。
+                existed_file.file_kind = file_kind
+                existed_file.storage_provider = storage_provider
+                existed_file.bucket_name = bucket_name
+                existed_file.region = region
+                existed_file.content_type = item.get("content_type")
+                existed_file.size_bytes = item.get("size_bytes")
+                existed_file.etag = item.get("etag")
+                existed_file.uploaded_at = uploaded_at
+                existed_file.storage_last_modified = None
 
             self.db.flush()
             preview_url = self._build_file_preview_url(file_object=existed_file)

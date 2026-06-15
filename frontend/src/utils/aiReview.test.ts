@@ -111,6 +111,7 @@ describe("ai review utilities", () => {
       sensorContext: null,
       decisionContext: null,
       deviceContext: null,
+      cloudDetectionContext: null,
       capturedAt: "2026-04-20T02:00:01.000Z",
       detectedAt: "2026-04-20T02:00:02.000Z",
       uploadedAt: "2026-04-20T02:00:03.000Z",

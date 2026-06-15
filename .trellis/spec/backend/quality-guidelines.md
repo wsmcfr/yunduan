@@ -93,6 +93,120 @@ Why:
 
 ---
 
+## Scenario: Cloud Detection Generated Images and AI Context
+
+### 1. Scope / Trigger
+
+- Trigger: changes touching `CloudDetectionService`, `RecordService.run_cloud_detection(...)`, `cloud_detection_context`, COS-generated cloud detection artifacts, or record AI chat context.
+- Affected layers: local ONNX runner -> COS object keys -> `FileObject` metadata -> `DetectionRecord.cloud_detection_context` -> AI prompt / schema.
+
+### 2. Signatures
+
+```py
+def CloudDetectionService.run_for_record(*, record: DetectionRecord, trigger: str) -> dict[str, Any]: ...
+def CloudDetectionService._upload_generated_images(...) -> list[dict[str, Any]]: ...
+def RecordService.run_cloud_detection(*, company_id: int, record_id: int, trigger: str = "manual_rerun") -> DetectionRecord: ...
+def RecordService._register_cloud_detection_generated_files(*, record: DetectionRecord, context: dict[str, Any]) -> list[dict[str, Any]]: ...
+def RecordService._build_ai_chat_context(*, record: DetectionRecord) -> dict: ...
+```
+
+Stable generated object keys:
+
+```text
+detections/{record_no}/cloud_detection/cloud_unet_overlay.jpg
+detections/{record_no}/cloud_detection/cloud_unet_mask.png
+detections/{record_no}/cloud_detection/cloud_mobilenetv3_classification.jpg
+```
+
+AI context field:
+
+```json
+{
+  "cloud_detection_context": {
+    "status": "success",
+    "summary_text": "...",
+    "comparison": {"mp157_result": "good", "cloud_result": "bad", "is_conflict": true},
+    "generated_files": [{"artifact_type": "cloud_unet_overlay", "object_key": "...", "preview_url": "..."}]
+  }
+}
+```
+
+### 3. Contracts
+
+| Boundary | Contract |
+|---|---|
+| COS object key | Cloud-generated detection images use stable keys without timestamps because they represent the current cloud review result. |
+| Manual rerun | A manual ONNX rerun overwrites the existing COS object for each artifact type instead of creating historical image versions. |
+| `FileObject` metadata | If a generated artifact with the same `object_key` already exists for the record, update that row's `content_type`, `size_bytes`, `etag`, `uploaded_at`, and storage fields; do not insert another row. |
+| Board fields | Cloud detection must write only `cloud_detection_context`; it must not overwrite board-side `vision_context`, `sensor_context`, `decision_context`, or `device_context`. |
+| AI context | `_build_ai_chat_context(...)` must include `cloud_detection_context` so AI chat can compare MP157 and cloud model conclusions. |
+| Compact prompt | Compact OpenClaudeCode/Micu prompts must include readable cloud summary, comparison, classification/segmentation signals when present, and generated artifact URLs or object keys. |
+
+### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+|---|---|
+| First source/annotated upload triggers cloud detection | Generated files are uploaded to COS, registered as `FileObject`, and written back into `cloud_detection_context.generated_files`. |
+| Manual rerun happens twice for the same record | COS upload requests use the same keys both times; DB still has one generated file row per artifact key, with updated metadata from the latest run. |
+| Cloud detector returns no `generated_files` list | Record still stores failure or summary context; no file rows are created. |
+| Existing generated row has stale metadata | Registration updates stale metadata instead of leaving old size/etag visible in the detail page. |
+| AI chat uses a compact provider prompt | Prompt contains `云端模型检测上下文`, `summary_text`, `mp157_result`, `cloud_result`, and generated artifact reference. |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Example |
+|---|---|
+| Good | First run uploads `cloud_unet_overlay.jpg`; second manual rerun uploads the same key and updates the existing `FileObject.etag`. |
+| Base | Cloud detection fails before generating images; `cloud_detection_context.status="failed"` and the existing board upload files remain unchanged. |
+| Bad | Object keys include a timestamp, so every rerun creates new overlay/mask/classification images and the UI shows stale historical outputs as if they were current. |
+| Bad | `_build_ai_chat_context(...)` omits `cloud_detection_context`, so the AI only sees MP157 output and cannot reason about cloud/model disagreement. |
+
+### 6. Tests Required
+
+- `test_cloud_detection_service.py`: assert repeated `run_for_record(...)` calls produce the same generated `object_key` list.
+- `test_record_service.py`: assert manual rerun reuses the same generated `FileObject.id` and updates `size_bytes` / `etag`.
+- `test_record_service.py`: assert `_build_ai_chat_context(...)` includes `cloud_detection_context`.
+- `test_ai_review_client.py`: assert compact prompt and context snapshot include cloud detection summary, comparison, and generated artifact URL.
+
+Assertion points:
+
+- generated key names contain `cloud_unet_overlay`, `cloud_unet_mask`, and `cloud_mobilenetv3_classification` without a timestamp prefix
+- rerun count changes metadata, not row count
+- AI prompt includes both `mp157_result` and `cloud_result`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```py
+timestamp = started_at.strftime("%Y%m%dT%H%M%S%fZ")
+object_key = f"detections/{record.record_no}/cloud_detection/{timestamp}_{artifact_type}.jpg"
+```
+
+#### Correct
+
+```py
+object_key = f"detections/{record.record_no}/cloud_detection/{artifact_type}.{extension}"
+```
+
+#### Wrong
+
+```py
+if object_key in existing_keys:
+    return existing_file
+```
+
+#### Correct
+
+```py
+if existing_file is not None:
+    existing_file.size_bytes = item.get("size_bytes")
+    existing_file.etag = item.get("etag")
+    existing_file.uploaded_at = datetime.now(timezone.utc)
+```
+
+---
+
 ## Testing Expectations
 
 ### Bootstrap baseline

@@ -2072,7 +2072,7 @@ watch(gatewayDialogVisible, (visible) => {
                   active-text="开"
                   inactive-text="关"
                   :loading="isUserActionPending(row.id)"
-                  @change="(value) => handleToggleUserAiPermission(row, Boolean(value))"
+                  @change="(value: boolean | string | number) => handleToggleUserAiPermission(row, Boolean(value))"
                 />
               </template>
             </ElTableColumn>

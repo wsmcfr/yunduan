@@ -750,6 +750,85 @@ class AIReviewClientTestCase(unittest.TestCase):
         self.assertLess(len(current_prompt), 5200)
         self.assertNotIn("input_image", str(client.captured_payload))
 
+    def test_openclaudecode_compact_prompt_includes_cloud_detection_context(self) -> None:
+        """验证紧凑视觉提示词会带入云端模型检测结论，避免大模型只看到板端初检。"""
+
+        client = StubAIReviewClient()
+        client.next_response = {
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "已结合云端检测结果回答。"}],
+                }
+            ]
+        }
+        cloud_context = {
+            "status": "success",
+            "summary_text": "云端模型检测完成：坏件概率 97.87%；UNet 检出疑似缺陷像素 1432，高于阈值 80。",
+            "comparison": {
+                "mp157_result": "good",
+                "cloud_result": "bad",
+                "is_conflict": True,
+                "suggested_action": "建议人工复核，并考虑修正板端结果。",
+            },
+            "generated_files": [
+                {
+                    "artifact_type": "cloud_unet_overlay",
+                    "display_name": "云端 UNet 缺陷叠加图",
+                    "object_key": "detections/demo/cloud_detection/overlay.jpg",
+                    "preview_url": "https://demo-bucket.cos.ap-guangzhou.myqcloud.com/detections/demo/cloud_detection/overlay.jpg",
+                }
+            ],
+        }
+
+        client.chat_about_record(
+            record_id=1,
+            provider_hint="OpenClaudeCode / Codex",
+            question="云端模型和板端结果不一致时应该怎么处理？",
+            history=[{"role": "user", "content": "上一轮已经看过图。"}],
+            context={**self.context, "cloud_detection_context": cloud_context},
+            referenced_files=self.referenced_files,
+            model_context={
+                "display_name": "OpenClaudeCode Codex",
+                "model_identifier": "gpt-5.4",
+                "protocol_type": "openai_responses",
+                "auth_mode": "authorization_bearer",
+                "base_url": "https://www.micuapi.ai/v1",
+                "user_agent": "codex_cli_rs/0.132.0",
+                "supports_vision": True,
+                "supports_stream": True,
+                "gateway_name": "OpenClaudeCode",
+                "gateway_vendor": "openclaudecode",
+                "api_key": "sk-demo-codex",
+            },
+        )
+
+        current_prompt = client.captured_payload["input"][-1]["content"][0]["text"]  # type: ignore[index]
+        self.assertIn("云端模型检测上下文", current_prompt)
+        self.assertIn("坏件概率 97.87%", current_prompt)
+        self.assertIn("mp157_result", current_prompt)
+        self.assertIn("cloud_result", current_prompt)
+        self.assertIn("cloud_unet_overlay", current_prompt)
+        self.assertIn("https://demo-bucket.cos.ap-guangzhou.myqcloud.com/detections/demo/cloud_detection/overlay.jpg", current_prompt)
+
+    def test_context_snapshot_contains_cloud_detection_context(self) -> None:
+        """验证普通提示词快照也保留 cloud_detection_context，供非紧凑分支使用。"""
+
+        snapshot = self.client._build_context_snapshot(  # type: ignore[attr-defined]
+            context={
+                **self.context,
+                "cloud_detection_context": {
+                    "status": "success",
+                    "summary_text": "云端模型检测完成。",
+                },
+            },
+            referenced_files=self.referenced_files,
+        )
+
+        self.assertIn("cloud_detection_context", snapshot)
+        self.assertIn("云端模型检测完成", snapshot)
+
     def test_openclaudecode_responses_first_turn_still_sends_images(self) -> None:
         """验证首轮视觉判断仍会发送图片，让模型先建立当前记录的视觉依据。"""
 

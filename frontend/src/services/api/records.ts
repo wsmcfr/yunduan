@@ -83,6 +83,21 @@ export function deleteRecord(recordId: number): Promise<ApiMessageResponseDto> {
 }
 
 /**
+ * 手动重新运行云端 ONNX 模型检测。
+ *
+ * 参数:
+ *   recordId: 当前检测记录编号。
+ *
+ * 返回:
+ *   返回后端重新检测后的完整记录详情；前端用它直接刷新上下文、图片清单和复核区。
+ */
+export function runCloudDetection(recordId: number): Promise<DetectionRecordDetailDto> {
+  return apiRequest<DetectionRecordDetailDto>(`/api/v1/records/${recordId}/cloud-detection`, {
+    method: "POST",
+  });
+}
+
+/**
  * 触发云端 AI 复核预留接口。
  */
 export function requestAiReview(

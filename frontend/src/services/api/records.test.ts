@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { deleteRecord } from "@/services/api/records";
+import { deleteRecord, runCloudDetection } from "@/services/api/records";
 
 /**
  * 构造最小 JSON Response，避免每个 API 测试重复拼装响应头。
@@ -38,6 +38,24 @@ describe("records api", () => {
       "/api/v1/records/13",
       expect.objectContaining({
         method: "DELETE",
+        credentials: "include",
+      }),
+    );
+  });
+
+  it("runCloudDetection calls the mounted cloud detection endpoint with POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(createJsonResponse({
+      id: 13,
+      record_no: "REC-CLOUD-001",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runCloudDetection(13);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/records/13/cloud-detection",
+      expect.objectContaining({
+        method: "POST",
         credentials: "include",
       }),
     );

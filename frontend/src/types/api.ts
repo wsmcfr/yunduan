@@ -54,6 +54,25 @@ export type StructuredContextValueDto =
       [key: string]: StructuredContextValueDto;
     };
 
+export type StructuredContextBlockDto = Record<string, StructuredContextValueDto>;
+
+export interface CloudDetectionContextDto {
+  [key: string]: StructuredContextValueDto | undefined;
+  status?: string | null;
+  trigger?: string | null;
+  source_file?: StructuredContextBlockDto | null;
+  classification?: StructuredContextBlockDto | null;
+  segmentation?: StructuredContextBlockDto | null;
+  comparison?: StructuredContextBlockDto | null;
+  generated_files?: StructuredContextBlockDto[];
+  summary_text?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
 export interface ApiErrorResponseDto {
   code: string;
   message: string;
@@ -564,6 +583,7 @@ export interface DetectionRecordDto {
   sensor_context: Record<string, StructuredContextValueDto> | null;
   decision_context: Record<string, StructuredContextValueDto> | null;
   device_context: Record<string, StructuredContextValueDto> | null;
+  cloud_detection_context: CloudDetectionContextDto | null;
   captured_at: string;
   detected_at: string | null;
   uploaded_at: string | null;
@@ -646,6 +666,7 @@ export interface DetectionRecordCreateRequestDto {
   sensor_context?: Record<string, StructuredContextValueDto> | null;
   decision_context?: Record<string, StructuredContextValueDto> | null;
   device_context?: Record<string, StructuredContextValueDto> | null;
+  cloud_detection_context?: CloudDetectionContextDto | null;
   captured_at: string;
   detected_at: string | null;
   uploaded_at?: string | null;
@@ -718,6 +739,7 @@ export interface AIRecordContextDto {
   sensor_context: Record<string, StructuredContextValueDto> | null;
   decision_context: Record<string, StructuredContextValueDto> | null;
   device_context: Record<string, StructuredContextValueDto> | null;
+  cloud_detection_context: CloudDetectionContextDto | null;
   captured_at: string;
   detected_at: string | null;
   uploaded_at: string | null;

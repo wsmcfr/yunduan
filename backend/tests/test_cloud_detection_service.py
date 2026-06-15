@@ -275,6 +275,33 @@ class CloudDetectionServiceTestCase(unittest.TestCase):
         self.assertTrue(all(item["preview_url"].startswith("https://cloud-bucket.cos.ap-shanghai.myqcloud.com/") for item in context["generated_files"]))
         self.assertIn("云端 UNet 缺陷叠加图", context["generated_files"][0]["display_name"])
 
+    def test_run_cloud_detection_uses_stable_generated_image_keys_for_rerun_overwrite(self) -> None:
+        """重复执行云端检测时，生成图必须使用固定 COS key，让后一次上传覆盖当前展示图。"""
+
+        cos_client = FakeCosClient()
+        service = self._make_service(cos_client=cos_client)
+        record = self._make_record()
+        record.record_no = "REC-CLOUD-OVERWRITE-0001"
+        for file_object in record.files:
+            file_object.object_key = file_object.object_key.replace("REC-CLOUD-0001", "REC-CLOUD-OVERWRITE-0001")
+
+        first_context = service.run_for_record(record=record, trigger="manual_rerun")
+        second_context = service.run_for_record(record=record, trigger="manual_rerun")
+
+        first_keys = [item["object_key"] for item in first_context["generated_files"]]
+        second_keys = [item["object_key"] for item in second_context["generated_files"]]
+        self.assertEqual(first_keys, second_keys)
+        self.assertEqual(
+            first_keys,
+            [
+                "detections/REC-CLOUD-OVERWRITE-0001/cloud_detection/cloud_unet_overlay.jpg",
+                "detections/REC-CLOUD-OVERWRITE-0001/cloud_detection/cloud_unet_mask.png",
+                "detections/REC-CLOUD-OVERWRITE-0001/cloud_detection/cloud_mobilenetv3_classification.jpg",
+            ],
+        )
+        self.assertEqual([request["object_key"] for request in cos_client.upload_requests[:3]], first_keys)
+        self.assertEqual([request["object_key"] for request in cos_client.upload_requests[3:]], second_keys)
+
     def test_run_cloud_detection_without_image_returns_failed_context(self) -> None:
         """记录没有 source 或 annotated 图片时，不抛异常，而是返回可展示的失败上下文。"""
 

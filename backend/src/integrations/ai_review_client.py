@@ -494,6 +494,73 @@ class AIReviewClient:
 
         return lines
 
+    def _build_compact_cloud_detection_context_lines(self, *, context: dict[str, Any]) -> list[str]:
+        """提取云端 ONNX 复核上下文里的关键字段，供大模型和板端结果对照。
+
+        参数:
+            context: 当前记录的完整 AI 上下文字典，可能包含 ``cloud_detection_context``。
+
+        返回:
+            返回多行可读提示词片段；当云端检测未运行或结构不合法时返回空列表。
+
+        说明:
+            云端检测上下文里可能包含模型调试字段、产物文件列表和时间戳。紧凑提示词只保留
+            人能读懂的摘要、板端/云端对比和生成图定位，避免把完整 JSON 塞进网关请求。
+        """
+
+        cloud_context = context.get("cloud_detection_context")
+        if not isinstance(cloud_context, dict) or not cloud_context:
+            return []
+
+        lines = ["- 云端模型检测上下文:"]
+        lines.append(f"  status={self._trim_prompt_text(cloud_context.get('status'), max_chars=80)}")
+
+        summary_text = cloud_context.get("summary_text")
+        if summary_text:
+            lines.append(f"  summary_text={self._trim_prompt_text(summary_text, max_chars=260)}")
+
+        comparison = cloud_context.get("comparison")
+        if isinstance(comparison, dict) and comparison:
+            comparison_items = [
+                f"{key}={self._trim_prompt_text(value, max_chars=90)}"
+                for key, value in comparison.items()
+            ]
+            lines.append(f"  comparison={'；'.join(comparison_items[:6])}")
+
+        classification = cloud_context.get("classification")
+        if isinstance(classification, dict) and classification:
+            classification_items = []
+            for key in ("predicted_result", "predicted_label", "confidence", "bad_probability"):
+                if key in classification:
+                    classification_items.append(f"{key}={self._trim_prompt_text(classification.get(key), max_chars=80)}")
+            if classification_items:
+                lines.append(f"  classification={'；'.join(classification_items)}")
+
+        segmentation = cloud_context.get("segmentation")
+        if isinstance(segmentation, dict) and segmentation:
+            segmentation_items = []
+            for key in ("predicted_result", "defect_pixels", "threshold_pixels"):
+                if key in segmentation:
+                    segmentation_items.append(f"{key}={self._trim_prompt_text(segmentation.get(key), max_chars=80)}")
+            if segmentation_items:
+                lines.append(f"  segmentation={'；'.join(segmentation_items)}")
+
+        generated_files = cloud_context.get("generated_files")
+        if isinstance(generated_files, list) and generated_files:
+            for index, item in enumerate(generated_files[:4], start=1):
+                if not isinstance(item, dict):
+                    continue
+                lines.append(
+                    (
+                        f"  generated_file_{index}: "
+                        f"artifact_type={self._trim_prompt_text(item.get('artifact_type'), max_chars=80)}；"
+                        f"object_key={self._trim_prompt_text(item.get('object_key'), max_chars=150)}；"
+                        f"preview_url={self._trim_prompt_text(item.get('preview_url'), max_chars=220)}"
+                    )
+                )
+
+        return lines
+
     def _build_compact_record_context(self, *, context: dict[str, Any]) -> str:
         """构造紧凑结构化摘要，替代完整 JSON 上下文。
 
@@ -529,6 +596,7 @@ class AIReviewClient:
         for field_name, field_value in field_pairs:
             lines.append(f"- {field_name}: {self._trim_prompt_text(field_value, max_chars=160)}")
         lines.extend(self._build_compact_nested_context_lines(context=context))
+        lines.extend(self._build_compact_cloud_detection_context_lines(context=context))
         return "\n".join(lines)
 
     def _infer_compact_file_purpose(self, *, file_object: dict[str, Any]) -> str:

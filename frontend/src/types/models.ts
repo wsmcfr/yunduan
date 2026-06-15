@@ -30,6 +30,34 @@ export type StructuredContextValue =
 
 export type StructuredContextBlock = Record<string, StructuredContextValue>;
 
+export interface CloudDetectionGeneratedFile {
+  [key: string]: unknown;
+  artifact_type?: string | null;
+  display_name?: string | null;
+  object_key?: string | null;
+  uploaded_at?: string | null;
+  preview_url?: string | null;
+  bucket_name?: string | null;
+  region?: string | null;
+}
+
+export interface CloudDetectionContext {
+  [key: string]: unknown;
+  status?: string | null;
+  trigger?: string | null;
+  source_file?: Record<string, unknown> | null;
+  classification?: Record<string, unknown> | null;
+  segmentation?: Record<string, unknown> | null;
+  comparison?: Record<string, unknown> | null;
+  generated_files?: CloudDetectionGeneratedFile[];
+  summary_text?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
 export interface CompanyBrief {
   id: number;
   name: string;
@@ -350,6 +378,7 @@ export interface AIRecordContext {
   sensorContext: StructuredContextBlock | null;
   decisionContext: StructuredContextBlock | null;
   deviceContext: StructuredContextBlock | null;
+  cloudDetectionContext: CloudDetectionContext | null;
   capturedAt: string;
   detectedAt: string | null;
   uploadedAt: string | null;
@@ -472,6 +501,7 @@ export interface DetectionRecordModel {
   sensorContext: StructuredContextBlock | null;
   decisionContext: StructuredContextBlock | null;
   deviceContext: StructuredContextBlock | null;
+  cloudDetectionContext: CloudDetectionContext | null;
   capturedAt: string;
   detectedAt: string | null;
   uploadedAt: string | null;

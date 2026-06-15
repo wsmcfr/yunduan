@@ -18,7 +18,10 @@ dependencies = [
   "passlib>=1.7.4",
   "cos-python-sdk-v5>=1.9.38",
   "weasyprint>=66.0",
-  "reportlab>=4.4.2"
+  "reportlab>=4.4.2",
+  "onnxruntime>=1.18.0",
+  "opencv-python-headless>=4.10.0",
+  "numpy>=1.26.0"
 ]
 
 [build-system]

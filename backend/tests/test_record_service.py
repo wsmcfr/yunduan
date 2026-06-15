@@ -78,6 +78,7 @@ class FakeCloudDetectionService:
         """
 
         self.calls.append({"record_id": record.id, "trigger": trigger, "file_count": len(record.files)})
+        run_index = len(self.calls)
         return {
             "status": "success",
             "trigger": trigger,
@@ -104,8 +105,8 @@ class FakeCloudDetectionService:
                     "region": "ap-shanghai",
                     "object_key": f"detections/{record.record_no}/cloud_detection/overlay.jpg",
                     "content_type": "image/jpeg",
-                    "size_bytes": 4096,
-                    "etag": "overlay-etag",
+                    "size_bytes": 4096 + run_index,
+                    "etag": f"overlay-etag-{run_index}",
                     "preview_url": f"https://demo-bucket.cos.ap-shanghai.myqcloud.com/detections/{record.record_no}/cloud_detection/overlay.jpg",
                 }
             ],
@@ -484,6 +485,37 @@ class RecordServiceTestCase(unittest.TestCase):
         self.assertIn("MobileNetV3-Small 分类", referenced_files[2]["analysis_purpose"])
         self.assertIn("原始采集图", referenced_files[3]["analysis_purpose"])
 
+    def test_ai_chat_context_includes_cloud_detection_context(self) -> None:
+        """AI 对话上下文应包含云端模型检测结果，供大模型与 MP157 初检对比。"""
+
+        record = self._create_detection_record(record_no="REC-AI-CLOUD-CONTEXT-0001")
+        record.cloud_detection_context = {
+            "status": "success",
+            "summary_text": "云端模型检测完成：坏件概率 97.87%，UNet 检出疑似缺陷像素 1432。",
+            "comparison": {
+                "mp157_result": "good",
+                "cloud_result": "bad",
+                "is_conflict": True,
+            },
+            "generated_files": [
+                {
+                    "artifact_type": "cloud_unet_overlay",
+                    "display_name": "云端 UNet 缺陷叠加图",
+                    "object_key": "detections/REC-AI-CLOUD-CONTEXT-0001/cloud_detection/overlay.jpg",
+                }
+            ],
+        }
+        self.db.commit()
+
+        loaded_record = self.service.get_record_detail(company_id=self.company.id, record_id=record.id)
+        context = self.service._build_ai_chat_context(record=loaded_record)  # type: ignore[attr-defined]
+
+        self.assertEqual(
+            context["cloud_detection_context"]["summary_text"],
+            "云端模型检测完成：坏件概率 97.87%，UNet 检出疑似缺陷像素 1432。",
+        )
+        self.assertTrue(context["cloud_detection_context"]["comparison"]["is_conflict"])
+
     def test_delete_record_purges_files_reviews_and_cos_objects(self) -> None:
         """删除检测记录时，应一并清理文件元数据、复核历史和 COS 对象。"""
 
@@ -626,6 +658,55 @@ class RecordServiceTestCase(unittest.TestCase):
         self.assertEqual(fake_cloud_detection_service.calls[0]["trigger"], "manual_rerun")
         self.assertIsNotNone(generated_file)
         self.assertTrue(any(item.object_key.endswith("overlay.jpg") for item in updated_record.files))
+
+    def test_run_cloud_detection_reuses_generated_file_row_on_manual_rerun(self) -> None:
+        """手动重跑云端检测时，同一 COS key 的结果图只更新当前文件行，不追加历史图片。"""
+
+        record = self._create_detection_record(record_no="REC-CLOUD-OVERWRITE-0001")
+        self._create_record_file(
+            record=record,
+            file_kind=FileKind.SOURCE,
+            object_key="detections/REC-CLOUD-OVERWRITE-0001/source/raw.jpg",
+        )
+        fake_cloud_detection_service = FakeCloudDetectionService()
+        service = RecordService(
+            self.db,
+            cos_client=self.cos_client,
+            cloud_detection_service=fake_cloud_detection_service,
+        )
+
+        first_record = service.run_cloud_detection(
+            company_id=self.company.id,
+            record_id=record.id,
+            trigger="manual_rerun",
+        )
+        first_generated_file = self.db.scalar(
+            select(FileObject).where(
+                FileObject.detection_record_id == record.id,
+                FileObject.object_key == "detections/REC-CLOUD-OVERWRITE-0001/cloud_detection/overlay.jpg",
+            )
+        )
+        self.assertIsNotNone(first_generated_file)
+
+        second_record = service.run_cloud_detection(
+            company_id=self.company.id,
+            record_id=record.id,
+            trigger="manual_rerun",
+        )
+        generated_files = self.db.scalars(
+            select(FileObject).where(
+                FileObject.detection_record_id == record.id,
+                FileObject.object_key == "detections/REC-CLOUD-OVERWRITE-0001/cloud_detection/overlay.jpg",
+            )
+        ).all()
+
+        self.assertEqual(len(generated_files), 1)
+        self.assertEqual(generated_files[0].id, first_generated_file.id)
+        self.assertEqual(generated_files[0].size_bytes, 4098)
+        self.assertEqual(generated_files[0].etag, "overlay-etag-2")
+        self.assertEqual(first_record.cloud_detection_context["generated_files"][0]["file_id"], first_generated_file.id)
+        self.assertEqual(second_record.cloud_detection_context["generated_files"][0]["file_id"], first_generated_file.id)
+        self.assertEqual(second_record.cloud_detection_context["generated_files"][0]["etag"], "overlay-etag-2")
 
 
 if __name__ == "__main__":

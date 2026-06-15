@@ -8,12 +8,12 @@ import StatusTag from "@/components/common/StatusTag.vue";
 import AiReviewChatDialog from "@/features/review/AiReviewChatDialog.vue";
 import ManualReviewFormCard from "@/features/review/ManualReviewFormCard.vue";
 import { flattenStructuredContext } from "@/features/review/recordContext";
-import { fetchRecordDetail } from "@/services/api/records";
+import { fetchRecordDetail, runCloudDetection } from "@/services/api/records";
 import { createManualReview, syncBoardReview } from "@/services/api/reviews";
 import { mapDetectionRecordDetailDto } from "@/services/mappers/commonMappers";
 import { useAuthStore } from "@/stores/auth";
 import type { BoardSyncStatus, DetectionResult, ManualReviewCreateRequestDto } from "@/types/api";
-import type { DetectionRecordModel } from "@/types/models";
+import type { DetectionRecordModel, StructuredContextBlock } from "@/types/models";
 import { buildAiPreviewUrl, getAiFileKindLabel, sortAiDisplayFiles } from "@/utils/aiReview";
 import { formatConfidence, formatDateTime } from "@/utils/format";
 
@@ -21,6 +21,14 @@ interface RecordPreviewFile {
   id: number;
   fileKind: "source" | "annotated" | "thumbnail";
   label: string;
+  objectKey: string;
+  uploadedAt: string | null;
+  previewUrl: string | null;
+}
+
+interface CloudGeneratedFile {
+  artifactType: string;
+  displayName: string;
   objectKey: string;
   uploadedAt: string | null;
   previewUrl: string | null;
@@ -37,6 +45,7 @@ const route = useRoute();
 const authStore = useAuthStore();
 const loading = ref(false);
 const reviewSubmitting = ref(false);
+const cloudDetectionSubmitting = ref(false);
 const boardSyncSubmitting = ref(false);
 const boardSyncDialogVisible = ref(false);
 const boardSyncDecision = ref<DetectionResult>("bad");
@@ -108,6 +117,42 @@ const previewFiles = computed<RecordPreviewFile[]>(() => {
 });
 
 /**
+ * 解析云端检测上下文里的生成图列表。
+ *
+ * 返回:
+ *   只返回具备 COS 路径或预览地址的云端产物图，用于在详情页单独展示，方便和板端上传图片对比。
+ */
+const cloudGeneratedFiles = computed<CloudGeneratedFile[]>(() => {
+  const generatedFiles = record.value?.cloudDetectionContext?.generated_files;
+  if (!generatedFiles) {
+    return [];
+  }
+
+  return generatedFiles
+    .map((item) => {
+      const artifactType = typeof item.artifact_type === "string" ? item.artifact_type : "";
+      const displayName = typeof item.display_name === "string" ? item.display_name : artifactType;
+      const objectKey = typeof item.object_key === "string" ? item.object_key : "";
+      const uploadedAt = typeof item.uploaded_at === "string" ? item.uploaded_at : null;
+      const previewUrl = buildAiPreviewUrl({
+        previewUrl: typeof item.preview_url === "string" ? item.preview_url : null,
+        objectKey,
+        bucketName: typeof item.bucket_name === "string" ? item.bucket_name : "",
+        region: typeof item.region === "string" ? item.region : "",
+      });
+
+      return {
+        artifactType,
+        displayName: displayName || "云端检测生成图",
+        objectKey,
+        uploadedAt,
+        previewUrl,
+      };
+    })
+    .filter((item) => item.objectKey || item.previewUrl);
+});
+
+/**
  * 将四类结构化上下文整理成统一的页面板块配置。
  * 这样模板层只负责渲染，不再散落大量字段判断。
  */
@@ -135,6 +180,12 @@ const contextPanels = computed<RecordContextPanel[]>(() => [
     title: "设备上传上下文",
     description: "展示设备任务号、批次号、固件版本、采集参数等运行信息。",
     entries: flattenStructuredContext(record.value?.deviceContext),
+  },
+  {
+    key: "cloud-detection",
+    title: "云端模型检测上下文",
+    description: "展示云端 ONNX 复检摘要、分类/分割结果、与板端初检的对比以及生成图路径。",
+    entries: flattenStructuredContext(record.value?.cloudDetectionContext as StructuredContextBlock | null),
   },
 ]);
 
@@ -179,6 +230,44 @@ async function handleManualReviewSubmit(payload: ManualReviewCreateRequestDto): 
     ElMessage.error(message);
   } finally {
     reviewSubmitting.value = false;
+  }
+}
+
+/**
+ * 手动重新运行云端 ONNX 模型检测。
+ *
+ * 主要流程:
+ * 1. 防止无记录或重复点击；
+ * 2. 调用后端重新下载当前记录图片、运行分类与分割模型；
+ * 3. 用后端返回的完整详情刷新页面上的检测信息和生成图；
+ * 4. 根据后端上下文状态提示用户本次检测是否成功。
+ *
+ * 返回:
+ *   无返回值；成功时会更新 `record`。
+ */
+async function handleRunCloudDetection(): Promise<void> {
+  if (!record.value || cloudDetectionSubmitting.value) {
+    return;
+  }
+
+  cloudDetectionSubmitting.value = true;
+
+  try {
+    const response = await runCloudDetection(record.value.id);
+    record.value = mapDetectionRecordDetailDto(response);
+    const cloudContext = record.value.cloudDetectionContext;
+    if (cloudContext?.status === "success") {
+      ElMessage.success("云端模型检测已完成");
+    } else if (cloudContext?.status === "skipped") {
+      ElMessage.warning(cloudContext.summary_text ?? "云端模型检测已跳过");
+    } else {
+      ElMessage.warning(cloudContext?.summary_text ?? "云端模型检测未成功完成，请查看上下文详情");
+    }
+  } catch (caughtError) {
+    const message = caughtError instanceof Error ? caughtError.message : "云端模型检测失败";
+    ElMessage.error(message);
+  } finally {
+    cloudDetectionSubmitting.value = false;
   }
 }
 
@@ -484,6 +573,61 @@ watch(
         </div>
       </section>
 
+      <section class="app-panel detail-section">
+        <div class="detail-section__header">
+          <div>
+            <strong>云端检测生成图</strong>
+            <p class="muted-text">
+              云端重新检测会把 UNet 叠加图、mask 图和 MobileNetV3-Small 分类结果图上传到 COS。手动重新跑模型后，同一记录的这些图片会被当前结果覆盖。
+            </p>
+          </div>
+          <ElTag effect="dark" round type="success">
+            {{ cloudGeneratedFiles.length > 0 ? `${cloudGeneratedFiles.length} 张` : "暂无生成图" }}
+          </ElTag>
+        </div>
+
+        <ElEmpty
+          v-if="cloudGeneratedFiles.length === 0"
+          description="当前记录还没有云端检测生成图。上传板端图片后会自动触发一次，也可以点击重新进行云端检测。"
+        />
+
+        <div v-else class="cloud-generated-grid">
+          <article
+            v-for="file in cloudGeneratedFiles"
+            :key="file.objectKey || file.artifactType"
+            class="cloud-generated-card"
+          >
+            <div class="detail-preview__meta-head">
+              <strong>{{ file.displayName }}</strong>
+              <ElTag effect="dark" round>{{ formatDateTime(file.uploadedAt) }}</ElTag>
+            </div>
+
+            <ElImage
+              v-if="file.previewUrl"
+              :src="file.previewUrl"
+              :alt="file.displayName"
+              fit="contain"
+              class="cloud-generated-card__image"
+            >
+              <template #error>
+                <div class="detail-preview__fallback">
+                  <strong>{{ file.displayName }}</strong>
+                  <p>云端生成图已登记到 COS，但当前浏览器无法直接预览。</p>
+                  <code>{{ file.objectKey }}</code>
+                </div>
+              </template>
+            </ElImage>
+
+            <div v-else class="detail-preview__fallback">
+              <strong>{{ file.displayName }}</strong>
+              <p>云端生成图缺少可直接访问的预览地址。</p>
+            </div>
+
+            <code>{{ file.objectKey }}</code>
+          </article>
+        </div>
+      </section>
+
       <section
         v-for="panel in contextPanels"
         :key="panel.key"
@@ -558,6 +702,14 @@ watch(
                 @click="openAiDialog"
               >
                 打开 AI 对话分析
+              </ElButton>
+              <ElButton
+                type="warning"
+                plain
+                :loading="cloudDetectionSubmitting"
+                @click="handleRunCloudDetection"
+              >
+                重新进行云端检测
               </ElButton>
               <ElButton
                 type="warning"
@@ -739,6 +891,7 @@ watch(
 .detail-preview__meta-list,
 .detail-preview__mobile-list,
 .detail-preview__print-list,
+.cloud-generated-grid,
 .detail-context,
 .detail-review-workspace,
 .detail-review-workspace__assistant,
@@ -787,8 +940,13 @@ watch(
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.cloud-generated-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
 .detail-preview__meta-card,
 .detail-preview__print-card,
+.cloud-generated-card,
 .detail-context__item {
   display: grid;
   gap: 10px;
@@ -796,6 +954,27 @@ watch(
   border-radius: 18px;
   border: 1px solid rgba(149, 184, 223, 0.12);
   background: rgba(255, 255, 255, 0.02);
+}
+
+.cloud-generated-card {
+  min-width: 0;
+}
+
+.cloud-generated-card code {
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-all;
+  color: var(--app-text);
+}
+
+.cloud-generated-card__image {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  min-height: 220px;
+  max-height: 320px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .detail-context {
@@ -874,7 +1053,8 @@ watch(
   }
 
   .detail-context,
-  .detail-preview__meta-list {
+  .detail-preview__meta-list,
+  .cloud-generated-grid {
     grid-template-columns: 1fr;
   }
 

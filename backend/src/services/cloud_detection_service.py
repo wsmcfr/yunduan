@@ -939,14 +939,13 @@ class CloudDetectionService:
             source_file: 本次检测使用的源图片。
             classification: 分类模型输出，可能包含分类结果图。
             segmentation: 分割模型输出，可能包含 mask 和 overlay 图。
-            started_at: 本次检测开始时间，用于生成稳定对象名前缀。
+            started_at: 本次检测开始时间；当前对象名固定，时间只保留在上下文里用于审计。
 
         返回:
             每个元素都是前端和后续 DB 登记可复用的文件元数据。
         """
 
         bucket_name, region = self._resolve_generated_target(source_file=source_file)
-        timestamp = started_at.strftime("%Y%m%dT%H%M%S%fZ")
         generated_files: list[dict[str, Any]] = []
 
         for artifact in self._build_generated_artifacts(
@@ -954,7 +953,10 @@ class CloudDetectionService:
             segmentation=segmentation,
         ):
             extension = self._extension_for_content_type(artifact.content_type)
-            object_key = f"detections/{record.record_no}/cloud_detection/{timestamp}_{artifact.artifact_type}.{extension}"
+            # 云端检测产物代表“当前最新复核结果”，不是历史版本归档。
+            # 因此同一记录同一产物类型使用固定 COS key，手动重跑时由 COS 覆盖旧对象，
+            # 详情页和 AI 引用也会继续指向当前结果图。
+            object_key = f"detections/{record.record_no}/cloud_detection/{artifact.artifact_type}.{extension}"
             upload_result = self.cos_client.upload_file_bytes(
                 bucket_name=bucket_name,
                 region=region,

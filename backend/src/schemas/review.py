@@ -124,6 +124,7 @@ class AIRecordContext(BaseModel):
     sensor_context: dict[str, Any] | None
     decision_context: dict[str, Any] | None
     device_context: dict[str, Any] | None
+    cloud_detection_context: dict[str, Any] | None
     captured_at: datetime
     detected_at: datetime | None
     uploaded_at: datetime | None
