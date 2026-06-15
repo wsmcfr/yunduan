@@ -1316,3 +1316,52 @@ Updated STM32MP157 cloud upload contract with verified F4-side hardware fields f
 ### Next Steps
 
 - None - task complete
+
+
+## Session 28: 记录云端生成图分页与 hwy 部署
+
+**Date**: 2026-06-15
+**Task**: 记录云端生成图分页与 hwy 部署
+**Branch**: `feature/cloud-detection-context`
+
+### Summary
+
+Fixed the record detail cloud-generated image gallery so model output images stay in a bounded, single-row comparison area with internal pagination. Updated the frontend source contract test and component guideline memory, then deployed the rebuilt frontend to the `hwy` server.
+
+### Main Changes
+
+| 项目 | 内容 |
+|---|---|
+| 主要提交 | `c7b46f9 fix: paginate cloud generated images` |
+| 前端修复 | `RecordDetailPage.vue` 将云端检测生成图从全量自动换行改为 `visibleCloudGeneratedFiles` 分页展示；桌面每页固定两张、一行两列，超出通过 `上一组` / `下一组` 切换。 |
+| 状态处理 | 新增 `CLOUD_GENERATED_IMAGE_PAGE_SIZE`、`cloudGeneratedImagePageState`、`cloudGeneratedImageCurrentPage`、`cloudGeneratedImageTotalPages` 和 `changeCloudGeneratedImagePage`；详情刷新和手动重新云端检测后重置到第一页，避免覆盖图片后停留在旧页码。 |
+| 样式约束 | 新增 `.cloud-generated-gallery` 和 `.cloud-generated-pager`；`.cloud-generated-grid` 固定 `grid-template-columns: repeat(2, minmax(0, 1fr));` 与 `grid-auto-rows: 1fr;`，避免 3 张图形成 `2 + 1` 的空白布局。 |
+| 测试覆盖 | 更新 `recordDetailCloudDetection.test.ts`，断言分页状态、可见图片列表、分页控件和固定两列一行 CSS 契约。 |
+| 经验沉淀 | 更新 `.trellis/spec/frontend/component-guidelines.md`，新增 `Cloud Generated Image Gallery Pagination` 规则：云端生成图不能使用 `auto-fit/auto-fill` 全量自动换行，必须固定框内分页，并考虑手动重跑覆盖图片后的页码复位。 |
+| 验证 | `npm test -- src/pages/recordDetailCloudDetection.test.ts` 4/4 通过；`npm test` 18 个文件、81 个测试通过；`npm run build` 成功；`git diff --check` 无空白错误，仅有 Windows 换行提示。 |
+| 本地预览 | `npm.cmd run preview -- --host 127.0.0.1 --port 4173` 后，`/` 和 `/records/1` HTTP 200；Playwright `.sh` 包装脚本在当前 Windows/WSL 路径下不可直接运行，未作为视觉通过依据。 |
+| 线上部署 | 已部署到 `ssh hwy`，备份 `/opt/yunduan/deploy_backups/dist_backup_ui_20260615_183829`，新线上入口为 `/assets/index-Db9W4qiD.js`；`RecordDetailPage-Dg_XcSHr.js` 和 `RecordDetailPage-DjA-p_bD.css` 均存在。 |
+| 线上校验 | `curl http://127.0.0.1/health` 返回 `{"status":"ok"}`；磁盘 `/opt/yunduan/frontend/dist/index.html` 和 Nginx served index 均引用 `assets/index-Db9W4qiD.js`。 |
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c7b46f9` | (see git log) |
+
+### Testing
+
+- [OK] `npm test -- src/pages/recordDetailCloudDetection.test.ts`: 1 file, 4 tests passed
+- [OK] `npm test`: 18 files, 81 tests passed
+- [OK] `npm run build`: `vue-tsc --noEmit && vite build` completed
+- [OK] `git diff --check`: no whitespace errors
+- [OK] `hwy` deployment check: disk and served index both reference `assets/index-Db9W4qiD.js`; `/health` returned `{"status":"ok"}`
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
