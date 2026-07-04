@@ -73,7 +73,7 @@
 | `cloud_result` | 云端最终复核结果 | 是 | 板端只接受 `good/bad/review`。云端的 `uncertain` 发送前要转成 `review`。 |
 | `cloud_reason` | 弹窗填写原因 | 是 | 不能为空；用于板端历史详情展示“云端修正原因”。 |
 | `operator` | 当前登录用户 | 否 | 建议用 `display_name`，为空时用 `username`。 |
-| `review_time` | 云端复核时间 | 否 | 建议发送本地格式 `YYYY-MM-DD HH:mm:ss` 或 ISO 字符串。 |
+| `review_time` | 云端复核时间 | 否 | 发送板端直接展示的中国本地时间字符串 `YYYY-MM-DD HH:mm:ss`；后端必须从 UTC 复核时间固定转换为 UTC+8，不能依赖云服务器本机时区。 |
 | `source` | 固定值 | 否 | 固定传 `cloud`。 |
 
 板端成功响应示例：
@@ -324,7 +324,7 @@ def post_review_to_board(record, review, operator: str, token: str) -> tuple[boo
         "cloud_result": map_cloud_result_to_board(review.decision),
         "cloud_reason": review.comment or "",
         "operator": operator,
-        "review_time": review.reviewed_at.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+        "review_time": format_board_review_time(review.reviewed_at),
         "source": "cloud",
     }
 

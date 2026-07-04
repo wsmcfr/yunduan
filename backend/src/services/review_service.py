@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -24,6 +24,22 @@ from src.schemas.review import (
 )
 
 logger = get_logger(__name__)
+
+BOARD_REVIEW_DISPLAY_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
+
+
+def format_board_review_time(reviewed_at: datetime) -> str:
+    """把云端复核时间格式化为板端详情页显示的中国本地时间。
+
+    云端数据库统一保存 UTC 时间，前端 `new Date().toISOString()` 也会提交 UTC ISO。
+    板端 `review_time` 字段是无时区的可读字符串，如果直接使用云服务器本机时区，
+    服务器运行在 UTC 时就会比现场时间少 8 小时。这里固定转成 UTC+8，保证云端
+    修正后写回 MP157 的时间与操作员看到的中国本地时间一致。
+    """
+
+    if reviewed_at.tzinfo is None or reviewed_at.tzinfo.utcoffset(reviewed_at) is None:
+        reviewed_at = reviewed_at.replace(tzinfo=timezone.utc)
+    return reviewed_at.astimezone(BOARD_REVIEW_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def map_cloud_result_to_board(decision: DetectionResult) -> str:
@@ -202,14 +218,13 @@ class ReviewService:
     ) -> dict[str, Any]:
         """按板端 `/api/v1/review-result` 契约组装 JSON 请求体。"""
 
-        reviewed_at = review.reviewed_at
         return {
             "record_id": str(record.id),
             "record_no": record.record_no,
             "cloud_result": map_cloud_result_to_board(review.decision),
             "cloud_reason": review.comment or "",
             "operator": reviewer_name,
-            "review_time": reviewed_at.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+            "review_time": format_board_review_time(review.reviewed_at),
             "source": "cloud",
         }
 

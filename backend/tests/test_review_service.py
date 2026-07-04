@@ -210,7 +210,7 @@ class ReviewServiceBoardSyncTestCase(unittest.TestCase):
         record = self._create_detection_record(result=DetectionResult.GOOD)
         board_client = FakeBoardReviewClient()
         service = ReviewService(self.db, board_review_client=board_client)
-        reviewed_at = datetime(2026, 5, 19, 14, 3, 10, tzinfo=timezone.utc)
+        reviewed_at = datetime(2026, 7, 4, 18, 3, 10, tzinfo=timezone.utc)
 
         response = service.sync_board_review(
             company_id=self.company.id,
@@ -250,7 +250,7 @@ class ReviewServiceBoardSyncTestCase(unittest.TestCase):
                 "cloud_result": "bad",
                 "cloud_reason": "云端复核发现边缘划痕，板端原判良品需要修正。",
                 "operator": "admin",
-                "review_time": "2026-05-19 14:03:10",
+                "review_time": "2026-07-05 02:03:10",
                 "source": "cloud",
             },
         )

@@ -417,6 +417,7 @@ Board payload:
 | `Device.board_review_token` | May be stored in `devices` for MVP, but must not be returned in normal device list/detail responses. Return `has_board_review_token` instead. |
 | `Device.board_review_url` | Returned to management UI so admins can verify endpoint configuration. |
 | Board HTTP client | Uses backend-side `httpx.post(...)` with a short timeout; the browser must not call the board directly. |
+| Board `review_time` | Format UTC review timestamps as China local time before sending to the board; do not rely on the cloud server process timezone. |
 | `board_sync_status` | Stable values are `success` and `failed` for the MVP response path. `pending` and `not_required` may exist for future workflows. |
 | `board_sync_time` | Latest successful board synchronization time, not the time of every failed retry. |
 | `board_sync_error` | Latest readable failure summary. Never include the board token. |

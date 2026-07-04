@@ -69,7 +69,7 @@ When single-record AI chat or AI review gives an evidence-based recommendation t
 | `cloud_result` | `map_cloud_result_to_board(review.decision)` | `good`, `bad`, or `review`; `uncertain` maps to `review`. |
 | `cloud_reason` | `review.comment` | Correction reason. |
 | `operator` | current user display name or username | Cloud reviewer. |
-| `review_time` | `review.reviewed_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")` | Board display time. |
+| `review_time` | `format_board_review_time(review.reviewed_at)` | Board display time. It must be formatted as China local time `YYYY-MM-DD HH:MM:SS` from the UTC review timestamp, not from the cloud server's local timezone. |
 | `source` | literal `cloud` | Origin marker. |
 
 #### Sync Persistence
