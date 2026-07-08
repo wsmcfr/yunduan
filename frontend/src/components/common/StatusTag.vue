@@ -11,7 +11,7 @@ const props = defineProps<{
 const labelMap = {
   good: "良品",
   bad: "坏品",
-  uncertain: "待确认",
+  uncertain: "待复核",
   pending: "待复核",
   reviewed: "已复核",
   ai_reserved: "AI 预留",

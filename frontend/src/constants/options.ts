@@ -17,7 +17,7 @@ export interface SelectOption<TValue extends string | number> {
 export const detectionResultOptions: SelectOption<DetectionResult>[] = [
   { label: "良品", value: "good" },
   { label: "坏品", value: "bad" },
-  { label: "待确认", value: "uncertain" },
+  { label: "待复核", value: "uncertain" },
 ];
 
 /**

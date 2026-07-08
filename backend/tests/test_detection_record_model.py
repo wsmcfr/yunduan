@@ -127,3 +127,22 @@ class DetectionRecordModelTestCase(unittest.TestCase):
         self.assertEqual(payload.part_name, "波形垫圈")
         self.assertEqual(payload.part_category, "垫圈类")
         self.assertTrue(payload.auto_create_part)
+
+    def test_create_request_normalizes_mp_pending_review_result_aliases(self) -> None:
+        """MP157 上传中文待复核结果时，请求 Schema 应统一转成云端稳定枚举。"""
+
+        payload = DetectionRecordCreateRequest(
+            record_no="REC-PENDING-REVIEW-SCHEMA",
+            part_id=1,
+            device_id=1,
+            result="待复核",
+            surface_result="待确认",
+            backlight_result="复核",
+            eddy_result="review",
+            captured_at=datetime(2026, 5, 20, 3, 39, 59, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(payload.result, DetectionResult.UNCERTAIN)
+        self.assertEqual(payload.surface_result, DetectionResult.UNCERTAIN)
+        self.assertEqual(payload.backlight_result, DetectionResult.UNCERTAIN)
+        self.assertEqual(payload.eddy_result, DetectionResult.UNCERTAIN)
