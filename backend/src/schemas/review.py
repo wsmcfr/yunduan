@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from src.db.models.enums import DetectionResult, FileKind, ReviewSource, ReviewStatus
 from src.schemas.common import ORMBaseModel
+from src.schemas.context_explanation import ContextExplanationResponse
 
 
 class ManualReviewCreateRequest(BaseModel):
@@ -134,6 +135,7 @@ class AIRecordContext(BaseModel):
     latest_review_decision: DetectionResult | None
     latest_review_comment: str | None
     latest_reviewed_at: datetime | None
+    context_explanations: ContextExplanationResponse | None = None
 
 
 class AIChatResponse(BaseModel):

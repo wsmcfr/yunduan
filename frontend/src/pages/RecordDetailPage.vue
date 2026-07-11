@@ -13,7 +13,7 @@ import { createManualReview, syncBoardReview } from "@/services/api/reviews";
 import { mapDetectionRecordDetailDto } from "@/services/mappers/commonMappers";
 import { useAuthStore } from "@/stores/auth";
 import type { BoardSyncStatus, DetectionResult, ManualReviewCreateRequestDto } from "@/types/api";
-import type { DetectionRecordModel } from "@/types/models";
+import type { ContextExplanationGroup, DetectionRecordModel } from "@/types/models";
 import { buildAiPreviewUrl, getAiFileKindLabel, sortAiDisplayFiles } from "@/utils/aiReview";
 import { formatConfidence, formatDateTime } from "@/utils/format";
 
@@ -33,6 +33,20 @@ interface RecordContextPanel {
   entries: ReturnType<typeof flattenStructuredContext>;
 }
 
+interface PaginatedContextExplanationGroup extends ContextExplanationGroup {
+  currentPage: number;
+  pageSize: number;
+  total: number;
+  pageCount: number;
+  pagedItems: ContextExplanationGroup["items"];
+}
+
+/**
+ * 每个 MP157 中文解释分组单页展示的卡片数。
+ * 这里固定为 4 条，是为了让桌面端形成稳定卡片框，窄屏也能保持可读高度。
+ */
+const CONTEXT_EXPLANATION_PAGE_SIZE = 4;
+
 const route = useRoute();
 const authStore = useAuthStore();
 const loading = ref(false);
@@ -44,6 +58,7 @@ const boardSyncReason = ref("");
 const error = ref("");
 const record = ref<DetectionRecordModel | null>(null);
 const aiDialogVisible = ref(false);
+const contextExplanationPageByGroup = ref<Record<string, number>>({});
 
 /**
  * 从路由里读取检测记录编号。
@@ -108,32 +123,71 @@ const previewFiles = computed<RecordPreviewFile[]>(() => {
 });
 
 /**
+ * 当前记录中已经由后端解释好的 MP157 中文上下文分组。
+ * 页面只负责渲染解释结果，不在前端重复翻译字段含义，避免 AI、PDF 和详情页口径不一致。
+ */
+const contextExplanationGroups = computed(
+  () => record.value?.contextExplanations?.groups.filter((group) => group.items.length > 0) ?? [],
+);
+
+/**
+ * MP157 中文解释的总览文本。
+ */
+const contextExplanationSummary = computed(
+  () => record.value?.contextExplanations?.summary ?? "当前记录没有可展示的 MP157 中文解释。",
+);
+
+/**
+ * 给每个 MP157 中文解释分组补充分页信息。
+ * 主要流程：读取当前分组页码、按固定页大小截取当前页条目，并把越界页码钳制到有效范围。
+ */
+const paginatedContextExplanationGroups = computed<PaginatedContextExplanationGroup[]>(() =>
+  contextExplanationGroups.value.map((group) => {
+    const total = group.items.length;
+    const pageSize = CONTEXT_EXPLANATION_PAGE_SIZE;
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    const rawPage = contextExplanationPageByGroup.value[group.key] ?? 1;
+    const currentPage = Math.min(Math.max(rawPage, 1), pageCount);
+    const startIndex = (currentPage - 1) * pageSize;
+
+    return {
+      ...group,
+      currentPage,
+      pageSize,
+      total,
+      pageCount,
+      pagedItems: group.items.slice(startIndex, startIndex + pageSize),
+    };
+  }),
+);
+
+/**
  * 将四类结构化上下文整理成统一的页面板块配置。
  * 这样模板层只负责渲染，不再散落大量字段判断。
  */
 const contextPanels = computed<RecordContextPanel[]>(() => [
   {
     key: "vision",
-    title: "视觉检测上下文",
-    description: "展示边缘侧视觉模型、通道结果、局部判定和图像侧依据。",
+    title: "视觉原始上下文",
+    description: "保留 MP157 视觉模型上报的原始字段，主要用于工程排障和算法调试。",
     entries: flattenStructuredContext(record.value?.visionContext),
   },
   {
     key: "sensor",
-    title: "传感器上下文",
-    description: "展示 F4 或其他传感器上传的原始值、阈值、计算结果和越界信息。",
+    title: "传感器原始上下文",
+    description: "保留称重、LDC1614 和 F4 流程上报的原始字段，便于追查通信和标定问题。",
     entries: flattenStructuredContext(record.value?.sensorContext),
   },
   {
     key: "decision",
-    title: "判定依据上下文",
-    description: "展示最终为什么会判成良品、不良或待确认，而不是只给一个结果。",
+    title: "判定原始上下文",
+    description: "保留 MP157 综合判定流程的原始字段，便于核对规则版本和分支结果。",
     entries: flattenStructuredContext(record.value?.decisionContext),
   },
   {
     key: "device",
-    title: "设备上传上下文",
-    description: "展示设备任务号、批次号、固件版本、采集参数等运行信息。",
+    title: "设备原始上下文",
+    description: "保留设备任务号、批次号、固件版本、采集参数等排障字段。",
     entries: flattenStructuredContext(record.value?.deviceContext),
   },
 ]);
@@ -242,6 +296,37 @@ function openAiDialog(): void {
   }
   aiDialogVisible.value = true;
 }
+
+/**
+ * 切换某一个 MP157 中文解释分组的当前页。
+ *
+ * @param groupKey 后端返回的解释分组稳定键，例如 vision、sensor、decision、device。
+ * @param nextPage Element Plus 分页组件传入的目标页码。
+ */
+function handleContextExplanationPageChange(groupKey: string, nextPage: number): void {
+  contextExplanationPageByGroup.value = {
+    ...contextExplanationPageByGroup.value,
+    [groupKey]: nextPage,
+  };
+}
+
+watch(
+  contextExplanationGroups,
+  (groups) => {
+    /**
+     * 记录切换或后端重新返回解释时，只保留仍然存在的分组页码，并把越界页码修正回来。
+     * 这样用户刷新详情后不会因为旧页码大于新数据页数而看到空白框。
+     */
+    const nextPageByGroup: Record<string, number> = {};
+    for (const group of groups) {
+      const pageCount = Math.max(1, Math.ceil(group.items.length / CONTEXT_EXPLANATION_PAGE_SIZE));
+      const rawPage = contextExplanationPageByGroup.value[group.key] ?? 1;
+      nextPageByGroup[group.key] = Math.min(Math.max(rawPage, 1), pageCount);
+    }
+    contextExplanationPageByGroup.value = nextPageByGroup;
+  },
+  { immediate: true },
+);
 
 watch(
   () => recordId.value,
@@ -484,6 +569,78 @@ watch(
         </div>
       </section>
 
+      <section class="app-panel detail-section detail-section--wide">
+        <div class="detail-section__header">
+          <div>
+            <strong>MP157 中文解释</strong>
+            <p class="muted-text">
+              这里把 MP157 发来的视觉、称重、LDC1614、F4 流程、综合判定和设备字段翻译成可直接阅读的中文说明；AI 对话和统计 PDF 也使用同一套解释。
+            </p>
+          </div>
+          <ElTag effect="dark" round type="success">
+            {{ contextExplanationGroups.length > 0 ? `${contextExplanationGroups.length} 组解释` : "暂无解释" }}
+          </ElTag>
+        </div>
+
+        <ElAlert
+          type="info"
+          show-icon
+          :closable="false"
+          :title="contextExplanationSummary"
+        />
+
+        <ElEmpty
+          v-if="contextExplanationGroups.length === 0"
+          description="当前记录没有可转换成中文说明的 MP157 上下文字段。"
+        />
+
+        <div v-else class="detail-context-explanations">
+          <article
+            v-for="group in paginatedContextExplanationGroups"
+            :key="group.key"
+            class="detail-context-explanations__group"
+          >
+            <div class="detail-context-explanations__group-head">
+              <div class="detail-context-explanations__group-title">
+                <strong>{{ group.title }}</strong>
+                <ElTag effect="dark" round type="info">
+                  {{ group.total }} 项 / 第 {{ group.currentPage }} 页
+                </ElTag>
+              </div>
+              <span>{{ group.summary }}</span>
+            </div>
+
+            <div class="detail-context-explanations__frame">
+              <div class="detail-context-explanations__items">
+                <div
+                  v-for="item in group.pagedItems"
+                  :key="item.sourcePath"
+                  class="detail-context-explanations__item"
+                >
+                  <span class="detail-context-explanations__label">{{ item.label }}</span>
+                  <strong class="detail-context-explanations__value">{{ item.valueText }}</strong>
+                  <p>{{ item.explanation }}</p>
+                  <code>{{ item.sourcePath }}</code>
+                </div>
+              </div>
+
+              <ElPagination
+                v-if="group.total > group.pageSize"
+                class="detail-context-explanations__pager"
+                background
+                small
+                layout="prev, pager, next, total"
+                :page-size="group.pageSize"
+                :total="group.total"
+                :current-page="group.currentPage"
+                :pager-count="5"
+                @current-change="(page) => handleContextExplanationPageChange(group.key, page)"
+              />
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section
         v-for="panel in contextPanels"
         :key="panel.key"
@@ -501,10 +658,13 @@ watch(
 
         <ElEmpty
           v-if="panel.entries.length === 0"
-          description="当前设备还没有上报这部分结构化上下文。"
+          description="当前设备还没有上报这部分原始上下文。"
         />
 
         <div v-else class="detail-context">
+          <div class="detail-context__notice">
+            原始上下文：以下字段保留 MP157 上报的原始值，主要用于工程排障；日常阅读请优先查看上方“MP157 中文解释”。
+          </div>
           <article
             v-for="entry in panel.entries"
             :key="entry.keyPath"
@@ -740,6 +900,10 @@ watch(
 .detail-preview__mobile-list,
 .detail-preview__print-list,
 .detail-context,
+.detail-context-explanations,
+.detail-context-explanations__group,
+.detail-context-explanations__frame,
+.detail-context-explanations__items,
 .detail-review-workspace,
 .detail-review-workspace__assistant,
 .detail-review-workspace__assistant-tags {
@@ -789,13 +953,122 @@ watch(
 
 .detail-preview__meta-card,
 .detail-preview__print-card,
-.detail-context__item {
+.detail-context__item,
+.detail-context-explanations__group,
+.detail-context-explanations__item {
   display: grid;
   gap: 10px;
   padding: 16px;
   border-radius: 18px;
   border: 1px solid rgba(149, 184, 223, 0.12);
   background: rgba(255, 255, 255, 0.02);
+}
+
+.detail-context-explanations__group {
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: rgba(24, 165, 141, 0.06);
+}
+
+.detail-context-explanations__group-head {
+  display: grid;
+  gap: 8px;
+  line-height: 1.7;
+}
+
+.detail-context-explanations__group-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.detail-context-explanations__group-head span,
+.detail-context-explanations__item p {
+  margin: 0;
+  color: var(--app-text-secondary);
+  line-height: 1.8;
+}
+
+.detail-context-explanations__group-head span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.detail-context-explanations__frame {
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px;
+  height: clamp(420px, 44dvh, 560px);
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px;
+  border: 1px solid rgba(149, 184, 223, 0.1);
+  border-radius: 14px;
+  background: rgba(7, 15, 24, 0.28);
+}
+
+.detail-context-explanations__items {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.detail-context-explanations__label {
+  color: var(--app-text-secondary);
+}
+
+.detail-context-explanations__item {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.detail-context-explanations__value {
+  display: block;
+  max-height: 4.2em;
+  overflow-y: auto;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.detail-context-explanations__item p {
+  min-height: 0;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+.detail-context-explanations__item code,
+.detail-context__notice {
+  max-width: 100%;
+  color: var(--app-text-secondary);
+  line-height: 1.7;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.detail-context-explanations__item code {
+  display: block;
+  max-height: 4.8em;
+  overflow-y: auto;
+}
+
+.detail-context-explanations__pager {
+  justify-content: flex-end;
+}
+
+.detail-context__notice {
+  grid-column: 1 / -1;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .detail-context {
@@ -874,8 +1147,13 @@ watch(
   }
 
   .detail-context,
+  .detail-context-explanations__items,
   .detail-preview__meta-list {
     grid-template-columns: 1fr;
+  }
+
+  .detail-context-explanations__frame {
+    height: clamp(560px, 72dvh, 720px);
   }
 
   /**

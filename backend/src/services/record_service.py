@@ -23,6 +23,7 @@ from src.schemas.upload import FileObjectCreateRequest
 from src.integrations.ai_review_client import AIReviewClient
 from src.integrations.cos_client import CosClient
 from src.services.ai_gateway_service import AIGatewayService
+from src.services.context_explanation_service import build_context_explanations
 from src.services.part_identity import normalize_part_category, normalize_part_display_name
 
 logger = get_logger(__name__)
@@ -274,6 +275,14 @@ class RecordService:
         for file_object in record.files:
             file_object.preview_url = self._build_file_preview_url(file_object=file_object)
 
+        # 详情页展示、AI 对话和 PDF 报表都应使用同一套中文解释，避免多处翻译口径漂移。
+        record.context_explanations = build_context_explanations(
+            vision_context=record.vision_context,
+            sensor_context=record.sensor_context,
+            decision_context=record.decision_context,
+            device_context=record.device_context,
+        )
+
         return record
 
     def _build_file_preview_url(self, *, file_object: FileObject) -> str | None:
@@ -402,6 +411,12 @@ class RecordService:
 
         latest_review = record.latest_review
         available_file_kinds = list(dict.fromkeys([item.file_kind.value for item in record.files]))
+        context_explanations = build_context_explanations(
+            vision_context=record.vision_context,
+            sensor_context=record.sensor_context,
+            decision_context=record.decision_context,
+            device_context=record.device_context,
+        )
 
         return {
             "record_id": record.id,
@@ -431,6 +446,7 @@ class RecordService:
             "latest_review_decision": latest_review.decision.value if latest_review is not None else None,
             "latest_review_comment": latest_review.comment if latest_review is not None else None,
             "latest_reviewed_at": latest_review.reviewed_at if latest_review is not None else None,
+            "context_explanations": context_explanations.model_dump(mode="json"),
         }
 
     def _build_ai_referenced_files(self, *, record: DetectionRecord) -> list[dict]:

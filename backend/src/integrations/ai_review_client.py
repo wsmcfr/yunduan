@@ -494,6 +494,52 @@ class AIReviewClient:
 
         return lines
 
+    def _build_context_explanation_lines(self, *, context: dict[str, Any]) -> list[str]:
+        """把云端中文上下文解释压缩成 AI 提示词里的独立文本块。
+
+        参数:
+            context: 当前记录上下文字典，可能包含 `context_explanations`。
+
+        返回:
+            返回多行中文解释文本；没有解释时返回空列表，调用方可直接跳过该块。
+        """
+
+        context_explanations = context.get("context_explanations")
+        if not isinstance(context_explanations, dict):
+            return []
+
+        lines = ["中文上下文解释："]
+        summary = str(context_explanations.get("summary") or "").strip()
+        if summary:
+            lines.append(f"- 总览：{self._trim_prompt_text(summary, max_chars=220)}")
+
+        groups = context_explanations.get("groups")
+        if not isinstance(groups, list):
+            return lines
+
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            title = str(group.get("title") or group.get("key") or "上下文").strip()
+            group_summary = str(group.get("summary") or "").strip()
+            if group_summary:
+                lines.append(f"- {title}：{self._trim_prompt_text(group_summary, max_chars=260)}")
+
+            items = group.get("items")
+            if not isinstance(items, list):
+                continue
+            for item in items[:4]:
+                if not isinstance(item, dict):
+                    continue
+                source_path = str(item.get("source_path") or "").strip()
+                explanation = str(item.get("explanation") or "").strip()
+                if not explanation:
+                    continue
+                prefix = f"{source_path} -> " if source_path else ""
+                lines.append(f"  - {prefix}{self._trim_prompt_text(explanation, max_chars=240)}")
+
+        return lines
+
     def _build_compact_record_context(self, *, context: dict[str, Any]) -> str:
         """构造紧凑结构化摘要，替代完整 JSON 上下文。
 
@@ -528,6 +574,7 @@ class AIReviewClient:
         lines = ["紧凑结构化摘要："]
         for field_name, field_value in field_pairs:
             lines.append(f"- {field_name}: {self._trim_prompt_text(field_value, max_chars=160)}")
+        lines.extend(self._build_context_explanation_lines(context=context))
         lines.extend(self._build_compact_nested_context_lines(context=context))
         return "\n".join(lines)
 
@@ -874,6 +921,7 @@ class AIReviewClient:
             context=context,
             referenced_files=referenced_files,
         )
+        context_explanation_block = "\n".join(self._build_context_explanation_lines(context=context))
         return "\n\n".join(
             [
                 "请基于下面这条检测记录进行分析，不要跳出当前记录。",
@@ -886,6 +934,7 @@ class AIReviewClient:
                 "不能把“尚未人工审核”当成回避判断的理由；它只能作为风险边界或下一步复核建议，不能替代你对当前图像和模型输出的综合分析。",
                 *self._build_board_correction_prompt_lines(),
                 image_status,
+                context_explanation_block,
                 "结构化上下文：",
                 context_snapshot,
                 "请先直接回答用户问题，再补充关键依据、风险边界和建议动作。回答要自然、具体、普通人能看懂；如果需要补充证据，默认只建议当前这一面的更清晰近景、标注或缺失字段，不要默认另一面。",
@@ -914,6 +963,7 @@ class AIReviewClient:
             context=context,
             referenced_files=referenced_files,
         )
+        context_explanation_block = "\n".join(self._build_context_explanation_lines(context=context))
         return "\n\n".join(
             [
                 "请对当前检测记录给出一份完整、谨慎、可落地的 AI 复核意见。",
@@ -925,6 +975,7 @@ class AIReviewClient:
                 *self._build_board_correction_prompt_lines(),
                 image_status,
                 note_block,
+                context_explanation_block,
                 "结构化上下文：",
                 context_snapshot,
             ]

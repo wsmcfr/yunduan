@@ -667,6 +667,15 @@ class StatisticsLightweightPdfRenderer:
             f"缺陷信息：{sample_image.get('defect_text', '未记录')}",
             f"采集时间：{sample_image.get('captured_at', '未记录')}",
         ]
+        context_summary = (sample_image.get("context_summary") or "").strip()
+        if context_summary:
+            # 样本卡必须把 MP157 字段解释一起带上，否则轻量 PDF 会比视觉版少关键信息。
+            meta_lines.extend(
+                [
+                    "MP157 中文解释",
+                    context_summary,
+                ]
+            )
         canvas_obj.setFillColor(self.theme.slate)
         canvas_obj.setFont(font_name, 8)
         current_meta_y = y - 38
@@ -677,7 +686,7 @@ class StatisticsLightweightPdfRenderer:
         image_area_x = x + 14
         image_area_y = y - height + 18
         image_area_width = width - 28
-        image_area_height = height - 94
+        image_area_height = height - (118 if context_summary else 94)
         canvas_obj.setFillColor(colors.HexColor("#FDFEFF"))
         canvas_obj.setStrokeColor(colors.HexColor(self.theme.border))
         canvas_obj.roundRect(

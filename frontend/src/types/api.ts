@@ -54,6 +54,25 @@ export type StructuredContextValueDto =
       [key: string]: StructuredContextValueDto;
     };
 
+export interface ContextExplanationItemDto {
+  source_path: string;
+  label: string;
+  value_text: string;
+  explanation: string;
+}
+
+export interface ContextExplanationGroupDto {
+  key: string;
+  title: string;
+  summary: string;
+  items: ContextExplanationItemDto[];
+}
+
+export interface ContextExplanationResponseDto {
+  summary: string;
+  groups: ContextExplanationGroupDto[];
+}
+
 export interface ApiErrorResponseDto {
   code: string;
   message: string;
@@ -586,6 +605,7 @@ export interface DetectionRecordListResponseDto {
 }
 
 export interface DetectionRecordDetailDto extends DetectionRecordDto {
+  context_explanations: ContextExplanationResponseDto | null;
   files: FileObjectDto[];
   reviews: ReviewRecordDto[];
 }
@@ -728,6 +748,7 @@ export interface AIRecordContextDto {
   latest_review_decision: DetectionResult | null;
   latest_review_comment: string | null;
   latest_reviewed_at: string | null;
+  context_explanations: ContextExplanationResponseDto | null;
 }
 
 export interface AIChatRequestDto {

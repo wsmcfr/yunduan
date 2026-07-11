@@ -247,6 +247,143 @@ const payload = {
 
 ---
 
+## Scenario: MP157 Context Explanations Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: MP157 uploads `vision_context`, `sensor_context`, `decision_context`, or `device_context`, and cloud pages need operator-readable Chinese explanations.
+- Trigger: any change touching `backend/src/services/context_explanation_service.py`, `DetectionRecordDetailResponse.context_explanations`, `AIRecordContext.context_explanations`, statistics PDF sample cards, or frontend detection detail DTO/model mapping.
+- Affected layers: backend context explanation service -> record detail schema -> AI chat context -> statistics PDF export -> `src/types/api.ts` -> `src/services/mappers/commonMappers.ts` -> `RecordDetailPage.vue`.
+
+### 2. Signatures
+
+```py
+def build_context_explanations(
+    *,
+    vision_context: dict[str, Any] | None,
+    sensor_context: dict[str, Any] | None,
+    decision_context: dict[str, Any] | None,
+    device_context: dict[str, Any] | None,
+) -> ContextExplanationResponse: ...
+
+class ContextExplanationItem(BaseModel):
+    source_path: str
+    label: str
+    value_text: str
+    explanation: str
+
+class ContextExplanationGroup(BaseModel):
+    key: str
+    title: str
+    summary: str
+    items: list[ContextExplanationItem]
+
+class ContextExplanationResponse(BaseModel):
+    summary: str
+    groups: list[ContextExplanationGroup]
+```
+
+```ts
+export interface ContextExplanationResponseDto {
+  summary: string;
+  groups: ContextExplanationGroupDto[];
+}
+
+export interface DetectionRecordDetailDto extends DetectionRecordDto {
+  context_explanations: ContextExplanationResponseDto | null;
+}
+
+export interface DetectionRecordModel {
+  contextExplanations?: ContextExplanationResponse | null;
+}
+```
+
+### 3. Contracts
+
+| Boundary / field | Contract |
+|---|---|
+| Raw context storage | Preserve `vision_context`, `sensor_context`, `decision_context`, and `device_context` unchanged for audit/debugging. |
+| Explanation source of truth | Backend `build_context_explanations(...)` is the only business translation layer; frontend must not retranslate MP157 field meanings. |
+| Detail response | `DetectionRecordDetailResponse.context_explanations` carries the same explanation structure used by AI and PDF. |
+| AI context | `AIRecordContext.context_explanations` must be included so prompts can render a `中文上下文解释` block before raw JSON. |
+| Statistics PDF | Visual and lightweight PDF sample cards must include an MP157 explanation summary for representative records. |
+| Frontend DTO | DTO fields stay snake_case: `context_explanations`, `source_path`, `value_text`. |
+| Frontend model | View-model fields stay camelCase: `contextExplanations`, `sourcePath`, `valueText`. |
+| Detail page display | Show `MP157 中文解释` before raw context panels; raw panels must be labeled as `原始上下文`/debug data. |
+| Unknown MP157 fields | Unmodeled nested fields still produce fallback Chinese debug explanations with `source_path`; do not silently drop them. |
+
+### 4. Validation & Error Matrix
+
+| Condition | Boundary | Expected behavior |
+|---|---|---|
+| `sensor_context.weighing.raw_adc` exists | backend explanation service | Output `HX711 原始 ADC 读数：...` with `source_path="sensor_context.weighing.raw_adc"`. |
+| `sensor_context.f4_flow.next_step="upload_then_final_sort"` | backend explanation service | Explain that the cloud should upload first, then notify F4 for final sorting. |
+| Known module contains a new field such as `weighing.cycle_id` | backend fallback | Keep a fallback item such as `原始字段 weighing.cycle_id` instead of dropping it. |
+| Detail response includes explanations | frontend mapper | Map all explanation fields to camelCase before page consumption. |
+| AI prompt is built | AI client | Include a readable `中文上下文解释` block and keep raw context for diagnostics. |
+| PDF exports representative samples | export service/renderer | Both visual HTML and lightweight ReportLab paths include the same `context_summary`. |
+| Backend returns `context_explanations=null` | frontend detail page | Show an empty state, not a runtime error. |
+
+### 5. Good / Base / Bad Cases
+
+| Case | Expected result |
+|---|---|
+| Good | Detail page shows `MP157 中文解释`, AI prompt includes `中文上下文解释`, and PDF sample cards include the same summary. |
+| Good | `raw_adc`, LDC channel state, F4 `next_step`, UNet `defect_pixels`, and final `result` are explained in Chinese. |
+| Base | Record has no structured context; response still has a stable empty/summary shape and the page shows an empty state. |
+| Base | MP157 adds a new nested debug field; fallback explanation preserves its path and value. |
+| Bad | Frontend only changes label text while AI and PDF still consume raw unreadable JSON. |
+| Bad | Adding a known-module field causes it to disappear because the parent object was marked as already handled. |
+
+### 6. Tests Required
+
+- Backend unit test for `build_context_explanations(...)` covering HX711, LDC1614, F4 flow, UNet, and decision fields.
+- Backend fallback test asserting unmodeled nested fields keep `source_path` and fallback Chinese explanation.
+- Record service test asserting detail records expose `context_explanations`.
+- AI client test asserting prompt text contains `中文上下文解释` and a concrete explanation sentence.
+- Statistics export tests asserting visual HTML and lightweight fake-canvas PDF include `MP157 中文解释` and a representative explanation.
+- Frontend mapper test asserting `context_explanations -> contextExplanations` and `source_path -> sourcePath`.
+- Detail page source contract test asserting `MP157 中文解释`, `contextExplanations`, and `原始上下文` remain present.
+
+Assertion points:
+
+- raw context fields remain present in response/model alongside explanations
+- explanation source paths use the original backend field path
+- AI/PDF/detail do not implement separate translation tables
+- lightweight PDF pagination tests still pass after explanation text is added
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+// Wrong: frontend invents its own partial translation and AI/PDF still see raw fields.
+const label = key === "raw_adc" ? "原始 ADC" : key;
+```
+
+```py
+# Wrong: known parent object is marked handled, so new nested fields disappear.
+handled_paths.add("weighing")
+```
+
+#### Correct
+
+```py
+context_explanations = build_context_explanations(
+    vision_context=record.vision_context,
+    sensor_context=record.sensor_context,
+    decision_context=record.decision_context,
+    device_context=record.device_context,
+)
+```
+
+```ts
+const record = mapDetectionRecordDetailDto(dto);
+const groups = record.contextExplanations?.groups ?? [];
+```
+
+---
+
 ## Scenario: Record AI Chat Reference Image Boundary
 
 ### 1. Scope / Trigger

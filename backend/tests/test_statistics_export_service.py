@@ -322,6 +322,7 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
                 "image_src": f"data:image/png;base64,{transparent_png_base64}",
                 "image_status": "loaded",
                 "image_message": "",
+                "context_summary": "MP157 中文解释：称重结论：通过，重量传感器认为该样本在允许范围内。",
             }
             for index in range(count)
         ]
@@ -372,6 +373,12 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
             created_at=now,
             updated_at=now,
         )
+        record.sensor_context = {
+            "weighing": {
+                "decision": "pass",
+                "raw_adc": 237171,
+            }
+        }
         record.part = part
         record.device = device
         record.files = [
@@ -434,6 +441,28 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
         self.assertIsNotNone(selected_file)
         self.assertEqual(selected_file.file_kind, FileKind.THUMBNAIL)
         self.assertEqual(selected_file.object_key, "detections/demo/thumb.png")
+
+    def test_build_sample_image_entry_includes_context_summary_for_visual_pdf(self) -> None:
+        """视觉版 PDF 样本卡片应带上 MP157 中文解释摘要。"""
+
+        service = self.build_service()
+        service.cos_client.read_file_bytes = Mock(  # type: ignore[method-assign]
+            return_value={
+                "content_type": "image/png",
+                "data": b"fake-image-bytes",
+            }
+        )
+        entry = service._build_sample_image_entry(record=self.build_record_with_files())
+        html = service._build_html(
+            overview=self.build_statistics_overview(),
+            ai_analysis=None,
+            ai_conversation=[],
+            sample_images=[entry],
+        )
+
+        self.assertIn("称重结论", entry["context_summary"])
+        self.assertIn("MP157 中文解释", html)
+        self.assertIn("称重结论", html)
 
     def test_build_ai_analysis_reuses_cached_frontend_result(self) -> None:
         """验证当前端已拿到 AI 分析时，PDF 导出不会再次触发模型请求。"""
@@ -749,6 +778,10 @@ class StatisticsExportServiceTestCase(unittest.TestCase):
         self.assertEqual(holder["canvas"].show_page_calls, 3)
         self.assertIn("代表样本图片", holder["canvas"].drawn_strings)
         self.assertIn("REC-20260420-0001", holder["canvas"].drawn_strings)
+        self.assertIn("MP157 中文解释", holder["canvas"].drawn_strings)
+        self.assertTrue(
+            any("称重结论" in item for item in holder["canvas"].drawn_strings),
+        )
         self.assertEqual(len(holder["canvas"].drawn_images), 3)
 
     def test_lightweight_renderer_splits_long_ai_message_across_pages(self) -> None:

@@ -24,6 +24,7 @@ from src.schemas.statistics import (
 )
 from src.services.statistics_lightweight_pdf_renderer import StatisticsLightweightPdfRenderer
 from src.services.statistics_service import StatisticsService
+from src.services.context_explanation_service import build_context_explanations
 
 logger = get_logger(__name__)
 
@@ -134,10 +135,36 @@ class StatisticsExportService:
         )
         return risky_records[:limit]
 
+    def _build_record_context_summary(self, *, record: DetectionRecord) -> str:
+        """把代表样本的 MP157 上下文解释压缩成 PDF 样本卡摘要。
+
+        参数:
+            record: 当前要嵌入 PDF 的检测记录。
+
+        返回:
+            返回一段短中文摘要；视觉版和轻量版 PDF 都复用这个字段，避免报表模式之间口径不一致。
+        """
+
+        context_explanations = build_context_explanations(
+            vision_context=record.vision_context,
+            sensor_context=record.sensor_context,
+            decision_context=record.decision_context,
+            device_context=record.device_context,
+        )
+        explanation_items = [
+            item.explanation
+            for group in context_explanations.groups
+            for item in group.items
+        ]
+        if not explanation_items:
+            return "MP157 本次没有上报可解释的结构化上下文。"
+        return "；".join(explanation_items[:4])
+
     def _build_sample_image_entry(self, *, record: DetectionRecord) -> dict[str, str]:
         """把一条代表性记录转换成报表内嵌图片条目。"""
 
         file_object = self._select_sample_file(record=record)
+        context_summary = self._build_record_context_summary(record=record)
         if file_object is None:
             return {
                 "record_no": record.record_no,
@@ -146,6 +173,7 @@ class StatisticsExportService:
                 "result_color": self._result_color(record.effective_result),
                 "defect_text": record.defect_type or record.defect_desc or "未记录缺陷信息",
                 "captured_at": self._format_datetime(record.captured_at),
+                "context_summary": context_summary,
                 "image_src": "",
                 "image_status": "missing",
                 "image_message": "当前记录没有可用图片对象。",
@@ -190,6 +218,7 @@ class StatisticsExportService:
             "result_color": self._result_color(record.effective_result),
             "defect_text": record.defect_type or record.defect_desc or "未记录缺陷信息",
             "captured_at": self._format_datetime(record.captured_at),
+            "context_summary": context_summary,
             "image_src": image_src,
             "image_status": image_status,
             "image_message": image_message,
@@ -549,6 +578,10 @@ class StatisticsExportService:
                       <div class="sample-card__meta">{escape(item['title'])}</div>
                       <div class="sample-card__meta">缺陷信息：{escape(item['defect_text'])}</div>
                       <div class="sample-card__meta">采集时间：{escape(item['captured_at'])}</div>
+                      <div class="sample-card__context">
+                        <strong>MP157 中文解释</strong>
+                        <span>{escape(item.get('context_summary', 'MP157 本次没有上报可解释的结构化上下文。'))}</span>
+                      </div>
                       {
                         f"<img src='{item['image_src']}' alt='{escape(item['record_no'])}' class='sample-card__image' />"
                         if item["image_src"]
@@ -815,6 +848,16 @@ class StatisticsExportService:
       .sample-card__meta {{
         color: #6f8298;
         margin-bottom: 6px;
+        line-height: 1.6;
+      }}
+      .sample-card__context {{
+        display: grid;
+        gap: 4px;
+        margin: 8px 0;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: #f4f8fb;
+        color: #10233a;
         line-height: 1.6;
       }}
       .sample-card__image {{

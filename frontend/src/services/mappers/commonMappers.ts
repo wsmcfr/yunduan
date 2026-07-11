@@ -2,6 +2,9 @@ import type {
   AuthRuntimeOptionsDto,
   AuthSessionStateDto,
   AIChatResponseDto,
+  ContextExplanationGroupDto,
+  ContextExplanationItemDto,
+  ContextExplanationResponseDto,
   AIContextFileDto,
   AIDiscoveredModelCandidateDto,
   AIRecordContextDto,
@@ -41,6 +44,9 @@ import type {
   AuthRuntimeOptions,
   AuthSessionState,
   AIChatResponse,
+  ContextExplanationGroup,
+  ContextExplanationItem,
+  ContextExplanationResponse,
   AIContextFile,
   AIDiscoveredModelCandidate,
   AIRecordContext,
@@ -79,6 +85,50 @@ import {
   normalizePartCategoryValue,
   resolvePartDisplayName,
 } from "@/features/parts/partCategories";
+
+/**
+ * 映射单条 MP157 中文解释项。
+ */
+export function mapContextExplanationItemDto(
+  dto: ContextExplanationItemDto,
+): ContextExplanationItem {
+  return {
+    sourcePath: dto.source_path,
+    label: dto.label,
+    valueText: dto.value_text,
+    explanation: dto.explanation,
+  };
+}
+
+/**
+ * 映射一组 MP157 中文解释。
+ */
+export function mapContextExplanationGroupDto(
+  dto: ContextExplanationGroupDto,
+): ContextExplanationGroup {
+  return {
+    key: dto.key,
+    title: dto.title,
+    summary: dto.summary,
+    items: dto.items.map(mapContextExplanationItemDto),
+  };
+}
+
+/**
+ * 映射 MP157 中文解释响应。
+ */
+export function mapContextExplanationResponseDto(
+  dto: ContextExplanationResponseDto | null | undefined,
+): ContextExplanationResponse | null {
+  if (!dto) {
+    return null;
+  }
+
+  return {
+    summary: dto.summary,
+    groups: dto.groups.map(mapContextExplanationGroupDto),
+  };
+}
 
 /**
  * 将认证运行时选项 DTO 映射为前端模型。
@@ -592,6 +642,7 @@ export function mapAIRecordContextDto(dto: AIRecordContextDto): AIRecordContext 
     latestReviewDecision: dto.latest_review_decision,
     latestReviewComment: dto.latest_review_comment,
     latestReviewedAt: dto.latest_reviewed_at,
+    contextExplanations: mapContextExplanationResponseDto(dto.context_explanations),
   };
 }
 
@@ -749,6 +800,7 @@ export function mapDetectionRecordDetailDto(
 ): DetectionRecordModel {
   return {
     ...mapDetectionRecordDto(dto),
+    contextExplanations: mapContextExplanationResponseDto(dto.context_explanations),
     files: dto.files.map(mapFileObjectDto),
     reviews: dto.reviews.map(mapReviewRecordDto),
   };

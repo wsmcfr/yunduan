@@ -427,6 +427,47 @@ class RecordServiceTestCase(unittest.TestCase):
         self.assertIn("MobileNetV3-Small 分类", referenced_files[2]["analysis_purpose"])
         self.assertIn("原始采集图", referenced_files[3]["analysis_purpose"])
 
+    def test_record_detail_attaches_chinese_context_explanations(self) -> None:
+        """详情服务应给 MP157 原始上下文附加统一中文解释，供前端直接展示。"""
+
+        record = self._create_detection_record(record_no="REC-CONTEXT-DETAIL-0001")
+        record.sensor_context = {
+            "weighing": {
+                "decision": "pass",
+                "raw_adc": 237171,
+            }
+        }
+        self.db.commit()
+
+        detail = self.service.get_record_detail(company_id=self.company.id, record_id=record.id)
+
+        self.assertTrue(detail.context_explanations.summary)
+        self.assertTrue(
+            any(
+                item.source_path == "sensor_context.weighing.raw_adc"
+                and "HX711 原始 ADC 读数" in item.explanation
+                for group in detail.context_explanations.groups
+                for item in group.items
+            )
+        )
+
+    def test_ai_chat_context_reuses_chinese_context_explanations(self) -> None:
+        """AI 对话上下文应复用同一套中文解释，而不是只给模型原始 JSON。"""
+
+        record = self._create_detection_record(record_no="REC-CONTEXT-AI-0001")
+        record.sensor_context = {
+            "weighing": {
+                "decision": "pass",
+                "raw_adc": 237171,
+            }
+        }
+        self.db.commit()
+
+        context = self.service._build_ai_chat_context(record=record)  # type: ignore[attr-defined]
+
+        self.assertTrue(context["context_explanations"]["summary"])
+        self.assertIn("称重结论", str(context["context_explanations"]))
+
     def test_delete_record_purges_files_reviews_and_cos_objects(self) -> None:
         """删除检测记录时，应一并清理文件元数据、复核历史和 COS 对象。"""
 

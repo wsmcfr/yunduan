@@ -452,6 +452,39 @@ class AIReviewClientTestCase(unittest.TestCase):
         self.assertIn("先给出倾向结论", prompt)
         self.assertIn("不能把“尚未人工审核”当成回避判断的理由", prompt)
 
+    def test_chat_prompt_renders_chinese_context_explanations(self) -> None:
+        """验证 AI 提示词会把云端转换后的中文上下文解释作为独立段落提供给模型。"""
+
+        prompt = self.client._build_chat_user_prompt(  # type: ignore[attr-defined]
+            question="把传感器数据讲成人话。",
+            context={
+                **self.context,
+                "context_explanations": {
+                    "summary": "已将 MP157 上报的传感器上下文转换为中文解释。",
+                    "groups": [
+                        {
+                            "key": "sensor",
+                            "title": "传感器中文解释",
+                            "summary": "称重结论：通过。",
+                            "items": [
+                                {
+                                    "source_path": "sensor_context.weighing.decision",
+                                    "label": "称重结论",
+                                    "value_text": "pass",
+                                    "explanation": "称重结论：通过，重量传感器认为该样本在允许范围内。",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+            referenced_files=self.referenced_files,
+            image_assets=[{"object_key": "detections/demo/source/raw.png"}],
+        )
+
+        self.assertIn("中文上下文解释", prompt)
+        self.assertIn("称重结论：通过", prompt)
+
     def test_chat_prompt_requires_board_correction_fields_when_ai_advice_conflicts_with_mp157_result(self) -> None:
         """验证 AI 倾向与 MP157 初检冲突时，提示词要求给出板端修正弹窗填写建议。"""
 

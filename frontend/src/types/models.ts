@@ -30,6 +30,25 @@ export type StructuredContextValue =
 
 export type StructuredContextBlock = Record<string, StructuredContextValue>;
 
+export interface ContextExplanationItem {
+  sourcePath: string;
+  label: string;
+  valueText: string;
+  explanation: string;
+}
+
+export interface ContextExplanationGroup {
+  key: string;
+  title: string;
+  summary: string;
+  items: ContextExplanationItem[];
+}
+
+export interface ContextExplanationResponse {
+  summary: string;
+  groups: ContextExplanationGroup[];
+}
+
 export interface CompanyBrief {
   id: number;
   name: string;
@@ -360,6 +379,7 @@ export interface AIRecordContext {
   latestReviewDecision: DetectionResult | null;
   latestReviewComment: string | null;
   latestReviewedAt: string | null;
+  contextExplanations: ContextExplanationResponse | null;
 }
 
 export interface AIChatResponse {
@@ -480,6 +500,7 @@ export interface DetectionRecordModel {
   boardSyncTime: string | null;
   boardSyncError: string | null;
   boardLastSyncedReviewId: number | null;
+  contextExplanations?: ContextExplanationResponse | null;
   createdAt: string;
   updatedAt: string;
   part: {

@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from src.db.models.enums import DetectionResult, ReviewStatus
+from src.schemas.context_explanation import ContextExplanationResponse
 from src.schemas.common import ORMBaseModel
 from src.schemas.device import DeviceBrief
 from src.schemas.part import PartBrief
@@ -148,6 +149,7 @@ class DetectionRecordListItem(ORMBaseModel):
 class DetectionRecordDetailResponse(DetectionRecordListItem):
     """检测记录详情响应体。"""
 
+    context_explanations: ContextExplanationResponse | None = None
     files: list[FileObjectResponse]
     reviews: list[ReviewRecordResponse]
 

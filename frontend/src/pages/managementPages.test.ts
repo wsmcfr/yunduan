@@ -90,4 +90,34 @@ describe("management page pagination and resource refresh contracts", () => {
     expect(source).toContain('class="table-action-button" text type="primary"');
     expect(source).toContain('class="table-action-button" text type="danger"');
   });
+
+  it("检测详情页展示 MP157 中文解释并保留原始上下文入口", () => {
+    /**
+     * 详情页不能只把原始 JSON 压平成工程字段；中文解释用于现场阅读，原始上下文只保留给排障。
+     */
+    const source = readPageSource("src/pages/RecordDetailPage.vue");
+
+    expect(source).toContain("MP157 中文解释");
+    expect(source).toContain("contextExplanations");
+    expect(source).toContain("原始上下文");
+  });
+
+  it("检测详情页的 MP157 中文解释在固定框内分页展示", () => {
+    /**
+     * MP157 解释项可能一次上报几十个字段。
+     * 详情页必须把每个解释分组限制在固定内容框内，通过分页切换条目，避免长字段把卡片撑到互相重叠。
+     */
+    const source = readPageSource("src/pages/RecordDetailPage.vue");
+
+    expect(source).toContain("CONTEXT_EXPLANATION_PAGE_SIZE");
+    expect(source).toContain("contextExplanationPageByGroup");
+    expect(source).toContain("paginatedContextExplanationGroups");
+    expect(source).toContain("handleContextExplanationPageChange");
+    expect(source).toContain('class="detail-context-explanations__frame"');
+    expect(source).toContain('<ElPagination');
+    expect(source).toContain('@current-change="(page) => handleContextExplanationPageChange(group.key, page)"');
+    expect(source).toContain('class="detail-context-explanations__value"');
+    expect(source).toContain("height: clamp(420px, 44dvh, 560px);");
+    expect(source).toContain("overflow-y: auto;");
+  });
 });
